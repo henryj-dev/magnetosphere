@@ -15,12 +15,12 @@ export function outboxMailer() {
   return { outbox, mailer: { send: async (m: MailMessage) => void outbox.push(m) } satisfies Mailer };
 }
 
-export function makeAuth(h: TestDb, extra: Partial<AuthConfig> = {}) {
+/** 테스트 기본 설정. 메일은 outbox 에 모으고, 응답과 떼어 보낸 전송은 pending 에, 실패는 mailErrors 에 모은다 */
+export function makeAuthConfig(h: TestDb) {
   const { outbox, mailer } = outboxMailer();
-  // 메일은 응답과 떼어 보내진다. pending 에 모아 두고 settle() 로 끝날 때까지 기다린다.
   const pending: Promise<unknown>[] = [];
   const mailErrors: unknown[] = [];
-  const app = createAuth({
+  const config: AuthConfig = {
     database: h,
     baseURL: BASE,
     secret: SECRET,
@@ -29,8 +29,14 @@ export function makeAuth(h: TestDb, extra: Partial<AuthConfig> = {}) {
     clientIp: randomIp,
     waitUntil: (p) => void pending.push(p),
     onMailError: (e) => void mailErrors.push(e),
-    ...extra,
-  });
+  };
+  return Object.assign(config, { outbox, pending, mailErrors });
+}
+
+export function makeAuth(h: TestDb, extra: Partial<AuthConfig> = {}) {
+  const { outbox, pending, mailErrors, ...config } = makeAuthConfig(h);
+  const app = createAuth({ ...config, ...extra });
+  // settle() 은 응답과 떼어 보낸 메일 전송이 끝날 때까지 기다린다
   const settle = async () => {
     while (pending.length) await Promise.all(pending.splice(0));
   };

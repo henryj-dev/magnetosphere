@@ -565,10 +565,16 @@ TC-S3.T3.b  신뢰하지 않는 출처의 X-Forwarded-For 는 무시된다
 TC-S3.T3.c  신뢰 프록시 뒤에서는 실제 클라이언트별로 센다
   단언:  신뢰 프록시 출처 + 서로 다른 X-Forwarded-For 두 개 → 각자 N 회까지 허용
   검출:  Caddy IP 하나로 모두 묶여 한 사람 때문에 전원이 막히는 것 (계획서 7장)
+TC-S3.T3.d  HTTP 요청을 받는 함수는 감싼 handler 하나뿐이다 (S3 보안 리뷰 M2)
+  단언:  패키지 진입점이 내보내는 이름 목록과 createAuth 반환값의 키가 {handler, api} 뿐 (auth·auth.handler 없음).
+         감싼 handler 에 x-magnetosphere-client-ip 를 매번 바꿔 위조해도 같은 출처면 N+1 번째 429.
+         대조: authOptions 로 직접 만든 감싸지 않은 auth.handler 에 같은 위조 → 429 가 나지 않음
+  검출:  S4 가 toNodeHandler(auth) 처럼 Better Auth handler 를 바로 붙여 클라이언트가 IP 헤더를 지어 넣어
+         요청 수 제한을 통째로 우회하는 것
 ```
 
 【통과】
-- [ ] G-S3.9 ~ G-S3.11 통과
+- [ ] G-S3.9 ~ G-S3.11, G-S3.16 통과
 
 ## 🚪 GATE S3
 
@@ -589,6 +595,7 @@ TC-S3.T3.c  신뢰 프록시 뒤에서는 실제 클라이언트별로 센다
 | G-S3.13 | `input: false` 다섯 칼럼 | grep `(role\|status\|monthlyLimitUsd\|maxKeys\|isBootstrapAdmin): \{ type: [^}]*input:\s*false` in `packages/db/src/schema/common.ts` (`USER_ADDITIONAL_FIELDS`, auth 구성이 `AUTH_SCHEMA_OPTIONS`로 그대로 씀) | == 5 |
 | G-S3.14 | TC-S3.T1.e | `pnpm -C packages/auth test -t "TC-S3.T1.e"` | 종료코드 0 |
 | G-S3.15 | TC-S3.T2.e | `pnpm -C packages/auth test -t "TC-S3.T2.e"` | 종료코드 0 |
+| G-S3.16 | TC-S3.T3.d | `pnpm -C packages/auth test -t "TC-S3.T3.d"` | 종료코드 0 |
 
 `node scripts/gate.mjs S3 --seal`
 

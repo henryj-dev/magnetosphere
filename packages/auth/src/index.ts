@@ -76,7 +76,10 @@ function deliverer(cfg: AuthConfig) {
   };
 }
 
-/** Better Auth 옵션. 스키마 비교(TC-S3.T1.e)도 이 함수의 결과를 쓴다. */
+/**
+ * Better Auth 옵션. 스키마 비교(TC-S3.T1.e)와 SSO 경로 검사(check-sso-paths.mjs)가 이 함수의 결과를 쓴다.
+ * 서버는 이것으로 betterAuth() 를 직접 만들지 않고 createAuth 를 쓴다 (직접 만들면 handler 가 감싸지지 않는다).
+ */
 export function authOptions(cfg: AuthConfig) {
   const deliver = deliverer(cfg);
   return {
@@ -111,7 +114,12 @@ export function authOptions(cfg: AuthConfig) {
   } satisfies BetterAuthOptions;
 }
 
+/**
+ * 인증 인스턴스. HTTP 요청은 handler 로만 받는다 (S3 보안 리뷰 M2).
+ * Better Auth 의 auth.handler 는 내보내지 않는다. 그것을 서버에 바로 붙이면(toNodeHandler(auth) 등) 클라이언트가
+ * x-magnetosphere-client-ip 를 지어 넣어 요청 수 제한을 통째로 우회한다. api 는 서버 안 호출용(auth.api)이다.
+ */
 export function createAuth(cfg: AuthConfig) {
   const auth = betterAuth(authOptions(cfg));
-  return { auth, handler: withClientIp(auth.handler, cfg.clientIp) };
+  return { handler: withClientIp(auth.handler, cfg.clientIp), api: auth.api };
 }

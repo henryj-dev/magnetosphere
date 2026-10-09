@@ -2,10 +2,11 @@
 // clientIp 는 런타임 어댑터 대신 가짜를 쓴다: 소켓 상대 주소를 테스트 전용 헤더 x-test-peer 로 넘기고,
 // 실제 Node 어댑터(S4.T1)가 쓸 resolveClientIp 로 신뢰 프록시·X-Forwarded-For 를 판정한다.
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import { CLIENT_IP_HEADER, RATE_LIMIT_RULES, resolveClientIp, type ClientIp } from "../src/index.ts";
+import { betterAuth } from "better-auth";
+import { authOptions, CLIENT_IP_HEADER, RATE_LIMIT_RULES, resolveClientIp, type ClientIp } from "../src/index.ts";
 import { client, email } from "./client.ts";
 import { ALL_DBS, OPEN, type TestDb } from "./db.ts";
-import { makeAuth } from "./helpers.ts";
+import { makeAuth, makeAuthConfig } from "./helpers.ts";
 
 const N = RATE_LIMIT_RULES["/sign-in/*"].max;
 const TRUSTED = ["10.0.0.0/8"];
@@ -82,5 +83,39 @@ describe("resolveClientIp", () => {
     expect(resolveClientIp("10.0.0.2", "192.0.2.1", TRUSTED)).toBe("192.0.2.1");
     expect(resolveClientIp("10.0.0.2", "1.2.3.4, 192.0.2.1, 10.0.0.9", TRUSTED)).toBe("192.0.2.1");
     expect(resolveClientIp("10.0.0.2", null, TRUSTED)).toBe("10.0.0.2");
+  });
+});
+
+describe("감싼 handler 만 내보낸다 (SQLite)", () => {
+  let h: TestDb;
+  beforeAll(async () => {
+    h = await OPEN.sqlite();
+  });
+  afterAll(async () => {
+    await h?.close();
+  });
+
+  test("TC-S3.T3.d HTTP 요청을 받는 함수는 감싼 handler 하나뿐이고 위조 헤더로 우회되지 않는다", async () => {
+    // 패키지 진입점(".")이 내보내는 것과 createAuth 의 반환값
+    const pkg = await import("../src/index.ts");
+    expect(Object.keys(pkg).sort()).toEqual(["CLIENT_IP_HEADER", "RATE_LIMIT_RULES", "SSO_DISABLED_PATHS", "authOptions", "createAuth", "resolveClientIp"]);
+    const cfg = { clientIp: fakeAdapter([]) };
+    const app = makeAuth(h, cfg);
+    expect(Object.keys(app).filter((k) => !["outbox", "mailErrors", "settle"].includes(k)).sort()).toEqual(["api", "handler"]);
+    expect("handler" in app.api).toBe(false);
+
+    const spoof = () => ({ "x-test-peer": "192.0.2.50", [CLIENT_IP_HEADER]: randomPublicIp() });
+    const target = email("spoof-hdr");
+    const login = (handler: (r: Request) => Promise<Response>) =>
+      client(handler).post("/sign-in/email", { email: target, password: "wrong-password-0000" }, spoof());
+    const wrapped: number[] = [];
+    for (let i = 0; i <= N; i++) wrapped.push((await login(app.handler)).status);
+    expect(wrapped).toEqual([...Array(N).fill(401), 429]);
+
+    // 대조: 감싸지 않은 Better Auth handler 는 같은 위조로 우회된다
+    const raw = betterAuth(authOptions({ ...makeAuthConfig(h), ...cfg }));
+    const unwrapped: number[] = [];
+    for (let i = 0; i <= N; i++) unwrapped.push((await login(raw.handler)).status);
+    expect(unwrapped).not.toContain(429);
   });
 });

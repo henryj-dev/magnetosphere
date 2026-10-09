@@ -104,6 +104,7 @@ export const GATES = {
       { id: "G-S3.13", how: "grep", desc: "권한 칼럼 다섯 input: false", pattern: "(role|status|monthlyLimitUsd|maxKeys|isBootstrapAdmin): \\{ type: [^}]*input:\\s*false", in: ["packages/db/src/schema/common.ts"], op: "==", limit: 5 },
       { id: "G-S3.14", how: "test", desc: "TC-S3.T1.e 구성과 스키마가 같은 옵션", cmd: 'pnpm -C packages/auth test -t "TC-S3.T1.e"' },
       { id: "G-S3.15", how: "test", desc: "TC-S3.T2.e 메일 전송 시간으로 계정 존재 노출 없음", cmd: 'pnpm -C packages/auth test -t "TC-S3.T2.e"' },
+      { id: "G-S3.16", how: "test", desc: "TC-S3.T3.d 감싼 handler 만 내보냄", cmd: 'pnpm -C packages/auth test -t "TC-S3.T3.d"' },
     ],
   },
   S4: {
