@@ -14,12 +14,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
+      - uses: pnpm/action-setup@v4
       - name: 게이트 장치 음성 대조
-        run: node --test --test-reporter=tap scripts/
+        run: node --test --test-reporter=tap "scripts/*.test.mjs"
       - name: 순서 위반 검사
+        # PR 은 대상 브랜치와 갈라진 뒤, push 는 직전 커밋 뒤의 변경을 본다. pre-push 훅을 건너뛴 push 도 여기서 잡는다.
         run: |
-          if git rev-parse --verify --quiet origin/main >/dev/null; then
-            node scripts/gate.mjs --assert-order --base origin/main
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="origin/${{ github.base_ref }}"
+          elif git cat-file -e "${{ github.event.before }}^{commit}" 2>/dev/null; then
+            base="${{ github.event.before }}"
+          else
+            base=""
+          fi
+          if [ -n "$base" ]; then
+            node scripts/gate.mjs --assert-order --base "$base"
           else
             node scripts/gate.mjs --assert-order
+          fi
+          echo "GATE_BASE=$base" >> "$GITHUB_ENV"
+      - name: 봉인 검증 (바뀐 봉인은 봉인 커밋에서 검사를 다시 돌린다)
+        run: |
+          if [ -n "$GATE_BASE" ]; then
+            node scripts/gate.mjs --verify-seals --rerun --since "$GATE_BASE"
+          else
+            node scripts/gate.mjs --verify-seals --rerun
           fi

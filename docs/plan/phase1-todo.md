@@ -30,7 +30,11 @@
 - 장치: `node scripts/gate.mjs`. 검사 정의는 `gates/gates.config.mjs`의 데이터다. 봉인 파일은 `gates/seals/S<n>.json`이고 커밋한다.
 - `test` 검사는 종료코드 0이면서 통과한 테스트가 1개 이상이어야 통과다. 이름 패턴이 아무 테스트에도 안 걸리면 실패한다. `node --test`는 `--test-reporter=tap`으로 돌린다 (요약의 pass 수는 파일 단위 항목까지 세서 믿지 않는다).
 - 검사가 하나도 정의되지 않은 단계는 실행·봉인을 거부한다.
-- 규칙 R1 순서: 선행 봉인이 없으면 그 단계 검사 실행을 거부한다. R2 최신성: 봉인의 `head`가 현재 `main`의 조상이 아니면 그 봉인은 ⚠ 무효다. R3 재검: `--seal`은 이전 결과를 읽지 않고 검사를 다시 돌린다.
+- 규칙 R1 순서: 선행 봉인이 없으면 그 단계 검사 실행을 거부한다. R2 최신성: 봉인의 `head`가 기준 브랜치(`origin/main`, 없으면 `main`)의 조상이 아니면 그 봉인은 ⚠ 무효다. 기준 브랜치가 없으면 판정을 거부한다. R3 재검: `--seal`은 이전 결과를 읽지 않고 검사를 다시 돌린다.
+- 봉인이 유효하려면 모양도 맞아야 한다: `phase`가 그 단계, `head`가 저장소에 있는 40자리 SHA, `checks`의 id 목록이 설정과 같고 모두 `ok`, 면제 봉인은 `waivable` 단계에 사유가 있을 때만. 선행 봉인이 무효면 뒤 봉인도 무효다.
+- 손으로 만든 봉인은 모양만으로 다 못 잡는다. `gate --verify-seals --rerun`이 봉인 커밋을 따로 꺼내 검사를 다시 돌린다. CI는 바뀐 봉인마다 이것을 돈다.
+- `--assert-order`는 비교 기준 시점에 잠겨 있던 단계의 `needs`·`outputs`·`waivable` 변경과 단계 삭제도 위반으로 본다. 같은 변경 안에서 설정을 고쳐 잠금을 푸는 것을 막는다.
+- pre-push 훅은 실제로 보내는 ref마다 검사한다 (`--head <sha>`).
 - 기존 장치 없음 (빈 저장소). `S0`이 장치, git 훅, 첫 CI를 만든다. pre-push 훅과 CI가 `--assert-order`를 실행해 잠긴 단계의 산출 경로 변경을 실제로 거부한다.
 
 **확인 결과 파일 (`S1` 전용)**
@@ -116,7 +120,21 @@ TC-S0.T2.e  면제는 사유와 허용 표시가 둘 다 있어야 한다
 TC-S0.T2.f  --assert-order 는 잠긴 단계 산출 변경을 잡는다
   단언:  S1 미봉인 상태에서 S2 outputs 경로(packages/db/**)에 파일 추가 커밋 → gate --assert-order 종료코드 ≠ 0
   검출:  순서를 건너뛴 작업이 push 까지 가는 것
+TC-S0.T2.g  위조·복사한 봉인은 무효다
+  단언:  S0 봉인 복사, head 에 ref 이름·짧은 SHA·없는 커밋, 검사 목록 불일치, 실패 검사 포함, 면제 불가 단계 면제, 최소 필드만
+         → 여덟 경우 모두 S1 "⚠", S2 "🔒", gate S2·--verify-seals 실패
+  검출:  봉인 파일 한 줄 편집으로 단계를 건너뛰는 것 (설계 검토 치명 1)
+TC-S0.T2.h  구조가 맞는 위조 봉인은 --verify-seals --rerun 이 잡는다
+  단언:  검사가 실패하는 커밋을 가리키며 결과는 통과라고 적은 봉인 → 상태는 ✅, --verify-seals --rerun 은 실패
+  검출:  모양만 맞춘 위조 봉인이 CI 까지 통과하는 것
+TC-S0.T2.i  잠긴 단계의 설정을 같은 변경 안에서 고쳐 순서를 피할 수 없다
+  단언:  needs 비우기, outputs 지우기, 단계 삭제, waivable 켜기 각각 + 잠긴 산출 추가 → --assert-order --base 실패
+  검출:  gates.config.mjs 를 고친 커밋 하나로 잠금이 풀리는 것 (리뷰 치명 2)
+TC-S0.T2.j  --assert-order --head 는 지정한 커밋을 본다
+  단언:  main 은 깨끗하고 evil 브랜치에만 위반 → --head evil 이면 실패, 생략하면 통과
+  검출:  훅이 체크아웃한 브랜치만 검사해 다른 브랜치 push 로 우회하는 것의 장치 쪽 원인
 ```
+TC-S0.T2.d 에는 다음 하위 단언도 들어간다: `test` 검사는 통과 0개·todo·skip 만 있으면 실패, `grep` 검사는 `in` 경로가 없으면 실패, `diff-empty` 는 기준 봉인 head 가 이상하면 실패, 검사가 빈 단계는 실행 거부.
 
 【통과】
 - [ ] G-S0.2 ~ G-S0.7 통과
@@ -125,8 +143,8 @@ TC-S0.T2.f  --assert-order 는 잠긴 단계 산출 변경을 잡는다
 선행 S0.T2 · 산출 `.githooks/pre-push`, `package.json`의 `prepare` 스크립트, `.github/workflows/gate.yml`, `scripts/hook.test.mjs` · 되돌리기 커밋 1개
 
 【작업】
-1. `.githooks/pre-push`: `node scripts/gate.mjs --assert-order --base origin/main` (원격이 없으면 `--base` 생략 시 루트 커밋 기준). `prepare`에서 `git config core.hooksPath .githooks`.
-2. `.github/workflows/gate.yml`: push·PR마다 `node --test scripts/` 와 `gate --assert-order --base origin/main`. 원격 저장소는 아직 없다 (계획서 8장). 파일만 둔다.
+1. `.githooks/pre-push`: stdin으로 받은 ref마다 `gate --assert-order --base <원격 sha 또는 원격 main> --head <로컬 sha>`. 원격이 비어 있으면 전체 이력을 본다. `prepare`에서 `git config core.hooksPath .githooks`.
+2. `.github/workflows/gate.yml`: push·PR마다 `node --test "scripts/*.test.mjs"`, `gate --assert-order`(PR은 대상 브랜치, push는 직전 커밋 기준), 바뀐 봉인에 대한 `gate --verify-seals --rerun`. 원격 저장소는 아직 없다 (계획서 8장). 파일만 둔다.
 3. 커밋.
 
 【테스트】
@@ -134,6 +152,9 @@ TC-S0.T2.f  --assert-order 는 잠긴 단계 산출 변경을 잡는다
 TC-S0.T3.a  pre-push 훅이 잠긴 단계 변경 push 를 막는다
   단언:  임시 bare 원격에 push, S1 미봉인 상태에서 packages/db/x 추가 후 git push → 종료코드 ≠ 0
   검출:  훅이 설치되지 않거나(core.hooksPath 누락) 실행 권한이 없어 순서 강제가 문서에만 남는 것
+TC-S0.T3.b  현재 브랜치가 아닌 브랜치를 push 해도 훅이 그 브랜치를 검사한다
+  단언:  main 체크아웃 상태에서 위반이 든 evil 브랜치 push → 거부, 원격에 refs/heads/evil 없음
+  검출:  훅이 stdin 의 ref 를 무시해 git push origin evil 로 우회하는 것 (리뷰 높음 3)
 ```
 
 【통과】
@@ -150,7 +171,13 @@ TC-S0.T3.a  pre-push 훅이 잠긴 단계 변경 push 를 막는다
 | G-S0.5 | TC-S0.T2.d | 같은 방식 `.d` | 종료코드 0 |
 | G-S0.6 | TC-S0.T2.e | 같은 방식 `.e` | 종료코드 0 |
 | G-S0.7 | TC-S0.T2.f | 같은 방식 `.f` | 종료코드 0 |
-| G-S0.8 | TC-S0.T3.a | `node --test scripts/hook.test.mjs` | 종료코드 0 |
+| G-S0.8 | TC-S0.T3.a | `node --test --test-reporter=tap --test-name-pattern="TC-S0.T3.a" scripts/hook.test.mjs` | 종료코드 0 |
+| G-S0.10 | TC-S0.T2.g | `node --test --test-reporter=tap --test-name-pattern="TC-S0.T2.g" scripts/gate.test.mjs` | 종료코드 0 |
+| G-S0.11 | TC-S0.T2.h | 같은 방식 `.h` | 종료코드 0 |
+| G-S0.12 | TC-S0.T2.i | 같은 방식 `.i` | 종료코드 0 |
+| G-S0.13 | TC-S0.T2.j | 같은 방식 `.j` | 종료코드 0 |
+| G-S0.14 | TC-S0.T3.b | `node --test --test-reporter=tap --test-name-pattern="TC-S0.T3.b" scripts/hook.test.mjs` | 종료코드 0 |
+| G-S0.15 | CI 테스트 명령이 실제로 돈다 | `node --test --test-reporter=tap "scripts/*.test.mjs"` | 종료코드 0 |
 | G-S0.9 | 봉인 디렉터리가 무시되지 않음 | `git check-ignore gates/seals/S0.json` | 종료코드 1 (무시 안 됨) |
 
 `node scripts/gate.mjs S0 --seal`

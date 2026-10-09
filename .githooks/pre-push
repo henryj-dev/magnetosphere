@@ -1,8 +1,26 @@
 #!/bin/sh
-# 잠긴 단계의 산출 경로 변경을 push 에서 막는다 (docs/plan/phase1-todo.md 0절).
-# 원격 추적 브랜치가 있으면 그 뒤의 변경만, 없으면(첫 push) 저장소 전체 이력을 본다.
+# 실제로 보내는 각 ref 에 대해 순서 위반을 검사한다 (docs/plan/phase1-todo.md 0절).
+# stdin 한 줄: <local ref> <local sha> <remote ref> <remote sha>
 remote="$1"
-if git rev-parse --verify --quiet "refs/remotes/$remote/main" >/dev/null; then
-  exec node scripts/gate.mjs --assert-order --base "$remote/main"
-fi
-exec node scripts/gate.mjs --assert-order
+zero=0000000000000000000000000000000000000000
+status=0
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue   # 브랜치 삭제
+
+  if [ "$remote_sha" != "$zero" ] && git cat-file -e "$remote_sha^{commit}" 2>/dev/null; then
+    base="$remote_sha"                      # 기존 원격 브랜치 갱신: 그 뒤 변경만
+  elif git rev-parse --verify --quiet "refs/remotes/$remote/main" >/dev/null; then
+    base="$remote/main"                     # 새 브랜치: 원격 main 과 갈라진 뒤 변경
+  else
+    base=""                                 # 원격이 비어 있음: 전체 이력
+  fi
+
+  if [ -n "$base" ]; then
+    node scripts/gate.mjs --assert-order --base "$base" --head "$local_sha" || status=1
+  else
+    node scripts/gate.mjs --assert-order --head "$local_sha" || status=1
+  fi
+done
+
+exit $status

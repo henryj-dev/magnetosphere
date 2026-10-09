@@ -1,23 +1,31 @@
 #!/usr/bin/env node
 // 실행판 게이트 장치. 계약은 docs/plan/phase1-todo.md 0절 「GATE와 봉인」.
 //
-//   gate <단계>                       검사 실행, 실패 시 종료코드 1
-//   gate <단계> --seal                검사를 다시 돌려 모두 통과하면 봉인
-//   gate <단계> --explain             실패한 검사의 측정값과 기준
+//   gate <단계>                          검사 실행, 실패 시 종료코드 1
+//   gate <단계> --seal                   검사를 다시 돌려 모두 통과하면 봉인
+//   gate <단계> --explain                실패한 검사의 측정값과 기준
 //   gate <단계> --seal --waived "<사유>"  면제 봉인 (waivable 단계만)
-//   gate --status [--json]            단계별 상태
-//   gate --assert-order [--base <ref>]  잠긴 단계의 산출 경로 변경이 있으면 실패
+//   gate --status [--json]               단계별 상태
+//   gate --assert-order [--base <ref>] [--head <ref>]
+//                                        잠긴 단계의 산출 경로·설정 변경이 있으면 실패
+//   gate --verify-seals [--rerun] [--since <ref>]
+//                                        봉인 구조 검사, --rerun 이면 봉인 커밋에서 검사를 다시 돌린다
 //
-// 공통 옵션: --root <dir> (기본: git 최상위), --config <path> (기본: gates/gates.config.mjs)
+// 공통 옵션: --root <dir> (기본: git 최상위)
 
 import { spawnSync } from "node:child_process";
+import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
+const SELF = fileURLToPath(import.meta.url);
+const CONFIG = "gates/gates.config.mjs";
 const SEAL_DIR = "gates/seals";
-const BASE_BRANCH = "main";
+const BASE_BRANCHES = ["origin/main", "main"];
 const STATE = { locked: "🔒", open: "🔓", sealed: "✅", invalid: "⚠", waived: "➖" };
+const SHA = /^[0-9a-f]{40}$/;
 
 // ---------- 인자 ----------
 
@@ -30,8 +38,8 @@ function parseArgs(argv) {
       continue;
     }
     const key = a.slice(2);
-    const next = argv[i + 1];
-    if (["root", "config", "base", "waived"].includes(key)) {
+    if (["root", "base", "head", "since", "waived"].includes(key)) {
+      const next = argv[i + 1];
       if (next === undefined || next.startsWith("--")) fail(`--${key} 에 값이 필요하다`);
       args[key] = next;
       i++;
@@ -50,8 +58,8 @@ function fail(message, code = 2) {
 // ---------- git ----------
 
 function git(root, args, { allowFail = false } = {}) {
-  const r = spawnSync("git", args, { cwd: root, encoding: "utf8" });
-  if (r.status !== 0 && !allowFail) fail(`git ${args.join(" ")} 실패: ${r.stderr.trim()}`);
+  const r = spawnSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  if (r.status !== 0 && !allowFail) fail(`git ${args.join(" ")} 실패: ${(r.stderr ?? "").trim()}`);
   return { ok: r.status === 0, out: (r.stdout ?? "").trim() };
 }
 
@@ -64,34 +72,89 @@ function isAncestor(root, sha, of) {
   return git(root, ["merge-base", "--is-ancestor", sha, of], { allowFail: true }).ok;
 }
 
-// 기준 브랜치가 있으면 그 끝, 없으면 HEAD 를 R2 판정 기준으로 쓴다.
-function baseTip(root) {
-  return resolveRef(root, BASE_BRANCH) ?? resolveRef(root, "HEAD");
+// 상태 판정(R2)의 기준 끝: origin/main, 없으면 main. 둘 다 없으면 판정하지 않는다.
+function defaultTip(root) {
+  for (const b of BASE_BRANCHES) {
+    const sha = resolveRef(root, b);
+    if (sha) return sha;
+  }
+  fail(`기준 브랜치(${BASE_BRANCHES.join(", ")})를 찾을 수 없다`);
+}
+
+// ---------- 파일 보기: 작업 트리 또는 특정 커밋 ----------
+
+function view(root, ref = null) {
+  return {
+    ref,
+    read(rel) {
+      if (!ref) {
+        const p = path.join(root, rel);
+        return fs.existsSync(p) ? fs.readFileSync(p, "utf8") : null;
+      }
+      const r = git(root, ["show", `${ref}:${rel}`], { allowFail: true });
+      return r.ok ? r.out : null;
+    },
+  };
+}
+
+async function loadGates(v, { required = true } = {}) {
+  const src = v.read(CONFIG);
+  if (src === null) {
+    if (required) fail(`설정 파일 없음: ${CONFIG}${v.ref ? ` (${v.ref.slice(0, 7)})` : ""}`);
+    return null;
+  }
+  // 커밋 시점 설정도 같은 방식으로 읽도록, 내용을 임시 모듈로 써서 불러온다.
+  const hash = crypto.createHash("sha256").update(src).digest("hex").slice(0, 16);
+  const tmp = path.join(os.tmpdir(), `gate-config-${hash}.mjs`);
+  if (!fs.existsSync(tmp)) fs.writeFileSync(tmp, src);
+  return (await import(pathToFileURL(tmp).href)).GATES;
 }
 
 // ---------- 봉인과 상태 ----------
 
-function sealPath(root, phase) {
-  return path.join(root, SEAL_DIR, `${phase}.json`);
+function readSeal(v, phase) {
+  const src = v.read(`${SEAL_DIR}/${phase}.json`);
+  if (src === null) return null;
+  try {
+    return JSON.parse(src);
+  } catch {
+    return { malformed: true };
+  }
 }
 
-function readSeal(root, phase) {
-  const p = sealPath(root, phase);
-  if (!fs.existsSync(p)) return null;
-  return JSON.parse(fs.readFileSync(p, "utf8"));
+// 봉인 파일 자체가 그 단계의 정당한 봉인 모양인지. 위조·복사·설정 변경을 잡는다.
+function sealProblem(root, seal, phase, def) {
+  if (seal.malformed) return "JSON 아님";
+  if (seal.sealed !== true) return "sealed 가 true 아님";
+  if (seal.phase !== phase) return `phase 가 ${JSON.stringify(seal.phase)} (기대 ${phase})`;
+  if (typeof seal.head !== "string" || !SHA.test(seal.head)) return "head 가 40자리 커밋 SHA 아님";
+  if (!resolveRef(root, seal.head)) return "head 커밋이 저장소에 없음";
+  if (seal.waived === true) {
+    if (!def.waivable) return "면제할 수 없는 단계의 면제 봉인";
+    if (typeof seal.reason !== "string" || !seal.reason.trim()) return "면제 사유 없음";
+    return null;
+  }
+  if (seal.waived !== false) return "waived 가 true/false 아님";
+  const want = (def.checks ?? []).map((c) => c.id).sort();
+  const got = Array.isArray(seal.checks) ? seal.checks.map((c) => c.id).sort() : [];
+  if (want.length === 0) return "설정에 검사가 없는 단계의 봉인";
+  if (JSON.stringify(want) !== JSON.stringify(got)) return "봉인의 검사 목록이 설정과 다름";
+  if (!seal.checks.every((c) => c.ok === true)) return "실패한 검사가 든 봉인";
+  return null;
 }
 
-function phaseState(root, gates, phase, memo = new Map()) {
+// ctx = { root, gates, seals: view, tip: sha }
+function phaseState(ctx, phase, memo = new Map()) {
   if (memo.has(phase)) return memo.get(phase);
-  const seal = readSeal(root, phase);
+  const def = ctx.gates[phase];
+  const seal = readSeal(ctx.seals, phase);
   let state;
-  if (seal?.sealed) {
-    const tip = baseTip(root);
-    const valid = tip !== null && resolveRef(root, seal.head) !== null && isAncestor(root, seal.head, tip);
-    state = !valid ? "invalid" : seal.waived ? "waived" : "sealed";
+  if (seal) {
+    const bad = sealProblem(ctx.root, seal, phase, def) ?? (isAncestor(ctx.root, seal.head, ctx.tip) ? null : "head 가 기준의 조상 아님");
+    const needsOk = (def.needs ?? []).every((n) => ["sealed", "waived"].includes(phaseState(ctx, n, memo)));
+    state = bad || !needsOk ? "invalid" : seal.waived ? "waived" : "sealed";
   } else {
-    const needs = gates[phase].needs ?? [];
-    const ready = needs.every((n) => ["sealed", "waived"].includes(phaseState(root, gates, n, memo)));
+    const ready = (def.needs ?? []).every((n) => ["sealed", "waived"].includes(phaseState(ctx, n, memo)));
     state = ready ? "open" : "locked";
   }
   memo.set(phase, state);
@@ -103,8 +166,7 @@ function phaseState(root, gates, phase, memo = new Map()) {
 function walk(root, rel, out = []) {
   const abs = path.join(root, rel);
   if (!fs.existsSync(abs)) return out;
-  const st = fs.statSync(abs);
-  if (st.isFile()) {
+  if (fs.statSync(abs).isFile()) {
     out.push(rel);
     return out;
   }
@@ -160,17 +222,17 @@ function getPath(obj, dotted) {
 function run(root, cmd) {
   // 부모가 node --test 일 때 물려받는 NODE_TEST_CONTEXT 가 있으면 자식 node --test 가 TAP 를 내지 않아 통과 수를 못 읽는다.
   const { NODE_TEST_CONTEXT, ...env } = process.env;
-  const r = spawnSync(cmd, { cwd: root, shell: true, encoding: "utf8", env: { ...env, FORCE_COLOR: "0" } });
+  const r = spawnSync(cmd, { cwd: root, shell: true, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, env: { ...env, FORCE_COLOR: "0" } });
   return { code: r.status ?? 1, output: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 }
 
 // 통과한 테스트 수. 못 읽으면 null.
 // node --test 는 --test-reporter=tap 출력만 읽는다. 요약의 "# pass" 는 이름 패턴에 걸린 테스트가 0개여도
-// 파일 단위 항목을 1로 세므로 쓰지 않고, 파일 이름으로 된 항목을 뺀 "ok N - <이름>" 줄을 센다.
+// 파일 단위 항목을 1로 세므로 쓰지 않고, 파일 이름 항목과 SKIP·TODO 를 뺀 "ok N - <이름>" 줄을 센다.
 function passedCount(output) {
   if (/^TAP version/m.test(output)) {
     const names = [...output.matchAll(/^\s*ok \d+ - (.+)$/gm)].map((m) => m[1].trim());
-    return names.filter((n) => !/\.[cm]?[jt]sx?$/.test(n) && !/# SKIP/i.test(n)).length;
+    return names.filter((n) => !/\.[cm]?[jt]sx?$/.test(n) && !/#\s*(SKIP|TODO)\b/i.test(n)).length;
   }
   const vitest = output.match(/Tests\s+(\d+) passed/);
   return vitest ? Number(vitest[1]) : null;
@@ -185,37 +247,44 @@ const CHECKS = {
   },
 
   grep(root, c) {
-    const re = new RegExp(c.pattern, "g");
+    const op = c.op ?? "<=";
+    const limit = `${op} ${c.limit}`;
+    const paths = c.in ?? ["."];
+    const missing = paths.filter((p) => !fs.existsSync(path.join(root, p)));
+    if (missing.length) return { ok: false, measured: `경로 없음: ${missing.join(", ")}`, limit };
     const exclude = (c.exclude ?? []).map(globToRegExp);
-    const files = (c.in ?? ["."]).flatMap((p) => walk(root, p)).filter((f) => !exclude.some((x) => x.test(f)));
+    const files = paths.flatMap((p) => walk(root, p)).filter((f) => !exclude.some((x) => x.test(f)));
+    if (files.length === 0) return { ok: false, measured: "대상 파일 0개", limit };
+    const re = new RegExp(c.pattern, "g");
     let n = 0;
     for (const f of files) n += (fs.readFileSync(path.join(root, f), "utf8").match(re) ?? []).length;
-    const op = c.op ?? "<=";
-    return { ok: compare(n, op, c.limit), measured: n, limit: `${op} ${c.limit}` };
+    return { ok: compare(n, op, c.limit), measured: n, limit };
   },
 
   cmd(root, c) {
     const expect = c.expectExit ?? 0;
-    const { code } = run(root, c.cmd);
-    return { ok: code === expect, measured: code, limit: `종료코드 ${expect}` };
+    const { code, output } = run(root, c.cmd);
+    return { ok: code === expect, measured: code, limit: `종료코드 ${expect}`, output };
   },
 
   test(root, c) {
+    const limit = "종료코드 0, 통과 ≥ 1";
     const { code, output } = run(root, c.cmd);
+    if (code !== 0) return { ok: false, measured: `종료코드 ${code}`, limit, output };
     const passed = passedCount(output);
-    if (code !== 0) return { ok: false, measured: `종료코드 ${code}`, limit: "종료코드 0, 통과 ≥ 1", output };
-    if (passed === null) return { ok: false, measured: "통과 수를 읽지 못함", limit: "종료코드 0, 통과 ≥ 1", output };
-    return { ok: passed >= 1, measured: `통과 ${passed}`, limit: "종료코드 0, 통과 ≥ 1", output };
+    if (passed === null) return { ok: false, measured: "통과 수를 읽지 못함", limit, output };
+    return { ok: passed >= 1, measured: `통과 ${passed}`, limit, output };
   },
 
   "diff-empty"(root, c) {
     const m = /^seal:(.+)$/.exec(c.since);
     if (!m) throw new Error(`diff-empty.since 는 "seal:<단계>" 형식: ${c.since}`);
-    const seal = readSeal(root, m[1]);
-    if (!seal?.head) return { ok: false, measured: `${m[1]} 봉인 없음`, limit: "변경 0" };
-    const r = git(root, ["diff", "--name-only", seal.head, "--", c.path], { allowFail: true });
+    const seal = readSeal(view(root), m[1]);
+    if (!seal?.head || !SHA.test(seal.head)) return { ok: false, measured: `${m[1]} 봉인 없음 또는 head 이상`, limit: "변경 0" };
+    const diff = git(root, ["diff", "--no-renames", "--name-only", seal.head, "--", c.path], { allowFail: true });
     const untracked = git(root, ["ls-files", "--others", "--exclude-standard", "--", c.path], { allowFail: true });
-    const changed = [r.out, untracked.out].join("\n").split("\n").filter(Boolean);
+    if (!diff.ok || !untracked.ok) return { ok: false, measured: "git 비교 실패", limit: "변경 0" };
+    const changed = [diff.out, untracked.out].join("\n").split("\n").filter(Boolean);
     return { ok: changed.length === 0, measured: changed.length, limit: "변경 0" };
   },
 
@@ -224,18 +293,16 @@ const CHECKS = {
     const re = globToRegExp(path.basename(c.file));
     const absDir = path.join(root, dir);
     const files = fs.existsSync(absDir) ? fs.readdirSync(absDir).filter((f) => re.test(f)) : [];
-    if (files.length < (c.minFiles ?? 1)) {
-      return { ok: false, measured: `파일 ${files.length}개`, limit: `파일 ≥ ${c.minFiles ?? 1}개` };
-    }
+    const op = c.op ?? "==";
+    const limit = `${c.path} ${op} ${JSON.stringify(c.value)}`;
+    if (files.length < (c.minFiles ?? 1)) return { ok: false, measured: `파일 ${files.length}개`, limit };
     const bad = [];
     for (const f of files) {
-      const data = JSON.parse(fs.readFileSync(path.join(absDir, f), "utf8"));
-      const values = getPath(data, c.path);
-      const op = c.op ?? "==";
+      const values = getPath(JSON.parse(fs.readFileSync(path.join(absDir, f), "utf8")), c.path);
       const okAll = values.length > 0 && values.every((v) => (op === "exists" ? v !== undefined : compare(v, op, c.value)));
       if (!okAll) bad.push(`${f}: ${JSON.stringify(values)}`);
     }
-    return { ok: bad.length === 0, measured: bad.length ? bad.join("; ") : `파일 ${files.length}개 일치`, limit: `${c.path} ${c.op ?? "=="} ${JSON.stringify(c.value)}` };
+    return { ok: bad.length === 0, measured: bad.length ? bad.join("; ") : `파일 ${files.length}개 일치`, limit };
   },
 };
 
@@ -254,24 +321,13 @@ function runChecks(root, phase, def) {
   });
 }
 
-function printTable(results) {
-  for (const r of results) console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.id.padEnd(10)} ${r.desc}  (${r.measured} / ${r.limit})`);
-}
-
 // ---------- 명령 ----------
 
-async function loadGates(root, configPath) {
-  const abs = path.resolve(root, configPath ?? "gates/gates.config.mjs");
-  if (!fs.existsSync(abs)) fail(`설정 파일 없음: ${abs}`);
-  const mod = await import(pathToFileURL(abs).href);
-  return mod.GATES;
-}
-
-function cmdStatus(root, gates, asJson) {
-  const rows = Object.keys(gates).map((phase) => {
-    const state = phaseState(root, gates, phase);
-    const seal = readSeal(root, phase);
-    return { phase, state, mark: STATE[state], needs: gates[phase].needs ?? [], head: seal?.head?.slice(0, 7) ?? null };
+function cmdStatus(ctx, asJson) {
+  const rows = Object.keys(ctx.gates).map((phase) => {
+    const state = phaseState(ctx, phase);
+    const seal = readSeal(ctx.seals, phase);
+    return { phase, state, mark: STATE[state], needs: ctx.gates[phase].needs ?? [], head: typeof seal?.head === "string" ? seal.head.slice(0, 7) : null };
   });
   if (asJson) {
     console.log(JSON.stringify(rows, null, 2));
@@ -282,33 +338,91 @@ function cmdStatus(root, gates, asJson) {
   for (const r of rows) console.log(`| ${r.phase} | ${r.mark} | \`node scripts/gate.mjs ${r.phase}\` | ${r.head ?? "—"} |`);
 }
 
-function changedFiles(root, base) {
-  const head = resolveRef(root, "HEAD");
-  if (!head) return [];
-  let from = base ? resolveRef(root, base) : null;
-  if (base && !from) fail(`기준 ref 를 찾을 수 없다: ${base}`);
-  if (!from) {
-    // 기준이 없으면 루트 커밋의 빈 트리부터 본다 (저장소 전체 이력).
-    const all = git(root, ["log", "--name-only", "--pretty=format:", "HEAD"]).out;
-    return [...new Set(all.split("\n").filter(Boolean))];
-  }
-  return git(root, ["diff", "--name-only", `${from}...HEAD`]).out.split("\n").filter(Boolean);
-}
+async function cmdAssertOrder(root, baseArg, headArg) {
+  const head = resolveRef(root, headArg ?? "HEAD");
+  if (!head) fail(`head 를 찾을 수 없다: ${headArg ?? "HEAD"}`);
+  const base = baseArg ? resolveRef(root, baseArg) : null;
+  if (baseArg && !base) fail(`기준 ref 를 찾을 수 없다: ${baseArg}`);
 
-function cmdAssertOrder(root, gates, base) {
-  const files = changedFiles(root, base);
+  const gatesNow = await loadGates(view(root, head));
   const violations = [];
-  for (const [phase, def] of Object.entries(gates)) {
-    if (phaseState(root, gates, phase) !== "locked") continue;
+
+  // 기준 시점에 잠겨 있던 단계의 설정(needs·outputs·waivable)은 바꿀 수 없다. 단계 삭제도 안 된다.
+  const gatesBase = base ? await loadGates(view(root, base), { required: false }) : null;
+  if (gatesBase) {
+    const baseCtx = { root, gates: gatesBase, seals: view(root, base), tip: base };
+    for (const [phase, def] of Object.entries(gatesBase)) {
+      const now = gatesNow[phase];
+      if (!now) {
+        violations.push(`${CONFIG}: 단계 ${phase} 삭제`);
+        continue;
+      }
+      if (phaseState(baseCtx, phase) !== "locked") continue;
+      for (const key of ["needs", "outputs", "waivable"]) {
+        if (JSON.stringify(def[key] ?? null) !== JSON.stringify(now[key] ?? null)) violations.push(`${CONFIG}: 잠긴 단계 ${phase} 의 ${key} 변경`);
+      }
+    }
+  }
+
+  // 판정 대상 이력 안의 봉인으로 상태를 본다. 봉인의 진위는 --verify-seals --rerun 이 따로 확인한다.
+  const ctx = { root, gates: gatesNow, seals: view(root, head), tip: head };
+  const files = base
+    ? git(root, ["diff", "--no-renames", "--name-only", `${base}...${head}`]).out.split("\n").filter(Boolean)
+    : [...new Set(git(root, ["log", "--no-renames", "--name-only", "--pretty=format:", head]).out.split("\n").filter(Boolean))];
+  for (const [phase, def] of Object.entries(gatesNow)) {
+    if (phaseState(ctx, phase) !== "locked") continue;
     const res = (def.outputs ?? []).map(globToRegExp);
     for (const f of files) if (res.some((re) => re.test(f))) violations.push(`${f} → ${phase} (🔒)`);
   }
+
   if (violations.length) {
-    console.error("잠긴 단계의 산출 경로가 바뀌었다:");
+    console.error("순서 위반:");
     for (const v of violations) console.error(`  ${v}`);
     process.exit(1);
   }
   console.log(`순서 위반 없음 (변경 파일 ${files.length}개 검사)`);
+}
+
+// sinceRef 가 있으면 그 커밋 이후 봉인 파일이 바뀐 단계만 다시 돌린다 (CI 에서 매 push 전부 재실행하지 않으려고).
+function cmdVerifySeals(root, gates, rerun, sinceRef) {
+  const head = resolveRef(root, "HEAD");
+  const since = sinceRef ? resolveRef(root, sinceRef) : null;
+  if (sinceRef && !since) fail(`기준 ref 를 찾을 수 없다: ${sinceRef}`);
+  const changedSeals = since
+    ? new Set(git(root, ["diff", "--no-renames", "--name-only", since, head, "--", SEAL_DIR]).out.split("\n").filter(Boolean))
+    : null;
+  const ctx = { root, gates, seals: view(root), tip: head };
+  const problems = [];
+  let count = 0;
+  for (const [phase, def] of Object.entries(gates)) {
+    const seal = readSeal(ctx.seals, phase);
+    if (!seal) continue;
+    count++;
+    const shouldRerun = rerun && (!changedSeals || changedSeals.has(`${SEAL_DIR}/${phase}.json`));
+    const bad = sealProblem(root, seal, phase, def) ?? (isAncestor(root, seal.head, head) ? null : "head 가 HEAD 의 조상 아님");
+    if (bad) {
+      problems.push(`${phase}: ${bad}`);
+      continue;
+    }
+    if (phaseState(ctx, phase) === "invalid") problems.push(`${phase}: 선행 단계 봉인이 유효하지 않음`);
+    if (shouldRerun && !seal.waived) {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), `gate-verify-${phase}-`));
+      git(root, ["worktree", "add", "--detach", "--quiet", dir, seal.head]);
+      try {
+        if (fs.existsSync(path.join(dir, "pnpm-lock.yaml"))) run(dir, "pnpm install --frozen-lockfile --silent");
+        const r = spawnSync(process.execPath, [SELF, "--root", dir, phase], { encoding: "utf8" });
+        if (r.status !== 0) problems.push(`${phase}: 봉인 커밋 ${seal.head.slice(0, 7)} 에서 다시 돌린 검사 실패\n${r.stdout}${r.stderr}`);
+      } finally {
+        git(root, ["worktree", "remove", "--force", dir], { allowFail: true });
+      }
+    }
+  }
+  if (problems.length) {
+    console.error("봉인 검증 실패:");
+    for (const p of problems) console.error(`  ${p}`);
+    process.exit(1);
+  }
+  console.log(`봉인 ${count}개 검증${rerun ? " (재실행 포함)" : ""}`);
 }
 
 function cmdPhase(root, gates, phase, args) {
@@ -316,8 +430,9 @@ function cmdPhase(root, gates, phase, args) {
   if (!def) fail(`알 수 없는 단계: ${phase}`);
 
   // R1 순서
+  const ctx = { root, gates, seals: view(root), tip: defaultTip(root) };
   const memo = new Map();
-  const unsealed = (def.needs ?? []).filter((n) => !["sealed", "waived"].includes(phaseState(root, gates, n, memo)));
+  const unsealed = (def.needs ?? []).filter((n) => !["sealed", "waived"].includes(phaseState(ctx, n, memo)));
   if (unsealed.length) fail(`${phase}: ${unsealed.join(", ")} 봉인 필요 (R1). 현재 상태는 gate --status`, 1);
 
   if (args.waived !== undefined) {
@@ -331,7 +446,7 @@ function cmdPhase(root, gates, phase, args) {
 
   // R3 재검: 봉인 때도 이전 결과를 읽지 않고 다시 돌린다.
   const results = runChecks(root, phase, def);
-  printTable(results);
+  for (const r of results) console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.id.padEnd(10)} ${r.desc}  (${r.measured} / ${r.limit})`);
   const failed = results.filter((r) => !r.ok);
 
   if (args.explain) {
@@ -348,7 +463,7 @@ function cmdPhase(root, gates, phase, args) {
 
   if (args.seal) {
     writeSeal(root, phase, { waived: false, reason: null, checks: results.map(({ id, ok, measured, limit }) => ({ id, ok, measured, limit })) });
-    console.log(`\n${phase} 봉인: ${path.relative(root, sealPath(root, phase))}`);
+    console.log(`\n${phase} 봉인: ${SEAL_DIR}/${phase}.json — 커밋해서 main 에 합치면 ✅`);
   } else {
     console.log(`\n${phase}: ${results.length}/${results.length} 통과`);
   }
@@ -359,16 +474,20 @@ function writeSeal(root, phase, { waived, reason, checks }) {
   if (!head) fail("커밋이 없어 봉인할 수 없다");
   const seal = { phase, sealed: true, head, at: new Date().toISOString(), waived, reason, checks };
   fs.mkdirSync(path.join(root, SEAL_DIR), { recursive: true });
-  fs.writeFileSync(sealPath(root, phase), `${JSON.stringify(seal, null, 2)}\n`);
+  fs.writeFileSync(path.join(root, SEAL_DIR, `${phase}.json`), `${JSON.stringify(seal, null, 2)}\n`);
 }
 
 // ---------- 진입 ----------
 
 const args = parseArgs(process.argv.slice(2));
 const root = path.resolve(args.root ?? (git(process.cwd(), ["rev-parse", "--show-toplevel"], { allowFail: true }).out || process.cwd()));
-const gates = await loadGates(root, args.config);
 
-if (args.status) cmdStatus(root, gates, args.json === true);
-else if (args["assert-order"]) cmdAssertOrder(root, gates, args.base);
-else if (args._[0]) cmdPhase(root, gates, args._[0], args);
-else fail("사용법: gate <단계> [--seal|--explain|--waived <사유>] | --status [--json] | --assert-order [--base <ref>]");
+if (args["assert-order"]) {
+  await cmdAssertOrder(root, args.base, args.head);
+} else {
+  const gates = await loadGates(view(root));
+  if (args.status) cmdStatus({ root, gates, seals: view(root), tip: defaultTip(root) }, args.json === true);
+  else if (args["verify-seals"]) cmdVerifySeals(root, gates, args.rerun === true, args.since);
+  else if (args._[0]) cmdPhase(root, gates, args._[0], args);
+  else fail("사용법: gate <단계> [--seal|--explain|--waived <사유>] | --status [--json] | --assert-order [--base <ref>] [--head <ref>] | --verify-seals [--rerun]");
+}

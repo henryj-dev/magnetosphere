@@ -55,3 +55,28 @@ test("TC-S0.T3.a pre-push 훅이 잠긴 단계 변경 push 를 막는다", () =>
   const localPrev = must(work, "git rev-parse HEAD~1");
   assert.equal(remoteHead, localPrev, "거부된 커밋이 원격에 올라가면 안 된다");
 });
+
+test("TC-S0.T3.b 현재 브랜치가 아닌 브랜치를 push 해도 훅이 그 브랜치를 검사한다", () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "hook-test-"));
+  const remote = path.join(tmp, "remote.git");
+  const work = path.join(tmp, "work");
+  must(tmp, `git init -q --bare -b main ${remote} && git init -q -b main ${work}`);
+  must(work, "git config user.email t@t.test && git config user.name t && git config commit.gpgsign false");
+  fs.cpSync(path.join(ROOT, ".githooks"), path.join(work, ".githooks"), { recursive: true });
+  fs.cpSync(path.join(ROOT, "scripts/gate.mjs"), path.join(work, "scripts/gate.mjs"));
+  write(work, "gates/gates.config.mjs", `export const GATES = ${JSON.stringify({
+    S0: { needs: [], outputs: ["a/**"], checks: [{ id: "G0", how: "cmd", cmd: "true" }] },
+    S1: { needs: ["S0"], outputs: ["s3/**"], checks: [{ id: "G1", how: "cmd", cmd: "true" }] },
+  })};\n`);
+  must(work, "git config core.hooksPath .githooks");
+  must(work, `git add -A && git commit -q -m init && git remote add origin ${remote}`);
+  assert.equal(sh(work, "git push -q -u origin main").status, 0);
+
+  must(work, "git checkout -q -b evil");
+  write(work, "s3/f.txt", "잠긴 산출");
+  must(work, 'git add -A && git commit -q -m evil && git checkout -q main');
+  const r = sh(work, "git push -q origin evil");
+  assert.notEqual(r.status, 0, "다른 브랜치의 위반도 거부돼야 한다");
+  assert.match(r.stderr, /s3\/f\.txt → S1/);
+  assert.notEqual(sh(remote, "git rev-parse --verify --quiet refs/heads/evil").status, 0, "evil 이 원격에 생기면 안 된다");
+});

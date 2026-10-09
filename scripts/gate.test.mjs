@@ -159,6 +159,37 @@ test("TC-S0.T2.d 검사 종류마다 이빨이 있다", async (t) => {
     assert.match(r.out, /FAIL\s+zero/);
   });
 
+  await t.test("test 검사는 todo·skip 테스트를 통과로 세지 않는다", () => {
+    const dir = fresh();
+    write(dir, "t.test.mjs", 'import { test } from "node:test";\ntest("todo", { todo: true }, () => {});\ntest("skip", { skip: true }, () => {});\n');
+    const r = gate(dir, "P");
+    const failed = [...r.out.matchAll(/^FAIL\s+(\S+)/gm)].map((m) => m[1]);
+    assert.deepEqual(failed, ["test"], r.out);
+  });
+
+  await t.test("grep 검사는 in 경로가 없으면 실패한다", () => {
+    const dir = fresh();
+    fs.rmSync(path.join(dir, "src"), { recursive: true });
+    const r = gate(dir, "P");
+    const failed = [...r.out.matchAll(/^FAIL\s+(\S+)/gm)].map((m) => m[1]);
+    assert.deepEqual(failed, ["grep"], r.out);
+  });
+
+  await t.test("diff-empty 는 기준 봉인 head 가 이상하면 실패한다", () => {
+    const dir = fresh();
+    const sp = path.join(dir, "gates/seals/A.json");
+    const seal = JSON.parse(fs.readFileSync(sp, "utf8"));
+    fs.writeFileSync(sp, JSON.stringify({ ...seal, head: "deadbeef" }));
+    // A 봉인이 무효가 되면 R1 로 P 실행 자체가 거부된다. diff-empty 단독 동작은 R1 을 거치지 않게 단계 하나로 본다.
+    write(dir, "gates/gates.config.mjs", `export const GATES = ${JSON.stringify({
+      A: { needs: [], checks: [ok("GA")] },
+      Q: { needs: [], checks: [{ id: "diff", how: "diff-empty", path: "lock.txt", since: "seal:A" }] },
+    })};\n`);
+    const r = gate(dir, "Q");
+    assert.notEqual(r.code, 0, r.out);
+    assert.match(r.out, /FAIL\s+diff/);
+  });
+
   await t.test("검사가 빈 단계는 실행을 거부한다", () => {
     const dir = repo({ E: { needs: [], checks: [] } });
     const r = gate(dir, "E", "--seal");
@@ -212,4 +243,92 @@ test("TC-S0.T2.f --assert-order 는 잠긴 단계 산출 변경을 잡는다", (
   // S0 을 봉인하면 S1 이 열려 같은 변경이 허용된다.
   sealAndCommit(dir, "S0");
   assert.equal(gate(dir, "--assert-order").code, 0);
+});
+
+test("TC-S0.T2.g 위조·복사한 봉인은 무효다", () => {
+  const gates = {
+    S0: { needs: [], checks: [ok("G0")] },
+    S1: { needs: ["S0"], checks: [ok("G1")] },
+    S2: { needs: ["S1"], checks: [ok("G2")] },
+  };
+  const dir = repo(gates);
+  sealAndCommit(dir, "S0");
+  const s0 = JSON.parse(fs.readFileSync(path.join(dir, "gates/seals/S0.json"), "utf8"));
+  const head = sh(dir, "git rev-parse HEAD");
+
+  const forgeries = {
+    "다른 단계 봉인 복사": s0,
+    "ref 이름 head": { ...s0, phase: "S1", head: "HEAD", checks: [{ id: "G1", ok: true }] },
+    "짧은 SHA": { ...s0, phase: "S1", head: head.slice(0, 7), checks: [{ id: "G1", ok: true }] },
+    "없는 커밋": { ...s0, phase: "S1", head: "0".repeat(40), checks: [{ id: "G1", ok: true }] },
+    "검사 목록 다름": { ...s0, phase: "S1", head, checks: [{ id: "G0", ok: true }] },
+    "실패 검사 포함": { ...s0, phase: "S1", head, checks: [{ id: "G1", ok: false }] },
+    "면제 불가 단계 면제": { ...s0, phase: "S1", head, waived: true, reason: "x", checks: [] },
+    "최소 필드만": { sealed: true, head },
+  };
+  for (const [name, forged] of Object.entries(forgeries)) {
+    write(dir, "gates/seals/S1.json", JSON.stringify(forged));
+    const st = status(dir);
+    assert.equal(st.S1, "invalid", `${name}: S1 이 무효여야 한다`);
+    assert.equal(st.S2, "locked", `${name}: 위조 봉인으로 S2 가 열리면 안 된다`);
+    assert.notEqual(gate(dir, "S2").code, 0, name);
+    assert.notEqual(gate(dir, "--verify-seals").code, 0, name);
+  }
+});
+
+test("TC-S0.T2.h 구조가 맞는 위조 봉인은 --verify-seals --rerun 이 잡는다", () => {
+  const dir = repo({
+    S0: { needs: [], checks: [ok("G0")] },
+    S1: { needs: ["S0"], checks: [{ id: "G1", how: "cmd", cmd: "test -f done.txt" }] },
+  });
+  sealAndCommit(dir, "S0");
+  const head = sh(dir, "git rev-parse HEAD");
+  // done.txt 가 없는 커밋을 가리키면서 검사 결과는 통과라고 적은 봉인
+  write(dir, "gates/seals/S1.json", JSON.stringify({ phase: "S1", sealed: true, head, at: "x", waived: false, reason: null, checks: [{ id: "G1", ok: true }] }));
+  commit(dir, "forged S1 seal");
+  assert.equal(status(dir).S1, "sealed", "구조 검사만으로는 못 잡는 위조다 (전제)");
+  assert.equal(gate(dir, "--verify-seals").code, 0);
+  const r = gate(dir, "--verify-seals", "--rerun");
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /S1: 봉인 커밋 .* 다시 돌린 검사 실패/);
+});
+
+test("TC-S0.T2.i 잠긴 단계의 설정을 같은 변경 안에서 고쳐 순서를 피할 수 없다", () => {
+  const gates = {
+    S0: { needs: [], outputs: ["a/**"], checks: [ok("G0")] },
+    S1: { needs: ["S0"], outputs: ["s1/**"], checks: [ok("G1")] },
+    S2: { needs: ["S1"], outputs: ["s2/**"], checks: [ok("G2")] },
+  };
+  const variants = {
+    "needs 비우기": (g) => ({ ...g, S2: { ...g.S2, needs: [] } }),
+    "outputs 지우기": (g) => ({ ...g, S2: { ...g.S2, outputs: [] } }),
+    "단계 삭제": (g) => ({ S0: g.S0, S1: g.S1 }),
+    "면제 허용으로 바꾸기": (g) => ({ ...g, S2: { ...g.S2, waivable: true } }),
+  };
+  for (const [name, change] of Object.entries(variants)) {
+    const dir = repo(gates);
+    const base = sh(dir, "git rev-parse HEAD");
+    write(dir, "gates/gates.config.mjs", `export const GATES = ${JSON.stringify(change(gates))};\n`);
+    write(dir, "s2/f.txt", "S2 산출");
+    commit(dir, name);
+    const r = gate(dir, "--assert-order", "--base", base);
+    assert.notEqual(r.code, 0, `${name}\n${r.out}`);
+  }
+});
+
+test("TC-S0.T2.j --assert-order --head 는 지정한 커밋을 본다", () => {
+  const dir = repo({
+    S0: { needs: [], outputs: ["a/**"], checks: [ok("G0")] },
+    S1: { needs: ["S0"], outputs: ["s1/**"], checks: [ok("G1")] },
+  });
+  const base = sh(dir, "git rev-parse HEAD");
+  sh(dir, "git checkout -q -b evil");
+  write(dir, "s1/f.txt", "S1 산출");
+  commit(dir, "evil");
+  const evil = sh(dir, "git rev-parse HEAD");
+  sh(dir, "git checkout -q main");
+  assert.equal(gate(dir, "--assert-order", "--base", base).code, 0, "main 에는 위반이 없다");
+  const r = gate(dir, "--assert-order", "--base", base, "--head", evil);
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /s1\/f\.txt → S1/);
 });
