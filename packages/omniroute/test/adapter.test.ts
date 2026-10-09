@@ -153,3 +153,24 @@ describe("TC-S5.T2.k 리다이렉트를 따라가지 않는다", () => {
     }
   });
 });
+
+describe("TC-S5.T2.l 키 id 는 영숫자·_·- 만 받는다", () => {
+  it('".", "..", 슬래시·쉼표·공백·빈 값 id → TypeError, 요청 0건. UUID 는 보낸다', async () => {
+    const { fetch, sent } = fakeFetch({ "DELETE *": { body: {} }, "GET /api/usage/analytics": { body: ANALYTICS } });
+    const c = createClient({ baseUrl: "http://omni.test", credential: { token: "t" }, fetch });
+    for (const id of [".", "..", "a/b", "a,b", "a b", "", "%2e%2e", 1 as any]) {
+      await expect(c.deleteKey(id)).rejects.toThrow(TypeError);
+      await expect(c.setKeyActive(id, true)).rejects.toThrow(TypeError);
+      await expect(c.renameKey(id, "x")).rejects.toThrow(TypeError);
+      await expect(c.setBudget(id, { monthlyUsd: 1 })).rejects.toThrow(TypeError);
+      await expect(c.getAnalytics({ ...range, apiKeyIds: ["k1", id] })).rejects.toThrow(TypeError);
+    }
+    expect(sent).toHaveLength(0);
+    await c.deleteKey("d5124f4e-895c-4a90-8585-951308c0e4b4");
+    await c.getAnalytics({ ...range, apiKeyIds: ["k_1", "k-2"] });
+    expect(sent.map((x) => new URL(x.url).pathname + new URL(x.url).search.replace(/&.*/, ""))).toEqual([
+      "/api/keys/d5124f4e-895c-4a90-8585-951308c0e4b4",
+      "/api/usage/analytics?apiKeyIds=k_1%2Ck-2",
+    ]);
+  });
+});

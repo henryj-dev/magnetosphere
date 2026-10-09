@@ -848,10 +848,13 @@ TC-S5.T2.j  월 예산은 양수만 받는다 (0 은 OmniRoute 에서 무제한)
 TC-S5.T2.k  리다이렉트를 따라가지 않는다
   단언:  OmniRoute 자리의 가짜 서버가 307 로 다른 출처를 가리킴 → createAccessToken 오류, 다른 출처 서버가 받은 본문 0건
   검출:  주소 설정 실수·중간자가 준 리다이렉트로 {password} 본문이 다른 서버로 넘어가는 것 (S5 보안 리뷰 L1)
+TC-S5.T2.l  키 id 는 영숫자·_·- 만 받는다
+  단언:  ".", "..", "a/b", "a,b", 공백·빈 값 id 로 deleteKey·setKeyActive·renameKey·setBudget·getAnalytics → TypeError, 요청 0건. UUID 는 그대로 보낸다
+  검출:  id 하나로 다른 관리 경로를 부르거나(/api/keys/..) 분석 대상 키를 늘리는 것 (S5 보안 리뷰 L3)
 ```
 
 【통과】
-- [ ] G-S5.2 ~ G-S5.9, G-S5.14, G-S5.16, G-S5.17 통과
+- [ ] G-S5.2 ~ G-S5.9, G-S5.14, G-S5.16, G-S5.17, G-S5.19 통과
 
 ### ☐ S5.T3 — OmniRoute 부트스트랩
 선행 S5.T2 · 산출 `apps/server/src/setup/omniroute.ts` · 되돌리기 커밋 1개
@@ -897,6 +900,7 @@ TC-S5.T3.e  발급 뒤 확인·저장이 실패하면 회수할 토큰 id 를 �
 | G-S5.16 | TC-S5.T2.j | `pnpm test:contract -t "TC-S5.T2.j"` | 종료코드 0 |
 | G-S5.17 | TC-S5.T2.k | `pnpm test:contract -t "TC-S5.T2.k"` | 종료코드 0 |
 | G-S5.18 | TC-S5.T3.e | `pnpm test:contract -t "TC-S5.T3.e"` | 종료코드 0 |
+| G-S5.19 | TC-S5.T2.l | `pnpm test:contract -t "TC-S5.T2.l"` | 종료코드 0 |
 
 `node scripts/gate.mjs S5 --seal`
 

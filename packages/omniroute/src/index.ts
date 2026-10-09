@@ -113,7 +113,16 @@ function requireText(name: string, v: unknown): string {
   return v;
 }
 
-const keyPath = (id: string) => `/api/keys/${encodeURIComponent(requireText("키 id", id))}`;
+/**
+ * OmniRoute 키 id. 실측 id 는 UUID 다. 영숫자·_·- 만 받는다 (S5 보안 리뷰 L3):
+ * "."·".." 은 경로를 바꾸고(/api/keys/.. → /api), 쉼표는 getAnalytics 의 apiKeyIds 를 여러 키로 늘린다
+ */
+function requireId(v: unknown): string {
+  if (typeof v !== "string" || !/^[A-Za-z0-9_-]+$/.test(v)) throw new TypeError("키 id 는 영숫자·_·- 로만 된 문자열이어야 한다");
+  return v;
+}
+
+const keyPath = (id: string) => `/api/keys/${requireId(id)}`;
 
 /** 대시보드 비밀번호 로그인. 돌려준 쿠키로 createClient({ credential: { cookie } }) 를 만든다 */
 export async function loginWithPassword(o: ConnectOptions, password: string): Promise<{ cookie: string }> {
@@ -234,7 +243,7 @@ export function createClient(o: ConnectOptions & { credential: Credential }) {
         {
           method: "POST",
           path: "/api/usage/budget",
-          body: { apiKeyId: requireText("키 id", id), dailyLimitUsd: 0, weeklyLimitUsd: 0, monthlyLimitUsd: monthly, resetInterval: "monthly" },
+          body: { apiKeyId: requireId(id), dailyLimitUsd: 0, weeklyLimitUsd: 0, monthlyLimitUsd: monthly, resetInterval: "monthly" },
         },
         budgetSchema,
       );
@@ -247,7 +256,7 @@ export function createClient(o: ConnectOptions & { credential: Credential }) {
     async getAnalytics(q: { apiKeyIds: string[]; startDate: Date | string; endDate: Date | string }): Promise<Analytics> {
       if (!Array.isArray(q.apiKeyIds) || q.apiKeyIds.length === 0) throw new TypeError("apiKeyIds 가 비어 있다");
       const p = new URLSearchParams({
-        apiKeyIds: q.apiKeyIds.map((x) => requireText("키 id", x)).join(","),
+        apiKeyIds: q.apiKeyIds.map(requireId).join(","),
         startDate: isoTime("startDate", q.startDate),
         endDate: isoTime("endDate", q.endDate),
       });
