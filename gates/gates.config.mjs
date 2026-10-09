@@ -180,6 +180,8 @@ export const GATES = {
       { id: "G-S5.21", how: "test", requires: ["local-services"], desc: "TC-S5.T3.f 부트스트랩 전체 제한 시간 하나", cmd: 'pnpm test:contract -t "TC-S5.T3.f"' },
     ],
   },
+  // S6 의 test:deploy·e2e 는 회원 앱 이미지를 만들고 Compose 묶음을 띄운다. workers-* E2E 는 계약 환경 OmniRoute(127.0.0.1:20170)와
+  // 시험용 MySQL·Postgres(docker-compose.test.yml)를 쓴다. 메모리가 빠듯하면 조합을 하나씩 돌린다 (각 조합은 끝나면 내린다).
   S6: {
     needs: ["S5"],
     waivable: false,
@@ -197,6 +199,12 @@ export const GATES = {
       { id: "G-S6.5", how: "test", requires: ["local-services"], desc: "TC-S6.T2.b 허용 목록 밖 /v1 → Caddy 404", cmd: 'pnpm test:deploy -t "TC-S6.T2.b"' },
       { id: "G-S6.6", how: "test", requires: ["local-services"], desc: "TC-S6.T2.c /api/* 는 회원 앱으로", cmd: 'pnpm test:deploy -t "TC-S6.T2.c"' },
       { id: "G-S6.7", how: "test", requires: ["local-services"], desc: "TC-S6.T2.d OmniRoute 포트는 루프백에만", cmd: 'pnpm test:deploy -t "TC-S6.T2.d"' },
+      { id: "G-S6.9", how: "cmd", requires: ["local-services"], desc: "TC-S6.T4.a 여섯 조합 E2E: docker-sqlite", cmd: "pnpm e2e --combo docker-sqlite" },
+      { id: "G-S6.10", how: "cmd", requires: ["local-services"], desc: "TC-S6.T4.b 여섯 조합 E2E: docker-mysql", cmd: "pnpm e2e --combo docker-mysql" },
+      { id: "G-S6.11", how: "cmd", requires: ["local-services"], desc: "TC-S6.T4.c 여섯 조합 E2E: docker-pg", cmd: "pnpm e2e --combo docker-pg" },
+      { id: "G-S6.12", how: "cmd", requires: ["local-services"], desc: "TC-S6.T4.d 여섯 조합 E2E: workers-d1", cmd: "pnpm e2e --combo workers-d1" },
+      { id: "G-S6.13", how: "cmd", requires: ["local-services"], desc: "TC-S6.T4.e 여섯 조합 E2E: workers-mysql", cmd: "pnpm e2e --combo workers-mysql" },
+      { id: "G-S6.14", how: "cmd", requires: ["local-services"], desc: "TC-S6.T4.f 여섯 조합 E2E: workers-pg", cmd: "pnpm e2e --combo workers-pg" },
       { id: "G-S6.15", how: "grep", desc: "Compose OmniRoute 버전 고정 (태그 + digest)", pattern: "diegosouzapw/omniroute:3\\.8\\.51@sha256:", in: ["docker-compose.yml"], op: "==", limit: 1 },
       { id: "G-S6.17", how: "grep", desc: "DB 최소 버전", pattern: "mysql:8.0|postgres:14", in: ["docker-compose.yml"], op: "==", limit: 2 },
       { id: "G-S6.18", how: "grep", desc: "대시보드 포트 루프백 고정", pattern: '"127\\.0\\.0\\.1:20128:20128"', in: ["docker-compose.yml"], op: "==", limit: 1 },
