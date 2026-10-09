@@ -26,7 +26,7 @@ describe("TC-S4.T3.a 깊은 주소는 SPA 로, /api 는 JSON 으로 간다", () 
   });
 
   it("GET /api/nope → 404 application/json (index.html 아님)", async () => {
-    for (const p of ["/api/nope", "/api/keys/1", "/api"]) {
+    for (const p of ["/api/nope", "/api/nope2", "/api"]) {
       const res = await fetch(`${base}${p}`);
       expect(res.status, p).toBe(404);
       expect(res.headers.get("content-type"), p).toMatch(/^application\/json/);

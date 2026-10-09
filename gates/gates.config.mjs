@@ -165,8 +165,7 @@ export const GATES = {
       { id: "G-S5.6", how: "test", requires: ["local-services"], desc: "TC-S5.T2.e 키별 분석 비용 (스트리밍 포함)", cmd: 'pnpm test:contract -t "TC-S5.T2.e"' },
       { id: "G-S5.7", how: "test", requires: ["local-services"], desc: "TC-S5.T2.f 응답 형식 변화 → 오류", cmd: 'pnpm test:contract -t "TC-S5.T2.f"' },
       { id: "G-S5.8", how: "test", requires: ["local-services"], desc: "TC-S5.T2.g 쿠키 변경 요청에 Origin", cmd: 'pnpm test:contract -t "TC-S5.T2.g"' },
-      // apps/server/test/app.test.ts 의 "/api/keys/1" 은 우리 서버의 모르는 /api 경로가 JSON 404 인지 보는 요청이다 (OmniRoute 호출 아님)
-      { id: "G-S5.9", how: "grep", desc: "TC-S5.T2.h 어댑터 밖 OmniRoute 관리 호출 0", pattern: "/api/(keys|usage)", in: ["apps", "packages"], exclude: ["packages/omniroute/**", "apps/server/test/app.test.ts"], op: "==", limit: 0 },
+      { id: "G-S5.9", how: "grep", desc: "TC-S5.T2.h 어댑터 밖 OmniRoute 관리 호출 0", pattern: "/api/(keys|usage)", in: ["apps", "packages"], exclude: ["packages/omniroute/**"], op: "==", limit: 0 },
       { id: "G-S5.10", how: "test", requires: ["local-services"], desc: "TC-S5.T3.a 설치 뒤 토큰 암호화 저장", cmd: 'pnpm test:contract -t "TC-S5.T3.a"' },
       { id: "G-S5.11", how: "test", requires: ["local-services"], desc: "TC-S5.T3.b 저장 토큰 범위 = V10 minScope", cmd: 'pnpm test:contract -t "TC-S5.T3.b"' },
       { id: "G-S5.12", how: "test", requires: ["local-services"], desc: "TC-S5.T3.c 틀린 비밀번호 → manual_required, 관리자는 생성", cmd: 'pnpm test:contract -t "TC-S5.T3.c"' },
