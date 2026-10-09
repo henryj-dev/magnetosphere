@@ -173,6 +173,7 @@ export const GATES = {
       { id: "G-S5.13", how: "grep", desc: "OmniRoute 버전 고정 (태그 + digest)", pattern: "diegosouzapw/omniroute:3\\.8\\.51@sha256:", in: ["tests/contract/docker-compose.yml"], op: "==", limit: 1 },
       { id: "G-S5.14", how: "test", requires: ["local-services"], desc: "TC-S5.T2.i 어댑터는 키 scopes 를 보내지 않음", cmd: 'pnpm test:contract -t "TC-S5.T2.i"' },
       { id: "G-S5.15", how: "test", requires: ["local-services"], desc: "TC-S5.T3.d 토큰 붙여 넣기는 관리자·write 만", cmd: 'pnpm test:contract -t "TC-S5.T3.d"' },
+      { id: "G-S5.16", how: "test", requires: ["local-services"], desc: "TC-S5.T2.j 월 예산 0 거부 (OmniRoute 0 = 무제한 대조)", cmd: 'pnpm test:contract -t "TC-S5.T2.j"' },
     ],
   },
   S6: {

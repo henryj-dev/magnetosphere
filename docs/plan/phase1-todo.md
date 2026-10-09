@@ -841,10 +841,14 @@ TC-S5.T2.i  어댑터는 키 범위(scopes)를 보내지 않는다
   단언:  어댑터 함수 전부를 가짜 fetch 로 부름 → 요청 본문에 "scopes" 0건, 키 PATCH 본문은 {isActive} 또는 {name} 하나.
          다른 값을 끼운 setKeyActive·renameKey·createKey → TypeError, 요청 0건
   검출:  write 토큰으로 키에 manage 를 붙여 admin 토큰까지 가는 경로(V10)를 회원 앱이 스스로 여는 것 (계획서 5.8)
+TC-S5.T2.j  월 예산은 양수만 받는다 (0 은 OmniRoute 에서 무제한)
+  단언:  setBudget(monthlyUsd 0·음수·NaN·Infinity) → TypeError, 요청 0건.
+         대조: 어댑터 없이 monthlyLimitUsd 0 을 넣은 키 → 3건(0.014633) 뒤 4번째 요청도 200
+  검출:  남은 한도 0 을 예산 0 으로 걸어 회원 한도가 아무도 모르게 무제한이 되는 것 (S5 보안 리뷰 M1). 0원 차단은 setKeyActive(false)
 ```
 
 【통과】
-- [ ] G-S5.2 ~ G-S5.9, G-S5.14 통과
+- [ ] G-S5.2 ~ G-S5.9, G-S5.14, G-S5.16 통과
 
 ### ☐ S5.T3 — OmniRoute 부트스트랩
 선행 S5.T2 · 산출 `apps/server/src/setup/omniroute.ts` · 되돌리기 커밋 1개
@@ -884,6 +888,7 @@ TC-S5.T3.d  붙여 넣기 입력은 관리자 세션만, write 범위 토큰만 
 | G-S5.13 | OmniRoute 버전 고정 | grep `diegosouzapw/omniroute:3\.8\.51@sha256:` in `tests/contract/docker-compose.yml` | 1 |
 | G-S5.14 | TC-S5.T2.i | `pnpm test:contract -t "TC-S5.T2.i"` | 종료코드 0 |
 | G-S5.15 | TC-S5.T3.d | `pnpm test:contract -t "TC-S5.T3.d"` | 종료코드 0 |
+| G-S5.16 | TC-S5.T2.j | `pnpm test:contract -t "TC-S5.T2.j"` | 종료코드 0 |
 
 `node scripts/gate.mjs S5 --seal`
 

@@ -220,10 +220,14 @@ export function createClient(o: ConnectOptions & { credential: Credential }) {
     /**
      * 키 하나의 월 예산. 넘으면 OmniRoute 가 429 BUDGET_EXCEEDED 로 막는다 (TC-S5.T2.d).
      * OmniRoute 는 resetInterval 에 맞는 한도 하나만 본다. monthly 로 두지 않으면 monthlyLimitUsd 가 무시된다 (계약 환경 실측).
+     * 한도 0 은 차단이 아니라 "한도 없음"이다 (OmniRoute 는 한도가 0보다 클 때만 막는다, TC-S5.T2.j). 그래서 양수만 받는다.
+     * 남은 한도가 0 인 회원을 막으려면 예산 대신 setKeyActive(false) 로 키를 끈다 (S5 보안 리뷰 M1).
      */
     async setBudget(id: string, budget: { monthlyUsd: number }): Promise<void> {
       const monthly = budget.monthlyUsd;
-      if (typeof monthly !== "number" || !Number.isFinite(monthly) || monthly < 0) throw new TypeError("monthlyUsd 는 0 이상의 수여야 한다");
+      if (typeof monthly !== "number" || !Number.isFinite(monthly) || monthly <= 0) {
+        throw new TypeError("monthlyUsd 는 0보다 큰 유한한 수여야 한다 (0 은 OmniRoute 에서 무제한이다. 막으려면 setKeyActive(false))");
+      }
       const r = await req(
         {
           method: "POST",

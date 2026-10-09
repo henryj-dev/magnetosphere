@@ -8,10 +8,12 @@ const conn = { baseUrl: OMNI_URL };
 const tokenIds: string[] = [];
 const keyIds: string[] = [];
 let client: OmniRouteClient;
+let adapterToken = "";
 
 beforeAll(async () => {
   const t = await createAccessToken(conn, { password: OMNI_PASSWORD, scope: "write", name: "contract-adapter", expiresInDays: 1 });
   tokenIds.push(t.id);
+  adapterToken = t.token;
   client = createClient({ ...conn, credential: { token: t.token } });
 });
 
@@ -139,5 +141,22 @@ describe("TC-S5.T2.g 쿠키 인증 변경 요청에 Origin 이 붙는다", () =>
     const err = await viaCookie.deleteKey(k.id).catch((e) => e);
     expect(err).toBeInstanceOf(OmniRouteError);
     expect(err.status).toBe(404);
+  });
+});
+
+describe("TC-S5.T2.j 월 예산은 양수만 받는다 (0 은 OmniRoute 에서 무제한)", () => {
+  it("대조: 어댑터를 거치지 않고 monthlyLimitUsd 0 을 넣으면 3건(0.014633) 뒤 4번째 요청도 200", async () => {
+    const k = await newKey("t2j");
+    const token = adapterToken;
+    const res = await fetch(`${OMNI_URL}/api/usage/budget`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ apiKeyId: k.id, dailyLimitUsd: 0, weeklyLimitUsd: 0, monthlyLimitUsd: 0, resetInterval: "monthly" }),
+    });
+    expect(res.status).toBe(200);
+    await threeRequests(k.key);
+    expect((await infer(k.key, "openai")).status).toBe(200);
+    // 어댑터는 0 을 보내지 않는다
+    await expect(client.setBudget(k.id, { monthlyUsd: 0 })).rejects.toThrow(TypeError);
   });
 });

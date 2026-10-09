@@ -104,3 +104,18 @@ describe("TC-S5.T2.i 어댑터는 키 범위(scopes)를 보내지 않는다", ()
     expect(Object.keys(c).filter((k) => /scope/i.test(k))).toEqual([]);
   });
 });
+
+describe("TC-S5.T2.j 월 예산은 양수만 받는다 (0 은 OmniRoute 에서 무제한)", () => {
+  it("0·음수·NaN·Infinity·문자열 → TypeError, 요청 0건. 양수는 보낸다", async () => {
+    const { fetch, sent } = fakeFetch({
+      "POST /api/usage/budget": { body: { success: true, apiKeyId: "k1", budget: { monthlyLimitUsd: 0.5, resetInterval: "monthly" } } },
+    });
+    const c = createClient({ baseUrl: "http://omni.test", credential: { token: "t" }, fetch });
+    for (const monthlyUsd of [0, -0, -1, Number.NaN, Number.POSITIVE_INFINITY, "1" as any]) {
+      await expect(c.setBudget("k1", { monthlyUsd })).rejects.toThrow(TypeError);
+    }
+    expect(sent).toHaveLength(0);
+    await c.setBudget("k1", { monthlyUsd: 0.5 });
+    expect(sent.map((x) => JSON.parse(x.body!).monthlyLimitUsd)).toEqual([0.5]);
+  });
+});
