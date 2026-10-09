@@ -1,0 +1,21 @@
+{
+  // TC-S4.T3.b 전용 로컬 Worker 설정. 배포하지 않는다 (배포 설정 wrangler.toml 은 S6).
+  // wrangler 4.115.0 의 workerd 는 compatibility_date 2026-07-29 까지 받는다 (V27). mysql2·better-auth 에 nodejs_compat 필요.
+  "name": "mg-server-test",
+  "main": "../src/workers.ts",
+  "compatibility_date": "2026-07-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "../../web/build",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/healthz"]
+  },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "mg-server-test", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "../../../packages/db/migrations/sqlite" }
+  ],
+  "vars": {
+    "BETTER_AUTH_URL": "http://localhost:3000",
+    "BETTER_AUTH_SECRET": "mg-server-test-secret-mg-server-test-secret"
+  }
+}

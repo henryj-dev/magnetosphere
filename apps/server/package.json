@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "start": "node src/node.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:both-runtimes": "vitest run --config vitest.both-runtimes.config.ts"
   },
   "dependencies": {
     "@hono/node-server": "2.1.1",
@@ -17,6 +18,7 @@
   "devDependencies": {
     "@libsql/client": "0.18.0",
     "drizzle-orm": "0.45.4",
-    "vitest": "5.0.3"
+    "vitest": "5.0.3",
+    "wrangler": "4.115.0"
   }
 }
