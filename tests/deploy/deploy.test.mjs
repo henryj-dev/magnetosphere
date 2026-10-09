@@ -7,7 +7,7 @@ import http from "node:http";
 import path from "node:path";
 import { after, describe, test } from "node:test";
 import https from "node:https";
-import { createAdmin, createStack, ROOT, signIn, startCaddyProbe } from "./stack.mjs";
+import { APP_IMAGE, buildAppImage, createAdmin, createStack, ROOT, signIn, startCaddyProbe } from "./stack.mjs";
 
 const V16 = JSON.parse(fs.readFileSync(path.join(ROOT, "docs/verify/V16.json"), "utf8")).answer;
 const HTTP_PORT = 28480;
@@ -196,6 +196,30 @@ test("TC-S6.T2.d OmniRoute 포트는 루프백에만 열린다", async () => {
       if (name === "caddy" || name === "omniroute") continue;
       assert.equal((svc.ports ?? []).length, 0, `${name} 가 호스트 포트를 연다`);
     }
+    // app·migrate 권한 축소 (S6 보안 리뷰 L4)
+    for (const name of ["app", "migrate"]) {
+      const svc = cfg.services[name];
+      assert.deepEqual(svc.cap_drop, ["ALL"], `${name}.cap_drop`);
+      assert.ok((svc.security_opt ?? []).some((o) => /^no-new-privileges(:true)?$/.test(o)), `${name}.security_opt`);
+      assert.equal(svc.read_only, true, `${name}.read_only`);
+    }
+    // DB 이미지는 digest 로 고정한다
+    const all = JSON.parse(s.composeBase("--profile", "mysql", "--profile", "postgres", "config", "--format", "json").out);
+    for (const name of ["mysql", "postgres"]) assert.match(all.services[name]?.image ?? "", /@sha256:[0-9a-f]{64}$/, `${name}.image`);
+
+    // .dev.vars(wrangler 로컬 비밀 값)는 이미지에 들어가지 않는다. 없으면 시험용으로 하나 두고 이미지를 다시 만든다
+    const devVars = path.join(ROOT, "apps/server/.dev.vars");
+    const made = !fs.existsSync(devVars);
+    if (made) fs.writeFileSync(devVars, "SETUP_TOKEN=must-not-be-in-image\n");
+    try {
+      buildAppImage();
+      const found = spawnSync("docker", ["run", "--rm", APP_IMAGE, "sh", "-c", "find /repo -name '.dev.vars*' -not -path '*/node_modules/*'"], { encoding: "utf8" });
+      assert.equal(found.status, 0, found.stderr);
+      assert.equal(found.stdout.trim(), "", `이미지 안에 .dev.vars: ${found.stdout}`);
+    } finally {
+      if (made) fs.rmSync(devVars);
+    }
+
     // HTTPS 로 받을 때 Caddy 가 HSTS 를 단다 (S6 보안 리뷰 L2). 뒤가 메아리 서버라 이 헤더는 Caddy 가 단 것이다
     // (회원 앱도 보안 헤더로 HSTS 를 달지만 OmniRoute /v1 응답에는 없다). 도메인 대신 localhost 로 Caddy 내부 인증서를 받는다
     const probe = startCaddyProbe({ siteAddress: "localhost", httpPort: HTTP_PORT + 20, httpsPort: HTTP_PORT + 21 });
