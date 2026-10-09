@@ -42,7 +42,7 @@ function parseArgs(argv) {
       continue;
     }
     const key = a.slice(2);
-    if (["root", "base", "head", "since", "waived", "skip-requires"].includes(key)) {
+    if (["root", "base", "head", "since", "waived", "skip-requires", "skip-ids"].includes(key)) {
       const next = argv[i + 1];
       if (next === undefined || next.startsWith("--")) fail(`--${key} 에 값이 필요하다`);
       args[key] = next;
@@ -312,10 +312,10 @@ const CHECKS = {
   },
 };
 
-function runChecks(root, phase, def, skipTag = null) {
+function runChecks(root, phase, def, skipTag = null, skipIds = new Set()) {
   if (!def.checks?.length) fail(`${phase}: 검사 정의가 없다. 빈 단계는 실행·봉인하지 않는다`, 1);
   return def.checks.map((c) => {
-    if (skipTag && (c.requires ?? []).includes(skipTag)) {
+    if ((skipTag && (c.requires ?? []).includes(skipTag)) || skipIds.has(c.id)) {
       return { id: c.id, desc: c.desc ?? "", ok: true, skipped: true, measured: `requires ${skipTag}`, limit: "-" };
     }
     const impl = CHECKS[c.how];
@@ -419,7 +419,11 @@ function cmdVerifySeals(root, gates, rerun, sinceRef, skipTag = null) {
       git(root, ["worktree", "add", "--detach", "--quiet", dir, seal.head]);
       try {
         if (fs.existsSync(path.join(dir, "pnpm-lock.yaml"))) run(dir, "pnpm install --frozen-lockfile --silent");
-        const r = spawnSync(process.execPath, [SELF, "--root", dir, phase, ...(skipTag ? ["--skip-requires", skipTag] : [])], { encoding: "utf8" });
+        // 어떤 검사가 이 환경에서 못 도는지는 봉인 커밋이 아니라 지금 설정(requires)으로 정한다.
+      // 봉인 뒤에 태그를 단 검사도 건너뛰되, 태그 없는 검사는 봉인 커밋 코드로 그대로 다시 돈다.
+      const skipIds = skipTag ? (def.checks ?? []).filter((c) => (c.requires ?? []).includes(skipTag)).map((c) => c.id) : [];
+      const extra = skipIds.length ? ["--skip-ids", skipIds.join(",")] : [];
+      const r = spawnSync(process.execPath, [SELF, "--root", dir, phase, ...extra], { encoding: "utf8" });
         if (r.status !== 0) problems.push(`${phase}: 봉인 커밋 ${seal.head.slice(0, 7)} 에서 다시 돌린 검사 실패\n${r.stdout}${r.stderr}`);
       } finally {
         git(root, ["worktree", "remove", "--force", dir], { allowFail: true });
@@ -455,8 +459,9 @@ function cmdPhase(root, gates, phase, args) {
 
   // R3 재검: 봉인 때도 이전 결과를 읽지 않고 다시 돌린다.
   const skipTag = args["skip-requires"] ?? null;
-  if (skipTag && args.seal) fail("--skip-requires 로 건너뛴 실행으로는 봉인하지 않는다", 1);
-  const results = runChecks(root, phase, def, skipTag);
+  const skipIds = new Set((args["skip-ids"] ?? "").split(",").filter(Boolean));
+  if ((skipTag || skipIds.size) && args.seal) fail("--skip-requires·--skip-ids 로 건너뛴 실행으로는 봉인하지 않는다", 1);
+  const results = runChecks(root, phase, def, skipTag, skipIds);
   for (const r of results) console.log(`${r.skipped ? "SKIP" : r.ok ? "PASS" : "FAIL"}  ${r.id.padEnd(10)} ${r.desc}  (${r.measured} / ${r.limit})`);
   const failed = results.filter((r) => !r.ok);
 

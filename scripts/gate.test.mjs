@@ -390,3 +390,29 @@ test("TC-S0.T2.l --verify-seals --rerun --skip-requires 는 태그 없는 검사
   assert.match(r.out, /FAIL\s+G1 /);
   assert.match(r.out, /SKIP\s+G1L/);
 });
+
+test("TC-S0.T2.m 봉인 뒤에 단 requires 태그도 재검에서 건너뛴다 (태그 판단은 현재 설정)", () => {
+  // G1L 은 이 컴퓨터에만 있는 서비스(EXTERNAL_FLAG 파일)를 본다. 봉인 때는 있었고, 재검하는 환경에는 없다.
+  const flag = path.join(os.tmpdir(), `gate-ext-${process.pid}-${Date.now()}`);
+  fs.writeFileSync(flag, "x");
+  const cfg = (tagged) => `export const GATES = ${JSON.stringify({
+    S0: { needs: [], checks: [ok("G0")] },
+    S1: { needs: ["S0"], checks: [
+      { id: "G1", how: "cmd", cmd: "true" },
+      { id: "G1L", how: "cmd", ...(tagged ? { requires: ["local-services"] } : {}), cmd: `test -f ${flag}` },
+    ] },
+  })};\n`;
+  const dir = repo({ S0: { needs: [], checks: [ok("G0")] } });
+  write(dir, "gates/gates.config.mjs", cfg(false));
+  commit(dir, "config");
+  sealAndCommit(dir, "S0");
+  sealAndCommit(dir, "S1");
+  fs.rmSync(flag);
+  write(dir, "gates/gates.config.mjs", cfg(true));
+  commit(dir, "tag G1L after seal");
+
+  const r = gate(dir, "--verify-seals", "--rerun", "--skip-requires", "local-services");
+  assert.equal(r.code, 0, `봉인 커밋 설정에는 태그가 없어도 지금 설정의 태그로 건너뛰어야 한다\n${r.out}`);
+  const strict = gate(dir, "--verify-seals", "--rerun");
+  assert.notEqual(strict.code, 0, "옵션 없이는 그대로 돌아 실패해야 한다 (대조)");
+});
