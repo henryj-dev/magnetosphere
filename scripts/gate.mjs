@@ -222,14 +222,16 @@ function getPath(obj, dotted) {
 function run(root, cmd) {
   // 부모가 node --test 일 때 물려받는 NODE_TEST_CONTEXT 가 있으면 자식 node --test 가 TAP 를 내지 않아 통과 수를 못 읽는다.
   const { NODE_TEST_CONTEXT, ...env } = process.env;
-  const r = spawnSync(cmd, { cwd: root, shell: true, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, env: { ...env, FORCE_COLOR: "0" } });
+  const r = spawnSync(cmd, { cwd: root, shell: true, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, env: { ...env, FORCE_COLOR: "0", NO_COLOR: "1" } });
   return { code: r.status ?? 1, output: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 }
 
 // 통과한 테스트 수. 못 읽으면 null.
 // node --test 는 --test-reporter=tap 출력만 읽는다. 요약의 "# pass" 는 이름 패턴에 걸린 테스트가 0개여도
 // 파일 단위 항목을 1로 세므로 쓰지 않고, 파일 이름 항목과 SKIP·TODO 를 뺀 "ok N - <이름>" 줄을 센다.
-function passedCount(output) {
+function passedCount(raw) {
+  // vitest 는 FORCE_COLOR=0 이어도 색상 코드를 섞어 내보낸다. 읽기 전에 지운다.
+  const output = raw.replace(/\x1b\[[0-9;]*m/g, "");
   if (/^TAP version/m.test(output)) {
     const names = [...output.matchAll(/^\s*ok \d+ - (.+)$/gm)].map((m) => m[1].trim());
     return names.filter((n) => !/\.[cm]?[jt]sx?$/.test(n) && !/#\s*(SKIP|TODO)\b/i.test(n)).length;

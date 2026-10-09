@@ -167,6 +167,21 @@ test("TC-S0.T2.d 검사 종류마다 이빨이 있다", async (t) => {
     assert.deepEqual(failed, ["test"], r.out);
   });
 
+  await t.test("test 검사는 색상 코드가 섞인 vitest 요약을 읽고, 통과 0 이면 실패한다", () => {
+    const esc = "\\033";
+    const vitest = (passed) =>
+      `printf '${esc}[2m      Tests ${esc}[22m ${esc}[1m${esc}[32m${passed} passed${esc}[39m${esc}[22m (2)\\n'`;
+    const dir = repo({
+      V1: { needs: [], checks: [{ id: "v1", how: "test", cmd: vitest(1) }] },
+      V0: { needs: [], checks: [{ id: "v0", how: "test", cmd: `printf '      Tests  2 skipped (2)\\n'` }] },
+    });
+    const one = gate(dir, "V1");
+    assert.equal(one.code, 0, one.out);
+    assert.match(one.out, /PASS\s+v1 .*통과 1/);
+    const zero = gate(dir, "V0");
+    assert.notEqual(zero.code, 0, zero.out);
+  });
+
   await t.test("grep 검사는 in 경로가 없으면 실패한다", () => {
     const dir = fresh();
     fs.rmSync(path.join(dir, "src"), { recursive: true });
