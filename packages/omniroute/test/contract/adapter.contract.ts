@@ -95,8 +95,8 @@ describe("TC-S5.T2.d 예산을 넘으면 429 BUDGET_EXCEEDED", () => {
     await client.setBudget(k.id, { monthlyUsd: 0.01 });
     await threeRequests(k.key);
     const r = await infer(k.key, "openai");
-    expect(r.status).toBe(429);
-    expect(r.json?.error?.code ?? r.json?.code).toBe("BUDGET_EXCEEDED");
+    expect(r.status, JSON.stringify(r.json)).toBe(429);
+    expect(r.json?.error?.code ?? r.json?.code, JSON.stringify(r.json)).toBe("BUDGET_EXCEEDED");
   });
 });
 

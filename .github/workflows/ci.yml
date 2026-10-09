@@ -217,7 +217,10 @@ jobs:
         run: |
           pnpm -C spikes/v17 install --frozen-lockfile
           pnpm -C spikes/v26 install --frozen-lockfile
-          pnpm -C spikes/v27 install --frozen-lockfile --ignore-workspace
+          # v27 은 자기 pnpm-workspace.yaml 이 없어 설치 스크립트 허용 목록이 없다 (pnpm 11 은 허용 안 된 빌드를 오류로 낸다).
+          # 저장소 최상위와 같은 허용 목록(esbuild·workerd)을 그 폴더에 두고 설치한다
+          printf 'allowBuilds:\n  esbuild: true\n  workerd: true\n' > spikes/v27/pnpm-workspace.yaml
+          pnpm -C spikes/v27 install --frozen-lockfile
       - name: Keycloak·DB 띄우기 (V26·V27)
         working-directory: ${{ runner.temp }}/s1
         run: |
