@@ -4,6 +4,7 @@
 //             OMNIROUTE_URL, OMNIROUTE_INITIAL_PASSWORD (선택, setup/omniroute.ts)
 // 관리자가 없으면 시작할 때마다 새 설치 토큰을 만들어 한 번 출력한다 (setup/).
 // 시작할 때 clientIp 가 실제 요청에서 IP 를 정하는지 확인하고, 못 정하면 시작하지 않는다 (TC-S4.T1.e).
+// 관리자가 있는데 OMNIROUTE_INITIAL_PASSWORD 가 남아 있으면 시작할 때 경고 한 줄을 남긴다 (TC-S6.T2.g).
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,7 +13,7 @@ import type { MiddlewareHandler } from "hono";
 import { createNodeRuntime, listen, type NodeRuntime } from "@magnetosphere/runtime/node";
 import { createApp } from "./app.ts";
 import { buildServices } from "./config.ts";
-import { ensureSetupToken } from "./setup/index.ts";
+import { ensureSetupToken, warnLeftoverInitialPassword } from "./setup/index.ts";
 
 export const DEFAULT_WEB_DIR = fileURLToPath(new URL("../../web/build", import.meta.url));
 
@@ -50,6 +51,7 @@ export async function startNodeServer(opts: NodeServerOptions = {}) {
     });
     const port = opts.port ?? Number(env.PORT ?? 3000);
     await ensureSetupToken(services.db, { rotate: true, log });
+    await warnLeftoverInitialPassword(services.db, services.omniroute.initialPassword, log);
     const listening = await listen(runtime, app.fetch, { port, hostname: opts.hostname ?? env.HOST ?? "0.0.0.0" });
     return {
       port: listening.port,

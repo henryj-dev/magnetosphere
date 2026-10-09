@@ -93,6 +93,17 @@ export async function ensureSetupToken(h: DbHandle, opts: IssueOptions): Promise
   return token;
 }
 
+/**
+ * 관리자가 있는데 OMNIROUTE_INITIAL_PASSWORD 가 아직 회원 앱 환경에 있으면 경고 한 줄을 남긴다 (S5 보안 리뷰 M2, TC-S6.T2.g).
+ * 이 비밀번호로는 OmniRoute admin 접근 토큰도 만들 수 있어 설치 뒤에는 지워야 한다 (Compose 는 .env.setup 삭제).
+ * 값은 출력하지 않는다. 경고를 냈으면 true.
+ */
+export async function warnLeftoverInitialPassword(h: DbHandle, initialPassword: string | null, log: (line: string) => void): Promise<boolean> {
+  if (!initialPassword || !(await adminExists(h))) return false;
+  log("[setup] 경고: 최초 설치가 끝났는데 OMNIROUTE_INITIAL_PASSWORD 가 남아 있다. .env.setup(Workers 는 해당 시크릿)을 지우고 다시 띄운다.");
+  return true;
+}
+
 export interface SetupInput {
   token: string;
   email: string;

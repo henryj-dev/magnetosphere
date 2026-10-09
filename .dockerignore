@@ -1,0 +1,19 @@
+# 회원 앱 이미지(apps/server/Dockerfile) 빌드 문맥에서 뺄 것. 비밀 값 파일은 절대 이미지에 넣지 않는다.
+**/node_modules
+**/.svelte-kit
+**/.wrangler
+apps/web/build
+.git
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-*
+.omc
+docs
+spikes
+tests
+test
+gates
+.github
+.githooks

@@ -1,0 +1,10 @@
+# 시험용 덧씌우기 (pnpm test:deploy, pnpm e2e --combo docker-*). 저장소 최상위 docker-compose.yml 위에 얹는다.
+# - OmniRoute 대시보드 포트를 열지 않는다. 이 컴퓨터의 localhost:20128 은 사람이 쓰는 OmniRoute 다.
+# - .env.setup 을 시험 폴더(MG_ENV_DIR)에서 읽는다. 저장소 최상위의 .env.setup 을 건드리지 않는다.
+services:
+  omniroute:
+    ports: !reset []
+  app:
+    env_file: !override
+      - path: ${MG_ENV_DIR:?}/.env.setup
+        required: false

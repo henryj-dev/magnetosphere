@@ -14,6 +14,7 @@
     "gate": "node scripts/gate.mjs",
     "test:scripts": "node --test --test-reporter=tap \"scripts/*.test.mjs\"",
     "typecheck": "pnpm -r typecheck",
-    "test:contract": "node tests/contract/run.mjs"
+    "test:contract": "node tests/contract/run.mjs",
+    "test:deploy": "node tests/deploy/run.mjs"
   }
 }

@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { createAdaptorServer } from "@hono/node-server";
-import { findInvalidTrustedProxies } from "@better-auth/core/utils/ip";
+import { findInvalidTrustedProxies, getIPFromHeader } from "@better-auth/core/utils/ip";
 import { resolveClientIp } from "@magnetosphere/auth";
 import { acquireLease } from "./lease.ts";
 import { assertClientIp, cronIntervalMinutes, type DbHandle, type Job, type Runtime } from "./types.ts";
@@ -22,6 +22,12 @@ export interface NodeRuntimeOptions {
   instanceId?: string;
   /** 주기 작업 예외 (기본 console.error) */
   onJobError?: (name: string, e: unknown) => void;
+  /**
+   * 신뢰 프록시가 아닌 상대가 X-Forwarded-For 를 보냈을 때 프로세스에서 한 번만 부른다 (기본 console.warn 한 줄).
+   * 프록시 설정(TRUSTED_PROXIES)을 빠뜨리면 모든 요청이 프록시 IP 하나로 묶이는데 시작 확인(TC-S4.T1.e)은 통과하므로,
+   * 그 신호를 여기서 낸다 (S4 보안 리뷰 M3, TC-S6.T2.e). 헤더 값은 클라이언트가 지어낼 수 있어 찍지 않는다.
+   */
+  onUntrustedForwardedFor?: (peer: string) => void;
 }
 
 export interface NodeRuntime extends Runtime {
@@ -72,6 +78,11 @@ export function createNodeRuntime(opts: NodeRuntimeOptions = {}): NodeRuntime {
   if (invalid.length) throw new Error(`신뢰 프록시 설정이 잘못됐다: ${invalid.join(", ")}`);
   const holder = opts.instanceId ?? `node-${randomUUID()}`;
   const onJobError = opts.onJobError ?? ((name, e) => console.error(`[runtime] 주기 작업 ${name} 실패`, e));
+  const onUntrusted =
+    opts.onUntrustedForwardedFor ??
+    ((peer: string) =>
+      console.warn(`[runtime] 신뢰 프록시가 아닌 ${peer} 가 X-Forwarded-For 를 보냈다. 무시하고 상대 주소로 센다. 프록시 뒤라면 TRUSTED_PROXIES 를 확인하라 (이 경고는 한 번만 나온다)`));
+  let warnedUntrusted = false;
   const peers = new WeakMap<Request, string>();
   const timers = new Set<NodeJS.Timeout>();
   let handle: Promise<DbHandle> | undefined;
@@ -112,7 +123,14 @@ export function createNodeRuntime(opts: NodeRuntimeOptions = {}): NodeRuntime {
     rateLimitStore: () => ({ storage: "database" }),
     secret: (name) => env[name],
     clientIp(req) {
-      return resolveClientIp(peers.get(req), req.headers.get("x-forwarded-for"), trustedProxies);
+      const peer = peers.get(req);
+      const xff = req.headers.get("x-forwarded-for");
+      // 상대가 신뢰 프록시면 상대 주소 하나로 된 사슬에서 신뢰하지 않는 홉이 없다 (getIPFromHeader 가 null)
+      if (!warnedUntrusted && xff && peer && (trustedProxies.length === 0 || getIPFromHeader(peer, { trustedProxies }) !== null)) {
+        warnedUntrusted = true;
+        onUntrusted(peer);
+      }
+      return resolveClientIp(peer, xff, trustedProxies);
     },
     bindPeer(req, peer) {
       if (peer) peers.set(req, peer);

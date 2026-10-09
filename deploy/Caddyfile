@@ -1,0 +1,23 @@
+# 공개 입구 (계획서 3장, 7장 "OmniRoute 노출", V16). docker-compose.yml 의 caddy 서비스가 쓴다.
+# - V16 허용 목록 9개 경로만 OmniRoute 로 넘긴다. * 는 한 구간만이라 정규식으로 쓴다 (Caddy 의 path 글롭 * 는 / 도 넘는다).
+# - 그 밖의 /v1, /v1/* 는 여기서 404 다. OmniRoute 의 관리·조회 별칭(/v1/registered-keys 등)이 회원 키로 열리는 것을 막는다.
+# - 나머지(/api/* 포함)는 회원 앱으로 간다. OmniRoute 대시보드와 /api/* 는 공개 주소에서 닿지 않는다.
+# 회원 앱은 edge 망 별칭(app-edge)으로만 부른다. app 은 TRUSTED_PROXIES 로 edge 망(Caddy)만 믿는다.
+# Caddy 는 신뢰 프록시 설정이 없으면 들어온 X-Forwarded-For 를 버리고 상대 주소로 새로 쓴다 (클라이언트가 지어낼 수 없다).
+# 앞에 다른 부하 분산기가 있으면 전역 옵션 servers { trusted_proxies static <주소> } 를 더한다.
+{$SITE_ADDRESS::80} {
+	@omniroute path_regexp ^/v1/(messages|messages/count_tokens|chat/completions|completions|responses|responses/[^/]+|embeddings|models|models/[^/]+)$
+	handle @omniroute {
+		reverse_proxy omniroute:20128
+	}
+
+	@v1 path /v1 /v1/*
+	handle @v1 {
+		header Content-Type application/json
+		respond `{"error":"not_found"}` 404
+	}
+
+	handle {
+		reverse_proxy app-edge:3000
+	}
+}
