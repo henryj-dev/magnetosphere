@@ -28,6 +28,8 @@ export interface Services {
   cipher: Cipher;
   /** OmniRoute 주소와 부트스트랩 비밀번호 (OMNIROUTE_URL, OMNIROUTE_INITIAL_PASSWORD). 없으면 null */
   omniroute: OmniRouteConfig;
+  /** 운영자가 정한 설치 토큰 (SETUP_TOKEN 시크릿). 없으면 무작위로 만들어 로그에 한 번 낸다 (setup/index.ts) */
+  setupToken?: string | null;
 }
 
 export interface AppDeps {

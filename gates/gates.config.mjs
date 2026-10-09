@@ -185,7 +185,8 @@ export const GATES = {
     waivable: false,
     outputs: [
       "scripts/init.mjs", "scripts/init.test.mjs", ".env.example", "docker-compose.yml", "deploy/**", ".dockerignore",
-      "apps/server/Dockerfile", "apps/server/wrangler.toml", "tests/e2e/**", "tests/deploy/**",
+      "apps/server/Dockerfile", "apps/server/wrangler.toml", "apps/server/vitest.workers.config.ts", "deploy/workers-deploy.mjs",
+      "tests/e2e/**", "tests/deploy/**",
     ],
     checks: [
       { id: "G-S6.1", how: "test", desc: "TC-S6.T1.a 필수 값이 모두 들어간다", cmd: nodeTest("scripts/init.test.mjs", "TC-S6.T1.a") },
@@ -201,6 +202,10 @@ export const GATES = {
       { id: "G-S6.18", how: "grep", desc: "대시보드 포트 루프백 고정", pattern: '"127\\.0\\.0\\.1:20128:20128"', in: ["docker-compose.yml"], op: "==", limit: 1 },
       { id: "G-S6.19", how: "test", requires: ["local-services"], desc: "TC-S6.T2.e Caddy 뒤 클라이언트별 계산·비신뢰 XFF 경고", cmd: 'pnpm test:deploy -t "TC-S6.T2.e"' },
       { id: "G-S6.20", how: "test", requires: ["local-services"], desc: "TC-S6.T2.f 빈 DB 에 마이그레이션 먼저 (세 프로필)", cmd: 'pnpm test:deploy -t "TC-S6.T2.f"' },
+      { id: "G-S6.8", how: "cmd", requires: ["local-services"], desc: "TC-S6.T3.a 세 환경 번들 (wrangler deploy --dry-run)", cmd: "pnpm -C apps/server dry-run:all" },
+      { id: "G-S6.21", how: "test", requires: ["local-services"], desc: "TC-S6.T3.b Workers 설치 토큰 되살리기 (wrangler dev + MySQL·PG 동시 경쟁)", cmd: 'pnpm -C apps/server test:workers -t "TC-S6.T3.b" && pnpm -C apps/server test:db -t "TC-S6.T3.b" --db mysql,pg' },
+      { id: "G-S6.22", how: "test", requires: ["local-services"], desc: "TC-S6.T3.c DB 시간대와 무관한 created_at (스키마 린트 R6 + 세션 시간대 비강제 연결)", cmd: 'node scripts/schema-lint.mjs && pnpm -C packages/runtime test:db -t "TC-S6.T3.c" --db mysql,mariadb,pg' },
+      { id: "G-S6.23", how: "test", requires: ["local-services"], desc: "TC-S6.T3.d Workers 배포 전 마이그레이션", cmd: 'pnpm -C apps/server test:workers -t "TC-S6.T3.d"' },
       { id: "G-S6.24", how: "grep", desc: "설치 운영 안내 (한 인스턴스)", pattern: "한 인스턴스", in: ["deploy/README.md"], op: ">=", limit: 1 },
       { id: "G-S6.25", how: "grep", desc: "Compose 신뢰 프록시 기본값", pattern: "TRUSTED_PROXIES", in: ["docker-compose.yml"], op: ">=", limit: 1 },
       { id: "G-S6.26", how: "test", desc: "TC-S6.T1.d OmniRoute 비밀번호는 .env.setup 에만", cmd: nodeTest("scripts/init.test.mjs", "TC-S6.T1.d") },

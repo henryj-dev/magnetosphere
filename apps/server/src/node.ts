@@ -1,7 +1,7 @@
 // Node 진입점 (Docker 조합). `node src/node.ts` 로 바로 띄운다 (Node 24 타입 지우기).
 //   환경 변수: DATABASE_URL, BETTER_AUTH_URL, BETTER_AUTH_SECRET, PORT(기본 3000), HOST(기본 0.0.0.0),
 //             APP_ENCRYPTION_KEY(32바이트 base64), TRUSTED_PROXIES(쉼표로 구분한 IP·CIDR, 예: Caddy), WEB_DIR(기본 apps/web/build),
-//             OMNIROUTE_URL, OMNIROUTE_INITIAL_PASSWORD (선택, setup/omniroute.ts)
+//             OMNIROUTE_URL, OMNIROUTE_INITIAL_PASSWORD (선택, setup/omniroute.ts), SETUP_TOKEN (선택, 운영자가 정한 설치 토큰)
 // 관리자가 없으면 시작할 때마다 새 설치 토큰을 만들어 한 번 출력한다 (setup/).
 // 시작할 때 clientIp 가 실제 요청에서 IP 를 정하는지 확인하고, 못 정하면 시작하지 않는다 (TC-S4.T1.e).
 // 관리자가 있는데 OMNIROUTE_INITIAL_PASSWORD 가 남아 있으면 시작할 때 경고 한 줄을 남긴다 (TC-S6.T2.g).
@@ -13,6 +13,7 @@ import type { MiddlewareHandler } from "hono";
 import { createNodeRuntime, listen, type NodeRuntime } from "@magnetosphere/runtime/node";
 import { createApp } from "./app.ts";
 import { buildServices } from "./config.ts";
+import { registerJobs } from "./jobs.ts";
 import { ensureSetupToken, warnLeftoverInitialPassword } from "./setup/index.ts";
 
 export const DEFAULT_WEB_DIR = fileURLToPath(new URL("../../web/build", import.meta.url));
@@ -50,8 +51,9 @@ export async function startNodeServer(opts: NodeServerOptions = {}) {
       carryRequest: (from, to) => runtime.carryPeer(from, to),
     });
     const port = opts.port ?? Number(env.PORT ?? 3000);
-    await ensureSetupToken(services.db, { rotate: true, log });
+    await ensureSetupToken(services.db, { rotate: true, log, fixedToken: services.setupToken });
     await warnLeftoverInitialPassword(services.db, services.omniroute.initialPassword, log);
+    registerJobs(runtime);
     const listening = await listen(runtime, app.fetch, { port, hostname: opts.hostname ?? env.HOST ?? "0.0.0.0" });
     return {
       port: listening.port,

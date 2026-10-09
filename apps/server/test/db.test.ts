@@ -6,6 +6,7 @@ import path from "node:path";
 import { connectNode } from "@magnetosphere/runtime/node";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDb, enabledDbs, LABEL, type DbKind } from "../../../packages/runtime/test/dbs.ts";
+import { ensureSetupToken } from "../src/setup/index.ts";
 import { ADMIN, boot, closeAll, post, tokenIn, TEST_ENCRYPTION_KEY, TEST_SECRET, type TestEnv } from "./helpers.ts";
 
 afterEach(closeAll);
@@ -25,6 +26,25 @@ async function envFor(kind: DbKind): Promise<TestEnv> {
 }
 
 describe.each(enabledDbs())("%s", (kind: DbKind) => {
+  describe("TC-S6.T3.b 처음 설치 상태 요청이 동시에 와도 토큰은 하나다 (Workers GET /api/setup 경로)", () => {
+    it(`${LABEL[kind]}: 빈 DB 에 ensureSetupToken(rotate: false) 10건 동시 → 예외 없음, 만든 토큰 1개, 출력 1줄, 행 1개`, async () => {
+      const db = await createTestDb(kind);
+      // 연결 풀(최대 10)이라 질의가 실제로 겹친다
+      const h = await connectNode(db.url);
+      try {
+        const lines: string[] = [];
+        const issued = await Promise.all(Array.from({ length: 10 }, () => ensureSetupToken(h, { rotate: false, log: (l) => lines.push(l) })));
+        expect(issued.filter(Boolean)).toHaveLength(1);
+        expect(lines).toHaveLength(1);
+        const rows = await h.db.select().from(h.schema.appSettings);
+        expect(rows.filter((r: { key: string }) => r.key === "setup_token_hash")).toHaveLength(1);
+      } finally {
+        await h.close();
+        await db.drop();
+      }
+    });
+  });
+
   describe("TC-S4.T4.f 동시에 설치 요청 10건이 와도 관리자는 하나다", () => {
     it(`${LABEL[kind]}: 같은 토큰으로 POST /api/setup 10건 동시 → 201 정확히 1개, 나머지 409·401, user 행 1개`, async () => {
       const r = await boot(await envFor(kind));

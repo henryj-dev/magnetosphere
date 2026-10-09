@@ -9,7 +9,9 @@
     "test:both-runtimes": "vitest run --config vitest.both-runtimes.config.ts",
     "test:db": "node scripts/test-db.mjs",
     "typecheck": "tsc --noEmit",
-    "test:contract": "vitest run --config vitest.contract.config.ts"
+    "test:contract": "vitest run --config vitest.contract.config.ts",
+    "dry-run:all": "pnpm -C ../web build && wrangler deploy --dry-run --env d1 --outdir .wrangler/dry-run/d1 && wrangler deploy --dry-run --env mysql --outdir .wrangler/dry-run/mysql && wrangler deploy --dry-run --env pg --outdir .wrangler/dry-run/pg",
+    "test:workers": "vitest run --config vitest.workers.config.ts"
   },
   "dependencies": {
     "@hono/node-server": "2.1.1",

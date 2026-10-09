@@ -77,19 +77,55 @@ async function deleteCount(h: DbHandle, table: any, where: unknown): Promise<num
   return (await h.db.delete(table).where(where).returning()).length;
 }
 
+/** 운영자가 출력을 못 본 채 잃었을 수 있는 설치 토큰을 다시 만드는 나이 (Workers, S4 보안 리뷰 M2) */
+export const SETUP_TOKEN_MAX_AGE_MS = 15 * 60_000;
+
 export interface IssueOptions {
   log: (line: string) => void;
-  /** true 면 이미 있는 토큰을 새로 바꾼다 (Node 시작 때). false 면 없을 때만 만든다 (Workers 첫 요청) */
+  /** true 면 이미 있는 토큰을 새로 바꾼다 (Node 시작 때). false 면 없거나 15분보다 오래됐을 때만 만든다 (Workers GET /api/setup) */
   rotate: boolean;
+  /**
+   * 운영자가 정한 설치 토큰 (SETUP_TOKEN 시크릿). 있으면 무작위로 만들지 않고 이 값의 해시를 두며, 로그에 토큰을 내지 않는다.
+   * 운영자가 이미 아는 값이라 출력을 잃을 일이 없다.
+   */
+  fixedToken?: string | null;
+  now?: () => Date;
 }
 
-/** 관리자가 없으면 설치 토큰을 만들어 log 로 한 번 내보낸다. 만든 토큰(없으면 null)을 돌려준다 */
+/** 설치 토큰 행을 없을 때만 넣는다. 넣었으면 true (동시에 둘이 넣어도 하나만 true, 고유 키 충돌로 500 이 나지 않는다) */
+async function insertTokenIfAbsent(h: DbHandle, hash: string, at: Date): Promise<boolean> {
+  const t = h.schema.appSettings;
+  const row = { key: SETUP_TOKEN_KEY, value: JSON.stringify(hash), updatedAt: at, updatedBy: null };
+  if (h.provider === "mysql") {
+    const [r] = await h.db.insert(t).ignore().values(row);
+    return r.affectedRows === 1;
+  }
+  return (await h.db.insert(t).values(row).onConflictDoNothing().returning()).length === 1;
+}
+
+/**
+ * 관리자가 없으면 설치 토큰을 정한다. 무작위로 만든 토큰은 log 로 한 번 내보낸다. 새로 정한 토큰(없으면 null)을 돌려준다.
+ * - rotate: 있던 토큰을 지우고 새로 만든다 (Node 는 시작할 때마다 새 토큰을 출력한다).
+ * - rotate 가 아니면: 없을 때, 또는 저장한 토큰이 SETUP_TOKEN_MAX_AGE_MS 보다 오래됐을 때만 만든다. 옛 행을 그 값 그대로일 때만
+ *   지우고(조건부 삭제) 없을 때만 넣으므로(조건부 쓰기) 처음 GET 이 동시에 여럿 와도 토큰은 하나, 출력도 한 번이다.
+ */
 export async function ensureSetupToken(h: DbHandle, opts: IssueOptions): Promise<string | null> {
   if (await adminExists(h)) return null;
-  if (!opts.rotate && (await readSetting(h, SETUP_TOKEN_KEY)) !== undefined) return null;
-  const token = newToken();
-  await writeSetting(h, SETUP_TOKEN_KEY, await sha256Hex(token), null);
-  opts.log(`[setup] 최초 설치 토큰: ${token}\n[setup] /setup 화면에 넣어 첫 관리자를 만든다. 다시 출력하지 않는다.`);
+  const now = opts.now?.() ?? new Date();
+  const t = h.schema.appSettings;
+  const fixed = opts.fixedToken?.trim() || null;
+  const token = fixed ?? newToken();
+  const hash = await sha256Hex(token);
+  const [row] = await h.db.select({ value: t.value, updatedAt: t.updatedAt }).from(t).where(eq(t.key, SETUP_TOKEN_KEY));
+  if (row) {
+    if (fixed && JSON.parse(row.value) === hash) return null;
+    const fresh = now.getTime() - new Date(row.updatedAt).getTime() < SETUP_TOKEN_MAX_AGE_MS;
+    if (!opts.rotate && !fixed && fresh) return null;
+    // 그사이 다른 요청이 바꿨으면 지우지 못한다. 그쪽 토큰을 그대로 둔다
+    if ((await deleteCount(h, t, and(eq(t.key, SETUP_TOKEN_KEY), eq(t.value, row.value)))) !== 1) return null;
+  }
+  if (!(await insertTokenIfAbsent(h, hash, now))) return null;
+  if (!fixed) opts.log(`[setup] 최초 설치 토큰: ${token}\n[setup] /setup 화면에 넣어 첫 관리자를 만든다. 다시 출력하지 않는다.`);
   return token;
 }
 

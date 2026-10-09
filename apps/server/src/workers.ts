@@ -4,6 +4,7 @@
 import { createWorkersRuntime, type WorkersEnv } from "@magnetosphere/runtime/workers";
 import { createApp, type Services } from "./app.ts";
 import { buildServices } from "./config.ts";
+import { registerJobs } from "./jobs.ts";
 import { warnLeftoverInitialPassword } from "./setup/index.ts";
 
 interface Env extends WorkersEnv {
@@ -12,6 +13,10 @@ interface Env extends WorkersEnv {
 
 interface ExecutionContext {
   waitUntil(p: Promise<unknown>): void;
+}
+
+interface ScheduledController {
+  cron: string;
 }
 
 // isolate 하나에서 OMNIROUTE_INITIAL_PASSWORD 남음 경고를 한 번만 확인한다 (Workers 는 시작 시점이 없어 첫 요청 때, TC-S6.T2.g)
@@ -47,4 +52,14 @@ export default {
     }
   },
 
+  // Cron Trigger (wrangler.toml [triggers]). 같은 cron 에 등록된 작업을 돌고 DB 연결을 닫는다
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    const runtime = createWorkersRuntime(env);
+    registerJobs(runtime);
+    try {
+      await runtime.runScheduled(controller.cron);
+    } finally {
+      ctx.waitUntil(runtime.close());
+    }
+  },
 };

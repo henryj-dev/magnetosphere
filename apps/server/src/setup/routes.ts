@@ -1,5 +1,6 @@
 // 최초 설치 API.
-//   GET  /api/setup  → { needed } 관리자가 없으면 true. issueTokenOnStatus 면 토큰이 없을 때 만든다 (Workers 는 시작 시점이 없다)
+//   GET  /api/setup  → { needed } 관리자가 없으면 true. issueTokenOnStatus 면 토큰이 없거나 15분보다 오래됐을 때 만든다
+//                      (Workers 는 시작 시점이 없다. SETUP_TOKEN 시크릿이 있으면 그 값을 쓰고 출력하지 않는다)
 //   POST /api/setup  → 201 { ok, omniroute: "connected" | "manual_required" } | 400 입력 오류 | 401 토큰 틀림 | 409 이미 설치됨
 //                      관리자를 만든 뒤 OmniRoute 토큰을 자동으로 만든다. 실패해도 201 이고 omniroute 가 manual_required 다
 // OmniRoute 토큰 (관리자 세션만, 계획서 4.7 3번 "토큰 붙여 넣기")
@@ -30,7 +31,7 @@ export function setupRoutes(services: () => Promise<Services>, opts: { issueToke
   const r = new Hono();
   r.get("/", async (c) => {
     const s = await services();
-    if (opts.issueTokenOnStatus) await ensureSetupToken(s.db, { rotate: false, log: opts.log });
+    if (opts.issueTokenOnStatus) await ensureSetupToken(s.db, { rotate: false, log: opts.log, fixedToken: s.setupToken });
     return c.json({ needed: !(await adminExists(s.db)) });
   });
   r.post("/", async (c) => {

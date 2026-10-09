@@ -1,0 +1,58 @@
+# 회원 앱 Workers 배포 설정 (실행판 S6.T3, 계획서 3.2). 환경 셋: d1 · mysql(Hyperdrive) · pg(Hyperdrive).
+#   배포:   node deploy/workers-deploy.mjs --env d1|mysql|pg   (마이그레이션 먼저, deploy/README.md)
+#   번들 확인: pnpm -C apps/server dry-run:all
+# 아래 D1 database_id·Hyperdrive id 는 자리 표시 값이다. 배포 전에 실제 값으로 바꾼다.
+# 시크릿(wrangler secret put): BETTER_AUTH_SECRET, APP_ENCRYPTION_KEY, SETUP_TOKEN(권장). 설치 때만 OMNIROUTE_INITIAL_PASSWORD.
+# 요청 수 제한은 KV 가 아니라 DB rate_limit 테이블이다 (계획서 v5.5 3.2). KV 바인딩이 없다.
+# vars·d1_databases·hyperdrive 는 환경으로 물려지지 않아 환경마다 적는다.
+name = "magnetosphere"
+main = "src/workers.ts"
+# wrangler 4.115.0 의 workerd 는 2026-07-29 까지 받는다 (V27). mysql2·better-auth 에 nodejs_compat 이 필요하다
+compatibility_date = "2026-07-29"
+compatibility_flags = ["nodejs_compat"]
+
+# 모든 요청이 Worker 를 먼저 거친다. 정적 파일에도 보안 헤더를 단다 (TC-S4.T3.f)
+[assets]
+directory = "../web/build"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = true
+
+# 주기 작업 (src/jobs.ts 의 JOB_CRON 과 같다)
+[triggers]
+crons = ["*/5 * * * *"]
+
+# ---------- Workers + D1 ----------
+[env.d1]
+name = "magnetosphere-d1"
+
+[env.d1.vars]
+BETTER_AUTH_URL = "https://magnetosphere.example.com"
+
+[[env.d1.d1_databases]]
+binding = "DB"
+database_name = "magnetosphere"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "../../packages/db/migrations/sqlite"
+
+# ---------- Workers + MySQL (Hyperdrive) ----------
+[env.mysql]
+name = "magnetosphere-mysql"
+
+[env.mysql.vars]
+BETTER_AUTH_URL = "https://magnetosphere.example.com"
+
+[[env.mysql.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "00000000000000000000000000000001"
+
+# ---------- Workers + Postgres (Hyperdrive) ----------
+[env.pg]
+name = "magnetosphere-pg"
+
+[env.pg.vars]
+BETTER_AUTH_URL = "https://magnetosphere.example.com"
+
+[[env.pg.hyperdrive]]
+binding = "HYPERDRIVE"
+id = "00000000000000000000000000000002"
