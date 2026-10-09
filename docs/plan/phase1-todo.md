@@ -1096,6 +1096,9 @@ TC-S6.T4.a ~ f  조합마다 설치 → 관리자 → 부트스트랩 → 로그
 - S6 → S7.T1 (CI 에서 E2E·배포 시험 돌리기): `pnpm e2e --combo docker-*`·`pnpm test:deploy` 는 `apps/server/Dockerfile` 로 이미지를 만들고(`magnetosphere-app:local`) Compose 묶음을 빈 볼륨으로 띄운다. 호스트 포트는 28480·28490·28580 만 쓰고 OmniRoute 대시보드 포트는 시험 덧씌우기(`tests/deploy/compose.test.yml`)가 닫는다. `workers-*` 는 계약 환경 OmniRoute(`tests/contract`, 127.0.0.1:20170)와 `docker-compose.test.yml` 의 MySQL(33306)·Postgres(35432)를 쓴다 (없으면 띄운다). 잡마다 docker·pnpm install·`apps/web` 빌드가 필요하다. 묶음 하나가 1GB 남짓 메모리를 쓰므로 조합은 매트릭스 잡으로 나눈다.
 - S6: Workers 운영의 OmniRoute 연결(Caddy 관리 호스트 + 비밀 헤더 + Tunnel, V24)은 아직 없다. Workers 배포는 설치 화면에서 토큰을 붙여 넣는다 → 8단계.
 - S6: `wrangler.toml` 의 D1 `database_id`·Hyperdrive `id` 는 자리 표시 값이다. 실제 배포 때 운영자가 바꾼다 (deploy/README.md).
+- S6 보안 리뷰 L3: edge 망 신뢰를 caddy 고정 주소 /32 로 좁히고, TRUSTED_PROXIES 기본값을 EDGE_SUBNET 에 맞춘다 (지금은 둘을 따로 바꿔야 한다).
+- S6 보안 리뷰: Workers 쪽에서 OmniRoute 가 3xx 를 돌려줄 때 따라가지 않고 오류가 되는지 보는 테스트 (redirect: "manual" 로 바꾼 경로).
+- S6 보안 리뷰: compose.test.yml 로 덮어쓰지 않은 .env.setup 기본 경로(저장소 최상위)를 app 이 읽는지 확인하는 테스트.
 - S4 보안 리뷰 L4: `job_leases` 임대 TTL 이 주기보다 5초 짧을 뿐이라, 작업이 주기보다 오래 걸리면 다음 경계에서 다른 인스턴스가 같은 작업을 겹쳐 돈다. 작업 중 임대 연장(하트비트)과 펜싱 토큰(임대마다 늘어나는 번호를 작업 결과 쓰기에 붙여 늦게 끝난 쪽의 쓰기를 거부)을 검토한다.
 
 ### ☐ S7.T1 — CI 매트릭스
