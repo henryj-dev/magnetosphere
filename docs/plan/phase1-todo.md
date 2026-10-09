@@ -519,6 +519,7 @@ TC-S3.T1.e  Better Auth 구성과 스키마 생성기가 같은 옵션 객체를
 【작업】
 1. 공통 인터페이스 `send({to, subject, text, html})`. SMTP(nodemailer, Node 전용 — 진입점 `@magnetosphere/auth/mail/smtp`로만 내보내 Workers 가 부르는 `.`·`./mail`에 섞이지 않게), Resend(fetch), Cloudflare Email Service(Workers 바인딩/REST), 콘솔. 인증 메일·비밀번호 재설정 메일 연결. 커밋.
    - 실측: Better Auth 는 가입 때 `sendVerificationEmail` 예외를 잡아 기록만 하고 가입은 200 으로 끝낸다 ("Failed to run background task"). 메일 실패를 가입 실패로 바꾸지 않는다. 재전송은 `/send-verification-email`.
+   - 메일 전송은 응답과 떼어 낸다 (S3 보안 리뷰 M1). 설정 `waitUntil(p)`(Workers 는 `ctx.waitUntil`, Node 는 흘려보냄)에 전송 약속을 넘기고 곧바로 돌아오며, 실패는 `onMailError(e, {to, subject})`로 넘긴다. Better Auth 의 다른 백그라운드 작업도 `advanced.backgroundTasks.handler`(1.7.7 이름)로 같은 `waitUntil`에 넘긴다.
 
 【테스트】
 ```
@@ -535,10 +536,15 @@ TC-S3.T2.c  Resend·Cloudflare 어댑터가 올바른 요청을 만든다
 TC-S3.T2.d  비밀번호 재설정 메일의 토큰은 한 번만 쓰인다
   단언:  재설정 링크로 변경 성공 → 같은 링크 재사용 → 실패(4xx)
   검출:  유출된 재설정 링크로 비밀번호를 다시 바꾸는 것
+TC-S3.T2.e  메일 전송 시간으로 계정 존재 여부가 드러나지 않는다 (S3 보안 리뷰 M1)
+  단언:  300ms 걸리는 가짜 메일러 → /request-password-reset, /sign-up/email 각각 있는 계정·없는 계정을 7번씩 재
+         응답 시간 중앙값 차이 < 50ms. 메일 전송 실패 → onMailError 로 그 예외가 넘어감 (L4)
+  검출:  메일 전송을 기다려 재설정은 있는 계정 306ms·없는 계정 4ms, 가입은 있는 계정 61ms·없는 계정 355ms 로 갈려
+         요청 몇 번으로 가입 여부를 알아내는 것 (리뷰 실측). 메일 실패가 기록만 되고 운영자에게 안 닿는 것
 ```
 
 【통과】
-- [ ] G-S3.5 ~ G-S3.8 통과
+- [ ] G-S3.5 ~ G-S3.8, G-S3.15 통과
 
 ### ☐ S3.T3 — 인증 경로 요청 수 제한과 클라이언트 IP
 선행 S3.T1 · 산출 `packages/auth/src/rate-limit.ts` · 되돌리기 커밋 1개
@@ -582,6 +588,7 @@ TC-S3.T3.c  신뢰 프록시 뒤에서는 실제 클라이언트별로 센다
 | G-S3.12 | Better Auth 버전 고정 | json `packages/auth/package.json` `dependencies.better-auth` | `"1.7.7"` (범위 기호 없음) |
 | G-S3.13 | `input: false` 다섯 칼럼 | grep `(role\|status\|monthlyLimitUsd\|maxKeys\|isBootstrapAdmin): \{ type: [^}]*input:\s*false` in `packages/db/src/schema/common.ts` (`USER_ADDITIONAL_FIELDS`, auth 구성이 `AUTH_SCHEMA_OPTIONS`로 그대로 씀) | == 5 |
 | G-S3.14 | TC-S3.T1.e | `pnpm -C packages/auth test -t "TC-S3.T1.e"` | 종료코드 0 |
+| G-S3.15 | TC-S3.T2.e | `pnpm -C packages/auth test -t "TC-S3.T2.e"` | 종료코드 0 |
 
 `node scripts/gate.mjs S3 --seal`
 

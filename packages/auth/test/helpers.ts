@@ -17,7 +17,24 @@ export function outboxMailer() {
 
 export function makeAuth(h: TestDb, extra: Partial<AuthConfig> = {}) {
   const { outbox, mailer } = outboxMailer();
-  return { ...createAuth({ database: h, baseURL: BASE, secret: SECRET, trustedOrigins: [BASE], mailer, clientIp: randomIp, ...extra }), outbox };
+  // 메일은 응답과 떼어 보내진다. pending 에 모아 두고 settle() 로 끝날 때까지 기다린다.
+  const pending: Promise<unknown>[] = [];
+  const mailErrors: unknown[] = [];
+  const app = createAuth({
+    database: h,
+    baseURL: BASE,
+    secret: SECRET,
+    trustedOrigins: [BASE],
+    mailer,
+    clientIp: randomIp,
+    waitUntil: (p) => void pending.push(p),
+    onMailError: (e) => void mailErrors.push(e),
+    ...extra,
+  });
+  const settle = async () => {
+    while (pending.length) await Promise.all(pending.splice(0));
+  };
+  return { ...app, outbox, mailErrors, settle };
 }
 
 /** 메일 본문에서 링크 하나를 꺼낸다 */

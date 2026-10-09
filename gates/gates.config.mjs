@@ -103,6 +103,7 @@ export const GATES = {
       // 칼럼 이름과 input: false 가 한 줄에 있는 정의만 센다 (주석·TABLES 의 칼럼 정의는 걸리지 않는다).
       { id: "G-S3.13", how: "grep", desc: "권한 칼럼 다섯 input: false", pattern: "(role|status|monthlyLimitUsd|maxKeys|isBootstrapAdmin): \\{ type: [^}]*input:\\s*false", in: ["packages/db/src/schema/common.ts"], op: "==", limit: 5 },
       { id: "G-S3.14", how: "test", desc: "TC-S3.T1.e 구성과 스키마가 같은 옵션", cmd: 'pnpm -C packages/auth test -t "TC-S3.T1.e"' },
+      { id: "G-S3.15", how: "test", desc: "TC-S3.T2.e 메일 전송 시간으로 계정 존재 노출 없음", cmd: 'pnpm -C packages/auth test -t "TC-S3.T2.e"' },
     ],
   },
   S4: {

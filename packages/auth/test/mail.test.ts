@@ -35,6 +35,7 @@ describe("인증·재설정 메일 (SQLite)", () => {
     const e = email("verify");
     const c = client(app.handler);
     expect((await c.post("/sign-up/email", { email: e, password: PASSWORD, name: "x" })).status).toBe(200);
+    await app.settle();
     expect(lines.join("\n")).toContain(VERIFY_SUBJECT);
     const url = linkIn(lines.join("\n"));
     expect(url, "콘솔 출력에 링크 없음").toBeDefined();
@@ -54,6 +55,7 @@ describe("인증·재설정 메일 (SQLite)", () => {
     await markVerified(h, e);
     app.outbox.length = 0;
     expect((await c.post("/request-password-reset", { email: e, redirectTo: "/reset" })).status).toBe(200);
+    await app.settle();
     const mail = app.outbox.find((m) => m.subject === RESET_SUBJECT && m.to === e.toLowerCase());
     expect(mail, "재설정 메일 없음").toBeDefined();
     const link = linkIn(mail!.text)!;

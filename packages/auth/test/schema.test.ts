@@ -47,7 +47,7 @@ export function diffAuthTables(options: Parameters<typeof getAuthTables>[0]): st
   return problems;
 }
 
-const options = () => authOptions({ database: { db: {}, provider: "sqlite", schema: {} }, baseURL: BASE, secret: SECRET, mailer: consoleMailer(), clientIp: () => null });
+const options = () => authOptions({ database: { db: {}, provider: "sqlite", schema: {} }, baseURL: BASE, secret: SECRET, mailer: consoleMailer(), clientIp: () => null, waitUntil: () => {}, onMailError: () => {} });
 
 describe("TC-S3.T1.e 구성과 스키마", () => {
   test("TC-S3.T1.e Better Auth 구성의 테이블이 공통 정의와 같다", () => {

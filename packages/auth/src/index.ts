@@ -7,7 +7,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { createAuthMiddleware } from "better-auth/api";
 import { AUTH_SCHEMA_OPTIONS } from "@magnetosphere/db/src/auth-options.ts";
 import { resetPasswordMessage, verifyEmailMessage } from "./mail/messages.ts";
-import type { Mailer } from "./mail/types.ts";
+import type { MailMessage, Mailer } from "./mail/types.ts";
 import { ipAddressOptions, rateLimitOptions, withClientIp, type ClientIp } from "./rate-limit.ts";
 
 export type { Mailer, MailMessage } from "./mail/types.ts";
@@ -46,6 +46,13 @@ export interface AuthConfig {
   mailer: Mailer;
   /** 런타임 어댑터의 clientIp(req). 요청 수 제한과 세션 IP 기록이 이 값을 쓴다 (src/rate-limit.ts) */
   clientIp: ClientIp;
+  /**
+   * 메일 전송 약속을 요청 뒤까지 살려 둔다. Workers 는 ctx.waitUntil, Node 는 그냥 흘려보내도 된다 ((p) => void p).
+   * Better Auth 의 다른 백그라운드 작업(advanced.backgroundTasks.handler, 1.7.7 이름)도 이 함수로 넘긴다.
+   */
+  waitUntil: (p: Promise<unknown>) => void;
+  /** 메일 전송 실패. 응답과 떼어 보내므로 요청은 실패를 모른다. 메시지에는 토큰 링크가 있어 넘기지 않는다 */
+  onMailError: (e: unknown, info: { to: string; subject: string }) => void;
 }
 
 /** 가입·로그인 요청의 이메일을 다듬는다. Better Auth 도 소문자로 바꾸지만 앞뒤 공백까지 우리가 먼저 정리한다 (V26). */
@@ -57,8 +64,21 @@ const normalizeEmailBody = createAuthMiddleware(async (ctx) => {
   return { context: { body: { ...ctx.body, email: email.trim().toLowerCase() } } };
 });
 
+/**
+ * 메일을 응답과 떼어 보낸다. Better Auth 는 sendVerificationEmail·sendResetPassword 를 기다리므로(runInBackgroundOrAwait),
+ * 기다리면 메일을 보내는 경우(있는 계정의 재설정, 없는 계정의 가입)만 응답이 느려져 계정 존재 여부가 드러난다.
+ * 그래서 전송 약속을 waitUntil 에 넘기고 곧바로 돌아온다. 실패는 onMailError 로 넘긴다.
+ */
+function deliverer(cfg: AuthConfig) {
+  return async (msg: MailMessage) => {
+    const sending = cfg.mailer.send(msg).catch((e) => cfg.onMailError(e, { to: msg.to, subject: msg.subject }));
+    cfg.waitUntil(sending);
+  };
+}
+
 /** Better Auth 옵션. 스키마 비교(TC-S3.T1.e)도 이 함수의 결과를 쓴다. */
 export function authOptions(cfg: AuthConfig) {
+  const deliver = deliverer(cfg);
   return {
     ...AUTH_SCHEMA_OPTIONS,
     baseURL: cfg.baseURL,
@@ -70,11 +90,11 @@ export function authOptions(cfg: AuthConfig) {
       ...AUTH_SCHEMA_OPTIONS.emailAndPassword,
       // 인증 전에는 로그인되지 않는다 (계획서 4.2 "인증 후 키 발급"의 전제)
       requireEmailVerification: true,
-      sendResetPassword: async ({ user, url }) => cfg.mailer.send(resetPasswordMessage(user.email, url)),
+      sendResetPassword: async ({ user, url }) => deliver(resetPasswordMessage(user.email, url)),
     },
     emailVerification: {
       sendOnSignUp: true,
-      sendVerificationEmail: async ({ user, url }) => cfg.mailer.send(verifyEmailMessage(user.email, url)),
+      sendVerificationEmail: async ({ user, url }) => deliver(verifyEmailMessage(user.email, url)),
     },
     // 로그인·가입·비밀번호 재설정 요청 수 제한. 저장소는 AUTH_SCHEMA_OPTIONS 의 DB(rate_limit)
     rateLimit: rateLimitOptions(AUTH_SCHEMA_OPTIONS.rateLimit),
@@ -82,6 +102,7 @@ export function authOptions(cfg: AuthConfig) {
     hooks: { before: normalizeEmailBody },
     advanced: {
       ipAddress: ipAddressOptions,
+      backgroundTasks: { handler: cfg.waitUntil },
       // 개발용 http 기준 주소에서도 Secure 를 붙인다. 쿠키 이름에 __Secure- 접두사가 붙는다.
       useSecureCookies: true,
       defaultCookieAttributes: { httpOnly: true, secure: true, sameSite: "lax" },

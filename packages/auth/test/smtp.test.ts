@@ -29,6 +29,8 @@ describe("SMTP (mailpit)", () => {
     const app = makeAuth(h, { mailer: smtpMailer(SMTP) });
     const e = email("smtp").toLowerCase();
     expect((await client(app.handler).post("/sign-up/email", { email: e, password: PASSWORD, name: "x" })).status).toBe(200);
+    await app.settle();
+    expect(app.mailErrors).toEqual([]);
     const msgs = await received(e);
     expect(msgs).toHaveLength(1);
     expect(msgs[0].Subject).toBe(VERIFY_SUBJECT);
