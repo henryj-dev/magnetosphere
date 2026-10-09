@@ -3,9 +3,10 @@
 작성일: 2026-10-09
 
 실행판(1단계)은 [`../plan/phase1-todo.md`](../plan/phase1-todo.md) 다.
-상태: 초안 v5.2 (설계 검토 1회 + S1 확인 반영)
+상태: 초안 v5.3 (설계 검토 1회 + S1 확인 반영)
 
 변경 이력
+- v5.3: S1 Better Auth 확인 반영 (V17·V26). SQLite 드라이버를 libsql로 고정, Drizzle 어댑터 `transaction: true` 필수, 권한 칼럼 입력 차단의 실제 동작.
 - v5.2: S1 확인 결과 반영 (`../verify/`). 부트스트랩 API 확정(`POST /api/cli/connect`), 관리 토큰 `write` 범위와 그 권한 상승 한계, 키 끄기 즉시 반영, Caddy 허용 목록 9개, OmniRoute 필수 비밀 값은 `INITIAL_PASSWORD` 하나.
 - v5.1: 지원 DB를 SQLite, MySQL, Postgres, D1 네 가지로 확정. 런타임 조합과 스키마 작성 규칙 추가.
 - v5: 설계 검토(critic) 반영 + 범위 결정. 회원별 키 여러 개(관리자가 최대 개수 지정)와 "남은 한도 분배" 방식, Caddy 허용 목록, OmniRoute 부트스트랩, 권한 칼럼 입력 차단, 메일 없을 때 정책 제한, 키 목표 상태 계산, 세션 무효화 추가. 런타임은 Node(SQLite·Postgres)와 Workers(D1·Postgres)를 처음부터 지원. 부가기능은 2차로, SSO는 OIDC 먼저 SAML 다음.
@@ -102,7 +103,7 @@ SAML·OIDC 프로토콜은 직접 구현하지 않는다.
 
 | 조합 | 회원 앱 | 회원 앱 DB | 작업 실행 | 요청 수 제한 저장소 |
 |---|---|---|---|---|
-| Docker + SQLite (기본) | Node 컨테이너 1개 | SQLite 파일 (better-sqlite3 또는 libSQL) | 프로세스 안 스케줄러 | 메모리 |
+| Docker + SQLite (기본) | Node 컨테이너 1개 | SQLite 파일 (libSQL `@libsql/client`) | 프로세스 안 스케줄러 | 메모리 |
 | Docker + MySQL | Node 컨테이너 (여러 개 가능) | MySQL 8.0+ / MariaDB 10.11+ (InnoDB) | 프로세스 안 스케줄러 + DB 임대 잠금 | DB 또는 Redis |
 | Docker + Postgres | Node 컨테이너 (여러 개 가능) | Postgres 14+ | 프로세스 안 스케줄러 + DB 임대 잠금 | DB 또는 Redis |
 | Workers + D1 | Workers | D1 | Cron Trigger | KV |
@@ -120,7 +121,10 @@ DB 지원 원칙
   - JSON 값은 문자열로 저장하고 앱에서 파싱한다. DB별 JSON 연산은 쓰지 않는다.
   - 금액은 `REAL` 대신 소수 자리를 정한 `DECIMAL(12,6)`(SQLite·D1은 실수)로 둔다.
   - 대소문자 구분: 이메일은 소문자로 바꿔 저장한다. MySQL 기본 정렬 규칙은 대소문자를 구분하지 않아 다른 DB와 결과가 달라질 수 있다.
-  - 트랜잭션: SQLite·MySQL(InnoDB)·Postgres는 대화형 트랜잭션을 쓴다. D1만 배치(batch)로 대신하고, 트랜잭션이 꼭 필요한 기능은 D1에서 따로 처리한다 (아래 D1 제약).
+  - SQLite 드라이버는 libSQL만 쓴다. better-sqlite3는 트랜잭션이 동기 전용이라 Better Auth 트랜잭션 경로에서 500이 나고, 그러면서도 user 행이 남아 원자성이 깨진다 (V26).
+  - Better Auth Drizzle 어댑터는 네 DB 모두 `drizzleAdapter(db, { transaction: true })`. 기본값 false면 SSO 로그인이 `SSO_USER_RESOLUTION_REQUIRES_NATIVE_TRANSACTIONS`로 거부된다 (V26).
+  - Better Auth는 이메일을 소문자로 바꿔 저장한다. Better Auth를 거치지 않고 이메일을 쓰거나 찾는 우리 코드도 같은 규칙을 따른다. 직접 넣으면 SQLite·Postgres는 대소문자 중복을 받고 MySQL·MariaDB는 정렬 규칙 때문에 거부해 DB마다 결과가 달라진다 (V26).
+  - 트랜잭션: SQLite(libSQL)·MySQL(InnoDB)·Postgres는 대화형 트랜잭션을 쓴다. D1만 배치(batch)로 대신하고, 트랜잭션이 꼭 필요한 기능은 D1에서 따로 처리한다 (아래 D1 제약).
 
 - OmniRoute는 어느 조합이든 상시 서버 1대(Docker)에서 돈다. Workers 조합은 회원 앱만 Workers로 옮긴 형태다.
 - 플랫폼 의존 코드는 `src/runtime/` 어댑터로 모은다: DB 연결, 작업 스케줄, 요청 수 제한 저장소, 비밀 값 읽기, 클라이언트 IP 얻기.
@@ -237,7 +241,8 @@ DB 지원 원칙
 ### 4.6 권한 칼럼 보호
 
 - Better Auth `user` 테이블에 더하는 칼럼(`role`, `status`, `monthly_limit_usd`, `max_keys`, `is_bootstrap_admin`)은 모두 `input: false`로 둔다. Better Auth 추가 칼럼은 기본이 입력 허용이라, 지정하지 않으면 가입·회원정보 수정 요청 본문에 `role=admin`을 넣어 관리자가 될 수 있다.
-- 이 칼럼은 관리자 API에서만 바꾼다. 회귀 테스트로 "가입 요청에 `role`을 넣어도 무시됨"을 검사한다.
+- 실제 동작 (V17): 회원정보 수정은 다섯 칼럼 모두 `400 FIELD_NOT_ALLOWED`. 가입은 기본값이 있는 칼럼(`role`, `status`, `is_bootstrap_admin`)을 조용히 기본값으로 바꿔 200, 기본값이 없는 칼럼(`monthly_limit_usd`, `max_keys`)은 400. 어느 경우든 DB에는 기본값이 남는다.
+- 이 칼럼은 관리자 API에서만 바꾼다. 회귀 테스트는 칼럼마다 따로 보내 "200 + 기본값 유지" 또는 "400 + 계정 미생성"을 통과로 본다.
 
 ### 4.7 최초 설치
 
