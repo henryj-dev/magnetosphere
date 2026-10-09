@@ -875,10 +875,13 @@ TC-S5.T3.d  붙여 넣기 입력은 관리자 세션만, write 범위 토큰만 
   단언:  manual_required 설치 뒤 PUT /api/setup/omniroute → 세션 없음 401, 회원 403, JSON 아님 415, 가짜 토큰 400 invalid_token,
          read 토큰 400 scope_not_write, write 토큰 200 connected 이고 저장값은 "v1:" 암호문
   검출:  manual_required 를 되돌릴 길이 없거나, 아무나·아무 범위 토큰으로 회원 앱의 OmniRoute 연결을 바꾸는 것
+TC-S5.T3.e  발급 뒤 확인·저장이 실패하면 회수할 토큰 id 를 남긴다
+  단언:  실제 OmniRoute 에서 발급 뒤 암호화 실패·whoami 500 → manual_required, 이유에 "토큰 tok_…" 있고 "oma_live_" 없음. 발급 전 실패면 id 없음
+  검출:  쓰지 않는 10년짜리 write 토큰이 OmniRoute 에 남는데 운영자가 그 존재를 모르는 것 (S5 보안 리뷰 L2)
 ```
 
 【통과】
-- [ ] G-S5.10 ~ G-S5.12, G-S5.15 통과
+- [ ] G-S5.10 ~ G-S5.12, G-S5.15, G-S5.18 통과
 
 ## 🚪 GATE S5
 
@@ -893,6 +896,7 @@ TC-S5.T3.d  붙여 넣기 입력은 관리자 세션만, write 범위 토큰만 
 | G-S5.15 | TC-S5.T3.d | `pnpm test:contract -t "TC-S5.T3.d"` | 종료코드 0 |
 | G-S5.16 | TC-S5.T2.j | `pnpm test:contract -t "TC-S5.T2.j"` | 종료코드 0 |
 | G-S5.17 | TC-S5.T2.k | `pnpm test:contract -t "TC-S5.T2.k"` | 종료코드 0 |
+| G-S5.18 | TC-S5.T3.e | `pnpm test:contract -t "TC-S5.T3.e"` | 종료코드 0 |
 
 `node scripts/gate.mjs S5 --seal`
 

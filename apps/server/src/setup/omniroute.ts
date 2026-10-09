@@ -70,6 +70,7 @@ export async function bootstrapOmniRoute(
 ): Promise<{ status: OmniRouteStatus; reason?: string }> {
   if (!cfg.baseUrl) return { status: "manual_required", reason: "OMNIROUTE_URL 없음" };
   if (!cfg.initialPassword) return { status: "manual_required", reason: "OMNIROUTE_INITIAL_PASSWORD 없음" };
+  let minted: string | null = null;
   try {
     const t = await createAccessToken(conn(cfg), {
       password: cfg.initialPassword,
@@ -77,13 +78,22 @@ export async function bootstrapOmniRoute(
       name: `magnetosphere-${new Date().toISOString().slice(0, 10)}`,
       expiresInDays: TOKEN_DAYS,
     });
+    minted = t.id;
     const checked = await checkScope(cfg, t.token);
-    if (!checked.ok) return { status: "manual_required", reason: `범위가 ${checked.scope}` };
+    if (!checked.ok) return { status: "manual_required", reason: `범위가 ${checked.scope}${orphan(minted)}` };
     await store(h, cipher, t.token, checked.me, updatedBy);
     return { status: "connected" };
   } catch (e) {
-    return { status: "manual_required", reason: reason(e) };
+    return { status: "manual_required", reason: `${reason(e)}${orphan(minted)}` };
   }
+}
+
+/**
+ * 발급은 됐는데 확인·저장이 실패하면 쓰지 않는 write 토큰(유효 TOKEN_DAYS 일)이 OmniRoute 에 남는다.
+ * 회원 앱은 토큰을 지울 권한이 없으므로(write) 운영자가 회수하도록 토큰 id 를 남긴다. 원문은 남기지 않는다 (S5 보안 리뷰 L2)
+ */
+function orphan(id: string | null): string {
+  return id ? `. 발급된 토큰 ${id} 은 쓰지 않으니 OmniRoute 대시보드(Settings → Access Tokens)에서 회수한다` : "";
 }
 
 export type ManualTokenResult = { ok: true } | { ok: false; error: "invalid_token" | "scope_not_write" | "omniroute_unreachable" };

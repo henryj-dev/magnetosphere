@@ -3,8 +3,9 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAccessToken, createClient } from "@magnetosphere/omniroute";
-import { createCipher } from "@magnetosphere/runtime/crypto";
-import { OMNIROUTE_TOKEN_AAD } from "../../src/setup/omniroute.ts";
+import { connectNode } from "@magnetosphere/runtime/node";
+import { createCipher, type Cipher } from "@magnetosphere/runtime/crypto";
+import { bootstrapOmniRoute, OMNIROUTE_TOKEN_AAD } from "../../src/setup/omniroute.ts";
 import { ADMIN, boot, closeAll, makeTestEnv, ORIGIN, post, sql, tokenIn, TEST_ENCRYPTION_KEY, type Running } from "../helpers.ts";
 
 const OMNI_URL = process.env.OMNI_URL ?? "http://127.0.0.1:20170";
@@ -141,5 +142,37 @@ describe("TC-S5.T3.d 붙여 넣기 입력은 관리자 세션만, write 범위 �
     expect(await decrypt(stored.token)).toBe(write.token);
     expect((await dump(r)).includes("oma_live_")).toBe(false);
     expect(await (await fetch(`${r.base}/api/setup/omniroute`, { headers: { cookie: admin } })).json()).toEqual({ omniroute: "connected" });
+  });
+});
+
+describe("TC-S5.T3.e 발급 뒤 확인·저장이 실패하면 회수할 토큰 id 를 남긴다", () => {
+  async function run(cipher: Cipher, fetchImpl?: typeof fetch) {
+    const t = await makeTestEnv();
+    const h = await connectNode(t.env.DATABASE_URL);
+    try {
+      return await bootstrapOmniRoute(h, cipher, { baseUrl: OMNI_URL, initialPassword: OMNI_PASSWORD, fetch: fetchImpl }, "admin");
+    } finally {
+      await h.close();
+      t.cleanup();
+    }
+  }
+
+  it("저장 실패·whoami 실패 → manual_required, 이유에 tok_ id 가 있고 토큰 원문은 없다", async () => {
+    const real = await createCipher(TEST_ENCRYPTION_KEY);
+    const broken: Cipher = { encrypt: async () => Promise.reject(new Error("disk full")), decrypt: real.decrypt };
+    const store = await run(broken);
+    expect(store.status).toBe("manual_required");
+    expect(store.reason).toMatch(/토큰 tok_[0-9a-f-]+ 은 쓰지 않으니/);
+    expect(store.reason).not.toContain("oma_live_");
+
+    const noWhoami: typeof fetch = (input, init) =>
+      String(input).includes("/api/cli/whoami") ? Promise.resolve(new Response("{}", { status: 500 })) : fetch(input, init);
+    const who = await run(real, noWhoami);
+    expect(who.status).toBe("manual_required");
+    expect(who.reason).toMatch(/^OmniRoute 500\. 발급된 토큰 tok_[0-9a-f-]+ 은/);
+
+    // 발급 전에 실패하면 남은 토큰이 없으니 id 도 없다
+    const noConnect: typeof fetch = () => Promise.resolve(new Response("{}", { status: 503 }));
+    expect((await run(real, noConnect)).reason).toBe("OmniRoute 503");
   });
 });
