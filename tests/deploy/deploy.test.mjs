@@ -4,9 +4,11 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import http from "node:http";
+import os from "node:os";
 import path from "node:path";
 import { after, describe, test } from "node:test";
 import https from "node:https";
+import { Readable } from "node:stream";
 import { APP_IMAGE, buildAppImage, createAdmin, createStack, ROOT, signIn, startCaddyProbe } from "./stack.mjs";
 
 const V16 = JSON.parse(fs.readFileSync(path.join(ROOT, "docs/verify/V16.json"), "utf8")).answer;
@@ -127,9 +129,26 @@ test("TC-S6.T2.c /api/* 는 OmniRoute 가 아니라 회원 앱으로 간다", as
   // 회원 앱 자신의 /api 는 그대로 닿는다
   const ok = await fetch(`${s.baseUrl}/api/auth/ok`);
   assert.deepEqual(await ok.json(), { ok: true });
-  // 본문 상한 (S6 보안 리뷰 L2): 회원 앱 쪽은 64KiB. 앱이 본문을 보지 않는 경로(POST /)도 Caddy 가 413
-  assert.equal((await fetch(`${s.baseUrl}/`, { method: "POST", body: "x".repeat(70 * 1024) })).status, 413);
-  assert.notEqual((await fetch(`${s.baseUrl}/`, { method: "POST", body: "x".repeat(1024) })).status, 413);
+  // 본문 상한 (S6 보안 리뷰 L2): 회원 앱 쪽은 64KiB. 앱이 본문을 보지 않는 경로(POST /, /api/keys)도 Caddy 가 413.
+  // 앱이 본문을 안 읽고 먼저 답하면 413 이 404 에 지는 경합이 있었다(CI 에서 가끔 404). 여러 번 보내 매번 413 인지 본다.
+  // chunked(Content-Length 없음) 본문도 같다
+  const chunked = (text) => ({ body: Readable.toWeb(Readable.from([text.slice(0, 40 * 1024), text.slice(40 * 1024)])), duplex: "half" });
+  const over = "x".repeat(70 * 1024);
+  for (const p of ["/", "/api/keys"]) {
+    const seen = [];
+    for (let i = 0; i < 20; i++) seen.push((await fetch(`${s.baseUrl}${p}`, { method: "POST", body: over })).status);
+    for (let i = 0; i < 5; i++) seen.push((await fetch(`${s.baseUrl}${p}`, { method: "POST", ...chunked(over) })).status);
+    assert.deepEqual(seen, Array(25).fill(413), `POST ${p} 70KiB → ${seen}`);
+    // 대조: 상한 아래는 413 이 아니다
+    assert.notEqual((await fetch(`${s.baseUrl}${p}`, { method: "POST", body: "x".repeat(1024) })).status, 413, p);
+    assert.notEqual((await fetch(`${s.baseUrl}${p}`, { method: "POST", ...chunked("x".repeat(1024)) })).status, 413, `${p} chunked`);
+  }
+  // /v1 쪽 상한(10MB)도 같은 방식으로 고정됐다: 10MB 를 넘는 본문은 길이가 있든 chunked 든 413
+  const v1Over = "x".repeat(10_000_001);
+  for (const init of [{ body: v1Over }, { body: v1Over }, chunked(v1Over)]) {
+    const res = await fetch(`${s.baseUrl}/v1/chat/completions`, { method: "POST", headers: { "content-type": "application/json" }, ...init });
+    assert.equal(res.status, 413, `/v1 10MB 초과 → ${res.status}`);
+  }
 
   // 클라이언트가 지어낸 IP 헤더는 뒤로 넘기지 않는다 (S6 보안 리뷰 L2). Caddy 단독 + 메아리 서버로 넘어간 헤더를 본다
   const probe = startCaddyProbe({ siteAddress: ":80", httpPort: HTTP_PORT + 20, httpsPort: HTTP_PORT + 21 });
@@ -325,4 +344,86 @@ test("TC-S6.T2.g 설치가 끝났는데 OmniRoute 비밀번호가 남아 있으�
   assert.equal(env.out.match(/^OMNIROUTE_INITIAL_PASSWORD=/m), null, "컨테이너 환경에 OMNIROUTE_INITIAL_PASSWORD 가 남았다");
   logs = s.logs("app");
   assert.equal(count(logs, WARN_PASSWORD), 0, "변수를 지운 뒤에도 경고가 났다");
+});
+
+// ---------- S7 (S6 보안 리뷰에서 남긴 시험) ----------
+
+test("TC-S7.T5.a 덧씌우기 없는 Compose 는 저장소 최상위의 .env.setup 을 app 에 넘긴다", () => {
+  // 시험 덧씌우기(compose.test.yml)는 .env.setup 을 시험 폴더에서 읽게 바꾼다. 운영 기본 경로(.env 옆 .env.setup)는 따로 본다.
+  // 운영자는 저장소 최상위에서 init 을 돌리고 docker compose 를 부른다. 그 폴더를 임시 폴더로 바꿔 같은 배치를 만든다
+  // (저장소의 진짜 .env·.env.setup 은 건드리지 않는다).
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mg-envsetup-"));
+  try {
+    fs.copyFileSync(path.join(ROOT, "docker-compose.yml"), path.join(dir, "docker-compose.yml"));
+    const init = spawnSync(process.execPath, [path.join(ROOT, "scripts/init.mjs"), "--dir", dir], { encoding: "utf8" });
+    assert.equal(init.status, 0, init.stderr);
+    const password = /^OMNIROUTE_INITIAL_PASSWORD=(.+)$/m.exec(fs.readFileSync(path.join(dir, ".env.setup"), "utf8"))?.[1];
+    assert.ok(password, ".env.setup 에 OMNIROUTE_INITIAL_PASSWORD 가 없다");
+    // 운영자처럼 그 폴더에서 아무 옵션 없이 부른다 (.env 도 기본 경로에서 읽힌다)
+    const config = (extra = []) => spawnSync("docker", ["compose", ...extra, "config", "--format", "json"], { cwd: dir, encoding: "utf8" });
+    let r = config();
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(JSON.parse(r.stdout).services.app.environment.OMNIROUTE_INITIAL_PASSWORD, password);
+    // OmniRoute 는 이 값을 .env 의 INITIAL_PASSWORD 로 받는다. 둘이 같아야 부트스트랩이 된다
+    assert.equal(JSON.parse(r.stdout).services.omniroute.environment.INITIAL_PASSWORD, password);
+    // 설치 뒤 .env.setup 을 지우면 app 환경에서 빠진다 (required: false 라 오류도 없다)
+    fs.rmSync(path.join(dir, ".env.setup"));
+    r = config();
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(JSON.parse(r.stdout).services.app.environment.OMNIROUTE_INITIAL_PASSWORD, undefined);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+describe("TC-S7.T6 app 은 edge 망의 Caddy 주소 하나만 신뢰 프록시로 믿는다 (S6 보안 리뷰 L3)", () => {
+  test("TC-S7.T6.a TRUSTED_PROXIES 기본값은 Caddy 고정 주소/32 이고 CADDY_EDGE_IP 를 따라간다", () => {
+    const s = createStack({ httpPort: HTTP_PORT, label: "config" });
+    try {
+      const cfg = (env = {}) => {
+        const r = spawnSync("docker", ["compose", "-p", s.project, "--env-file", path.join(s.dir, ".env"), "-f", "docker-compose.yml", "config", "--format", "json"], {
+          cwd: ROOT,
+          encoding: "utf8",
+          env: { ...process.env, ...env },
+        });
+        assert.equal(r.status, 0, r.stderr);
+        return JSON.parse(r.stdout);
+      };
+      const base = cfg();
+      const caddyIp = base.services.caddy.networks.edge?.ipv4_address;
+      assert.equal(caddyIp, "10.203.57.2");
+      assert.equal(base.services.app.environment.TRUSTED_PROXIES, `${caddyIp}/32`);
+      const ipam = base.networks.edge.ipam.config[0];
+      assert.equal(ipam.subnet, "10.203.57.0/29");
+      // 동적 배정 범위는 대역 안이고 Caddy 주소를 담지 않는다 (app 이 먼저 떠 그 주소를 가져가지 않게)
+      assert.equal(ipam.ip_range, "10.203.57.4/30");
+      // Caddy 주소를 바꾸면 신뢰 목록이 따라간다. TRUSTED_PROXIES 를 직접 주면 그 값이 이긴다
+      const moved = cfg({ CADDY_EDGE_IP: "10.203.57.3" });
+      assert.equal(moved.services.caddy.networks.edge.ipv4_address, "10.203.57.3");
+      assert.equal(moved.services.app.environment.TRUSTED_PROXIES, "10.203.57.3/32");
+      assert.equal(cfg({ TRUSTED_PROXIES: "192.0.2.10" }).services.app.environment.TRUSTED_PROXIES, "192.0.2.10");
+    } finally {
+      s.down();
+    }
+  });
+
+  test("TC-S7.T6.b edge 망의 Caddy 아닌 상대가 보낸 X-Forwarded-For 는 세션 IP 가 되지 않는다", async () => {
+    const s = stack();
+    const a = await ensureAdmin();
+    assert.equal(containerIp(s, "caddy", "edge"), "10.203.57.2");
+    // edge 망에 Caddy 가 아닌 컨테이너를 하나 붙인다 (망 게이트웨이·잘못 붙은 컨테이너의 자리). app 에 바로 지어낸 헤더를 보낸다
+    const script = `fetch("http://app-edge:3000/api/auth/sign-in/email", { method: "POST", headers: { "content-type": "application/json", origin: ${JSON.stringify(s.baseUrl)}, "x-forwarded-for": "198.51.100.77" }, body: JSON.stringify({ email: ${JSON.stringify(a.email)}, password: ${JSON.stringify(a.password)} }) }).then(async (r) => { await r.text(); console.log(r.status) })`;
+    const r = spawnSync("docker", ["run", "--rm", "--network", `${s.project}_edge`, "--entrypoint", "sh", APP_IMAGE, "-c", `hostname -i; node -e '${script.replace(/'/g, "'\\''")}'`], { encoding: "utf8" });
+    assert.equal(r.status, 0, r.stderr);
+    const [probeIp, status] = r.stdout.trim().split("\n").map((l) => l.trim());
+    assert.equal(status, "200", r.stdout);
+    const host = await signIn(s.baseUrl, a.email, a.password);
+    assert.equal(host.status, 200);
+    const sessions = await (await fetch(`${s.baseUrl}/api/auth/list-sessions`, { headers: { cookie: host.cookie, origin: s.baseUrl } })).json();
+    const ips = sessions.map((x) => x.ipAddress);
+    assert.ok(!ips.includes("198.51.100.77"), `edge 망의 Caddy 아닌 상대가 지어낸 IP 가 세션에 들어갔다: ${ips}`);
+    assert.ok(ips.includes(probeIp), `그 상대의 주소 ${probeIp} 가 세션에 없다: ${ips}`);
+    // 호스트에서 Caddy 를 거친 요청은 Caddy 주소로 묶이지 않는다 (망 게이트웨이를 프록시로 보지 않는다)
+    assert.ok(!ips.includes("10.203.57.2"), `세션 IP 가 Caddy 주소로 묶였다: ${ips}`);
+  });
 });

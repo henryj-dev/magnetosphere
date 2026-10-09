@@ -2,8 +2,8 @@
 // 검사가 빈 단계는 gate 가 실행·봉인을 거부한다. 각 단계 검사는 그 단계를 시작할 때 실행판 GATE 표대로 채운다.
 // outputs 는 --assert-order 가 잠긴 단계의 변경을 잡는 데 쓰는 글롭이다.
 // requires: ["local-services"] 는 이 컴퓨터에서만 띄워 둔 서비스가 필요한 검사다 (시험용 OmniRoute·Keycloak·
-// mailpit, docker 테스트 DB). CI 의 봉인 재검은 --skip-requires local-services 로 이 검사를 건너뛴다.
-// 이 검사들은 S7 의 CI 매트릭스에서 서비스를 띄워 다시 돈다.
+// mailpit, docker 테스트 DB). CI 의 봉인 재검(gate.yml)은 --skip-requires local-services 로 이 검사를 건너뛰고,
+// CI 매트릭스(ci.yml, S7.T1)가 단계마다 서비스를 띄운 잡에서 node scripts/gate.mjs S<n> 으로 다시 돈다.
 
 const nodeTest = (file, tc) => `node --test --test-reporter=tap --test-name-pattern="${tc}" ${file}`;
 
@@ -35,6 +35,8 @@ export const GATES = {
       { id: "G-S0.15", how: "test", desc: "CI 테스트 명령", cmd: 'node --test --test-reporter=tap "scripts/*.test.mjs"' },
     ],
   },
+  // S1 검사는 확인용 코드(spikes)로 돈다. spikes 는 S7.T2 에서 지웠으므로 main 에서 gate S1 은 돌지 않는다.
+  // 봉인 커밋에서만 돈다: gate --verify-seals --rerun (봉인 커밋 작업 트리) 과 CI 의 s1-seal 잡 (ci.yml).
   S1: {
     needs: ["S0"],
     waivable: false,
@@ -161,7 +163,7 @@ export const GATES = {
       { id: "G-S5.2", how: "test", requires: ["local-services"], desc: "TC-S5.T2.a 키 없는 /v1 → 401", cmd: 'pnpm test:contract -t "TC-S5.T2.a"' },
       { id: "G-S5.3", how: "test", requires: ["local-services"], desc: "TC-S5.T2.b 생성 → 끄기 → 예산 → 켜기 → 요청", cmd: 'pnpm test:contract -t "TC-S5.T2.b"' },
       { id: "G-S5.4", how: "test", requires: ["local-services"], desc: "TC-S5.T2.c 끈 키 즉시 거부", cmd: 'pnpm test:contract -t "TC-S5.T2.c"' },
-      { id: "G-S5.5", how: "test", requires: ["local-services"], desc: "TC-S5.T2.d 예산 초과 429 BUDGET_EXCEEDED", cmd: 'pnpm test:contract -t "TC-S5.T2.d"' },
+      { id: "G-S5.5", how: "test", requires: ["local-services"], desc: "TC-S5.T2.d 예산 초과 429 (arm64 BUDGET_EXCEEDED, amd64 예산 메시지)", cmd: 'pnpm test:contract -t "TC-S5.T2.d"' },
       { id: "G-S5.6", how: "test", requires: ["local-services"], desc: "TC-S5.T2.e 키별 분석 비용 (스트리밍 포함)", cmd: 'pnpm test:contract -t "TC-S5.T2.e"' },
       { id: "G-S5.7", how: "test", requires: ["local-services"], desc: "TC-S5.T2.f 응답 형식 변화 → 오류", cmd: 'pnpm test:contract -t "TC-S5.T2.f"' },
       { id: "G-S5.8", how: "test", requires: ["local-services"], desc: "TC-S5.T2.g 쿠키 변경 요청에 Origin", cmd: 'pnpm test:contract -t "TC-S5.T2.g"' },
@@ -223,10 +225,30 @@ export const GATES = {
       { id: "G-S6.30", how: "grep", desc: "OmniRoute 비공개 안내 (20128·/api 비공개, Workers 는 Tunnel·Access 로만)", pattern: "OmniRoute 20128 포트와 /api/\\* 는 공개로 열지 않는다|Workers 조합은 Cloudflare Tunnel·Access 로만 연결한다", in: ["deploy/README.md"], op: "==", limit: 2 },
     ],
   },
+  // S7 의 CI 매트릭스(.github/workflows/ci.yml)가 S2~S6 게이트를 서비스를 띄운 잡에서 그대로 돈다 (requires 로 건너뛰지 않는다).
   S7: {
     needs: ["S6"],
     waivable: false,
-    outputs: [".github/workflows/ci.yml", "scripts/check-ci-matrix.mjs"],
-    checks: [],
+    outputs: [
+      ".github/workflows/ci.yml", "scripts/check-ci-matrix.mjs", "test/fixtures/ci-5combos.yml", "test/fixtures/ci-guard/**", "scripts/gate.mjs", "scripts/gate.test.mjs",
+      "docker-compose.yml", ".env.example", "deploy/README.md", "tests/deploy/deploy.test.mjs", "apps/server/test/workers.test.ts",
+    ],
+    checks: [
+      { id: "G-S7.1", how: "cmd", desc: "TC-S7.T1.a·b·c CI 매트릭스 여섯 조합·명령이 조용히 빠지지 않음 (음성 대조 포함)", cmd: "node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-5combos.yml --expect 6 --expect-fail && node scripts/check-ci-matrix.mjs --fixture-dir test/fixtures/ci-guard --expect 6 --expect-fail" },
+      // grep 종료코드 1(일치 없음)만 통과다. 경로가 없어 grep 이 2 로 끝나면 실패한다
+      { id: "G-S7.2", how: "cmd", desc: "TC-S7.T2.a 확인용 코드가 남지 않음", cmd: 'test ! -e spikes && { grep -rn --exclude-dir=node_modules --exclude-dir=build --exclude-dir=.svelte-kit --exclude-dir=.wrangler "spikes/" apps packages scripts tests; test $? -eq 1; }' },
+      // 꺼진 테스트와 미구현 표식: vitest·node:test 의 .only·.skip·.skipIf·.todo·.skip.each·.only.each·runIf·x접두,
+      // node:test 옵션 { skip: true }·{ todo: true }, TODO·FIXME·"not implemented". 빌드 산출(build·.svelte-kit·.wrangler·dist)은 보지 않는다
+      // (node_modules 는 원래 안 본다). 제외는 하나: scripts/gate.test.mjs 는 gate 의 test 판정 음성 대조(TC-S0.T2.d)로
+      // { skip: true }·{ todo: true } 테스트 파일을 문자열로 만들어 "꺼진 테스트만 있으면 실패" 를 확인한다
+      { id: "G-S7.3", how: "grep", desc: "TC-S7.T3.a 건너뛴 테스트와 미구현 표식 0", pattern: "\\.(only|skip|skipIf|todo)\\(|\\.(skip|only)\\.|runIf\\(|\\b(skip|todo)\\s*:\\s*true|\\b(xit|xdescribe|xtest)\\(|TODO|FIXME|not implemented", in: ["apps", "packages", "tests", "scripts"], exclude: ["apps/web/build/**", "**/.svelte-kit/**", "**/.wrangler/**", "**/dist/**", "scripts/gate.test.mjs"], op: "==", limit: 0 },
+      // S0~S6 봉인이 모두 유효(✅)하다. 하나라도 ⚠·🔓·🔒 면 실패
+      { id: "G-S7.4", how: "cmd", desc: "앞 단계 봉인 모두 유효", cmd: `node -e 'const r=JSON.parse(require("child_process").execFileSync(process.execPath,["scripts/gate.mjs","--status","--json"],{encoding:"utf8"}));const want=["S0","S1","S2","S3","S4","S5","S6"];const bad=want.filter(p=>r.find(x=>x.phase===p)?.state!=="sealed");if(bad.length){console.error("봉인 무효·없음: "+bad.join(", "));process.exit(1)}console.log("S0~S6 봉인 유효")'` },
+      { id: "G-S7.5", how: "cmd", desc: "처음 커밋부터 순서 위반 없음", cmd: 'node scripts/gate.mjs --assert-order --base "$(git rev-list --max-parents=0 HEAD)"' },
+      { id: "G-S7.6", how: "test", requires: ["local-services"], desc: "TC-S7.T4.a Workers 에서 OmniRoute 3xx 를 따라가지 않음", cmd: 'pnpm -C apps/server test:workers -t "TC-S7.T4.a"' },
+      { id: "G-S7.7", how: "test", requires: ["local-services"], desc: "TC-S7.T5.a 덧씌우기 없는 Compose 가 최상위 .env.setup 을 app 에 넘김", cmd: 'pnpm test:deploy -t "TC-S7.T5.a"' },
+      { id: "G-S7.8", how: "test", requires: ["local-services"], desc: "TC-S7.T6.a·b app 은 Caddy 고정 주소 하나만 신뢰 (S6 보안 리뷰 L3)", cmd: 'pnpm test:deploy -t "TC-S7.T6"' },
+      { id: "G-S7.9", how: "test", desc: "TC-S0.T2.n 봉인 재검이 설치 실패를 보고 (S7 리뷰 M4)", cmd: nodeTest("scripts/gate.test.mjs", "TC-S0.T2.n") },
+    ],
   },
 };

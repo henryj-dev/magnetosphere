@@ -1,0 +1,64 @@
+{
+  "phase": "S7",
+  "sealed": true,
+  "head": "07aa5606489fd0f708051b1f545b6dd428960c5e",
+  "at": "2026-10-09T22:53:29.091Z",
+  "waived": false,
+  "reason": null,
+  "checks": [
+    {
+      "id": "G-S7.1",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-S7.2",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-S7.3",
+      "ok": true,
+      "measured": 0,
+      "limit": "== 0"
+    },
+    {
+      "id": "G-S7.4",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-S7.5",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-S7.6",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S7.7",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S7.8",
+      "ok": true,
+      "measured": "통과 3",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S7.9",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+# TC-S7.T1.c 음성 대조: 단계 잡 continue-on-error
+# expect: continue-on-error
+name: ci
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  schema:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: S2 게이트
+        run: node scripts/gate.mjs S2

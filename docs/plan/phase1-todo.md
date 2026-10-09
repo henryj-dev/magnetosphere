@@ -43,18 +43,18 @@
 
 ## 진행 현황
 
-이 표는 사람이 읽기 위한 사본이다. 판정은 항상 `node scripts/gate.mjs --status`가 한다.
+이 표는 사람이 읽기 위한 사본이다. 판정은 항상 `node scripts/gate.mjs --status`가 한다. S1 은 확인용 코드를 S7.T2 에서 지워 main 에서 `gate S1` 이 돌지 않는다. 봉인 커밋에서 다시 돈다 (`gate --verify-seals --rerun`, CI `s1-seal` 잡).
 
 | 단계 | 제목 | 상태 | 게이트 명령 | 봉인 |
 |---|---|---|---|---|
 | S0 | 저장소와 게이트 장치 | ✅ | `node scripts/gate.mjs S0` | b9f9473 |
-| S1 | 확인 항목 7개 | 🔓 | `node scripts/gate.mjs S1` | — |
-| S2 | DB 계층 (네 DB) | 🔒 | `node scripts/gate.mjs S2` | — |
-| S3 | 인증 코어와 메일 | 🔒 | `node scripts/gate.mjs S3` | — |
-| S4 | 서버·런타임·화면·최초 설치 | 🔒 | `node scripts/gate.mjs S4` | — |
-| S5 | OmniRoute 어댑터·부트스트랩·계약 테스트 | 🔒 | `node scripts/gate.mjs S5` | — |
-| S6 | 배포 묶음과 여섯 조합 E2E | 🔒 | `node scripts/gate.mjs S6` | — |
-| S7 | 재발 방지와 잔재 회수 | 🔒 | `node scripts/gate.mjs S7` | — |
+| S1 | 확인 항목 7개 | ✅ | `node scripts/gate.mjs S1` | da1bba3 |
+| S2 | DB 계층 (네 DB) | ✅ | `node scripts/gate.mjs S2` | ac26b44 |
+| S3 | 인증 코어와 메일 | ✅ | `node scripts/gate.mjs S3` | 150b5b0 |
+| S4 | 서버·런타임·화면·최초 설치 | ✅ | `node scripts/gate.mjs S4` | 81f39bc |
+| S5 | OmniRoute 어댑터·부트스트랩·계약 테스트 | ✅ | `node scripts/gate.mjs S5` | bfa4b6e |
+| S6 | 배포 묶음과 여섯 조합 E2E | ✅ | `node scripts/gate.mjs S6` | 65ae6e6 |
+| S7 | 재발 방지와 잔재 회수 | 🔓 | `node scripts/gate.mjs S7` | — |
 
 ## 선행 관계
 
@@ -85,7 +85,7 @@ TC-S0.T1.a  워크스페이스가 패키지 여섯을 인식한다
 ```
 
 【통과】
-- [ ] G-S0.1 통과
+- [x] G-S0.1 통과
 
 ### ☑ S0.T2 — 게이트 장치
 선행 S0.T1 · 산출 `scripts/gate.mjs`, `gates/gates.config.mjs`, `gates/seals/.gitkeep`, `scripts/gate.test.mjs` · 되돌리기 커밋 1개
@@ -139,7 +139,7 @@ TC-S0.T2.j  --assert-order --head 는 지정한 커밋을 본다
 TC-S0.T2.d 에는 다음 하위 단언도 들어간다: `test` 검사는 통과 0개·todo·skip 만 있으면 실패, `grep` 검사는 `in` 경로가 없으면 실패, `diff-empty` 는 기준 봉인 head 가 이상하면 실패, 검사가 빈 단계는 실행 거부.
 
 【통과】
-- [ ] G-S0.2 ~ G-S0.7 통과
+- [x] G-S0.2 ~ G-S0.7 통과
 
 ### ☑ S0.T3 — 실제로 거부하는 장치 연결 (훅과 첫 CI)
 선행 S0.T2 · 산출 `.githooks/pre-push`, `package.json`의 `prepare` 스크립트, `.github/workflows/gate.yml`, `scripts/hook.test.mjs` · 되돌리기 커밋 1개
@@ -160,7 +160,7 @@ TC-S0.T3.b  현재 브랜치가 아닌 브랜치를 push 해도 훅이 그 브�
 ```
 
 【통과】
-- [ ] G-S0.8 통과
+- [x] G-S0.8 통과
 
 ## 🚪 GATE S0
 
@@ -188,12 +188,13 @@ TC-S0.T3.b  현재 브랜치가 아닌 브랜치를 push 해도 훅이 그 브�
 
 ---
 
-# S1 — 확인 항목 7개 🔓 (S0 필요)
+# S1 — 확인 항목 7개 ✅ (S0 필요)
 
 **브랜치** `s1/verify`. 작업 코드는 `spikes/` 아래에만 둔다. `spikes/`는 S7에서 지운다.
+(S7.T2 에서 지웠다. 그래서 `gate S1` 은 main 에서 돌지 않고 봉인 커밋에서만 돈다: `gate --verify-seals --rerun` 의 작업 트리, CI `s1-seal` 잡.)
 **환경** 0단계와 같은 방식: `diegosouzapw/omniroute:3.8.51` 별도 인스턴스(호스트 포트 20140), 가짜 상위 서버(`docs/research/phase0-assets/mock-upstream.mjs`). 사용자가 쓰는 `localhost:20128` 인스턴스는 건드리지 않는다.
 
-### ☐ S1.T1 — V10 관리 토큰 최소 범위와 자동 발급 흐름
+### ☑ S1.T1 — V10 관리 토큰 최소 범위와 자동 발급 흐름
 선행 없음(단계 안) · 산출 `spikes/v10/`, `docs/verify/V10.json` · 되돌리기 커밋 1개
 
 【작업】
@@ -210,9 +211,9 @@ TC-S1.T1.b  더 낮은 범위는 실패한다
 ```
 
 【통과】
-- [ ] G-S1.1, G-S1.2 통과
+- [x] G-S1.1, G-S1.2 통과
 
-### ☐ S1.T2 — V11 키 끄기의 즉시성
+### ☑ S1.T2 — V11 키 끄기의 즉시성
 선행 없음 · 산출 `spikes/v11/`, `docs/verify/V11.json` · 되돌리기 커밋 1개
 
 【작업】
@@ -226,9 +227,9 @@ TC-S1.T2.a  끈 직후 요청이 거부된다
 ```
 
 【통과】
-- [ ] G-S1.3 통과
+- [x] G-S1.3 통과
 
-### ☐ S1.T3 — V16 Caddy 허용 목록 경로
+### ☑ S1.T3 — V16 Caddy 허용 목록 경로
 선행 없음 · 산출 `spikes/v16/`, `docs/verify/V16.json` · 되돌리기 커밋 1개
 
 【작업】
@@ -246,9 +247,9 @@ TC-S1.T3.b  관리 별칭은 허용 목록에 없다
 ```
 
 【통과】
-- [ ] G-S1.4, G-S1.5 통과
+- [x] G-S1.4, G-S1.5 통과
 
-### ☐ S1.T4 — V17 권한 칼럼 입력 차단
+### ☑ S1.T4 — V17 권한 칼럼 입력 차단
 선행 없음 · 산출 `spikes/v17/`, `docs/verify/V17.json` · 되돌리기 커밋 1개
 
 【작업】
@@ -265,9 +266,9 @@ TC-S1.T4.b  대조군: input 미지정이면 값이 들어간다
 ```
 
 【통과】
-- [ ] G-S1.6, G-S1.7 통과
+- [x] G-S1.6, G-S1.7 통과
 
-### ☐ S1.T5 — V21 OmniRoute 운영 필수 비밀 값
+### ☑ S1.T5 — V21 OmniRoute 운영 필수 비밀 값
 선행 없음 · 산출 `spikes/v21/`, `docs/verify/V21.json` · 되돌리기 커밋 1개
 
 【작업】
@@ -284,9 +285,9 @@ TC-S1.T5.b  목록의 각 값은 실제로 필수다
 ```
 
 【통과】
-- [ ] G-S1.8, G-S1.9 통과
+- [x] G-S1.8, G-S1.9 통과
 
-### ☐ S1.T6 — V26 Better Auth + SSO 플러그인의 MySQL·MariaDB·Postgres 동작
+### ☑ S1.T6 — V26 Better Auth + SSO 플러그인의 MySQL·MariaDB·Postgres 동작
 선행 S1.T4 · 산출 `spikes/v26/`, `docs/verify/V26.json` · 되돌리기 커밋 1개
 
 【작업】
@@ -306,9 +307,9 @@ TC-S1.T6.c  대소문자만 다른 이메일 중복이 네 DB 에서 같게 처�
 ```
 
 【통과】
-- [ ] G-S1.10 ~ G-S1.12 통과
+- [x] G-S1.10 ~ G-S1.12 통과
 
-### ☐ S1.T7 — V27 Workers + MySQL(Hyperdrive) Drizzle 동작
+### ☑ S1.T7 — V27 Workers + MySQL(Hyperdrive) Drizzle 동작
 선행 없음 · 산출 `spikes/v27/`, `docs/verify/V27.json` · 되돌리기 커밋 1개
 
 【작업】
@@ -322,7 +323,7 @@ TC-S1.T7.a  Worker 에서 MySQL 쓰기·읽기·트랜잭션이 된다
 ```
 
 【통과】
-- [ ] G-S1.13 통과
+- [x] G-S1.13 통과
 
 ## 🚪 GATE S1
 
@@ -368,11 +369,11 @@ TC-S1.G.d  resolved 는 막았던 항목이 현재 계획서 버전을 가리켜
 
 ---
 
-# S2 — DB 계층 (네 DB) 🔒 (S1 필요)
+# S2 — DB 계층 (네 DB) ✅ (S1 필요)
 
 **브랜치** `s2/db`. 계획서 3.2 "DB 지원 원칙", 5.9 데이터 모델.
 
-### ☐ S2.T1 — 공통 스키마 정의와 DB별 세 벌 생성
+### ☑ S2.T1 — 공통 스키마 정의와 DB별 세 벌 생성
 선행 없음 · 산출 `packages/db/src/schema/common.ts`, `packages/db/src/schema/{sqlite,mysql,pg}.ts`, `packages/db/scripts/gen-schema.mjs`, `scripts/schema-lint.mjs`, `test/fixtures/bad-schema.ts` · 되돌리기 커밋 2개
 
 【작업】
@@ -393,9 +394,9 @@ TC-S2.T1.c  린트에 이빨이 있다 (음성 대조)
 ```
 
 【통과】
-- [ ] G-S2.1 ~ G-S2.3 통과
+- [x] G-S2.1 ~ G-S2.3 통과
 
-### ☐ S2.T2 — 권한 칼럼과 기본 설정값
+### ☑ S2.T2 — 권한 칼럼과 기본 설정값
 선행 S2.T1 · 산출 `packages/db/src/seed.ts` · 되돌리기 커밋 1개
 
 【작업】
@@ -412,9 +413,9 @@ TC-S2.T2.b  시드는 두 번 돌려도 운영자 값을 덮지 않는다
 ```
 
 【통과】
-- [ ] G-S2.4, G-S2.5 통과
+- [x] G-S2.4, G-S2.5 통과
 
-### ☐ S2.T3 — DB별 마이그레이션과 적용 테스트
+### ☑ S2.T3 — DB별 마이그레이션과 적용 테스트
 선행 S2.T2 · 산출 `packages/db/migrations/{sqlite,mysql,pg}/`, `packages/db/drizzle.{sqlite,mysql,pg}.config.ts`, `packages/db/scripts/{check-drift,test-migrate}.mjs`, `packages/db/src/users.ts`(이메일 소문자 저장 계층), `packages/db/test/migrate.test.ts`, `docker-compose.test.yml` · 되돌리기 커밋 2개
 
 【작업】
@@ -447,7 +448,7 @@ TC-S2.T3.f  토큰·식별자는 대소문자를 구분한다
 ```
 
 【통과】
-- [ ] G-S2.6 ~ G-S2.8, G-S2.11 ~ G-S2.13 통과
+- [x] G-S2.6 ~ G-S2.8, G-S2.11 ~ G-S2.13 통과
 
 ## 🚪 GATE S2
 
@@ -473,11 +474,11 @@ TC-S2.T3.f  토큰·식별자는 대소문자를 구분한다
 
 ---
 
-# S3 — 인증 코어와 메일 🔒 (S2 필요)
+# S3 — 인증 코어와 메일 ✅ (S2 필요)
 
 **브랜치** `s3/auth`. 계획서 4.2, 4.6, 4.8, 7장 "인증", "요청 수 제한". SSO 기능(설정 화면·관리자 API·로그인 흐름)은 이 단계에서 다루지 않는다 (계획서 9장 5·6단계). 플러그인은 `AUTH_SCHEMA_OPTIONS`로 들어오므로 공개 관리 경로만 막는다.
 
-### ☐ S3.T1 — Better Auth 구성
+### ☑ S3.T1 — Better Auth 구성
 선행 없음 · 산출 `packages/auth/src/index.ts`, `packages/auth/test/`, `packages/auth/scripts/test.mjs`, `packages/auth/vitest.config.ts`, `scripts/check-sso-paths.mjs`, `test/fixtures/sso-unguarded/` · 되돌리기 커밋 1개
 
 【작업】
@@ -515,9 +516,9 @@ TC-S3.T1.f  secret 이 32자 미만이면 시작을 거부한다 (S3 보안 리�
 ```
 
 【통과】
-- [ ] G-S3.1 ~ G-S3.4, G-S3.14, G-S3.17, G-S3.19 통과
+- [x] G-S3.1 ~ G-S3.4, G-S3.14, G-S3.17, G-S3.19 통과
 
-### ☐ S3.T2 — 메일 어댑터 네 종류
+### ☑ S3.T2 — 메일 어댑터 네 종류
 선행 S3.T1 · 산출 `packages/auth/src/mail/{smtp,resend,cloudflare,console,types,messages,index}.ts`, `packages/auth/test/mailpit.compose.yml`, `packages/auth/scripts/test-smtp.mjs` · 되돌리기 커밋 1개
 
 【작업】
@@ -542,8 +543,10 @@ TC-S3.T2.d  비밀번호 재설정 메일의 토큰은 한 번만 쓰인다
   단언:  재설정 링크로 변경 성공 → 같은 링크 재사용 → 실패(4xx)
   검출:  유출된 재설정 링크로 비밀번호를 다시 바꾸는 것
 TC-S3.T2.e  메일 전송 시간으로 계정 존재 여부가 드러나지 않는다 (S3 보안 리뷰 M1)
-  단언:  300ms 걸리는 가짜 메일러 → /request-password-reset, /sign-up/email 각각 있는 계정·없는 계정을 7번씩 재
-         응답 시간 중앙값 차이 < 50ms. 메일 전송 실패 → onMailError 로 그 예외가 넘어감 (L4)
+  단언:  /request-password-reset, /sign-up/email 각각 있는 계정·없는 계정을 7번씩 재 응답 시간 중앙값 차이를 1초 걸리는
+         가짜 메일러와 바로 끝나는 메일러로 따로 구하고, 메일 지연이 그 차이에 더한 몫 < 250ms. 메일 전송 실패 → onMailError
+         로 그 예외가 넘어감 (L4). (S7 에서 고침: 처음엔 300ms 메일러로 차이 자체 < 50ms 였는데, CI 러너에서는 새 가입의
+         DB 쓰기만으로 차이가 108ms 가 나 메일과 무관하게 실패했다. 이 DB 쓰기 차이는 S7 백로그에 남긴다.)
   검출:  메일 전송을 기다려 재설정은 있는 계정 306ms·없는 계정 4ms, 가입은 있는 계정 61ms·없는 계정 355ms 로 갈려
          요청 몇 번으로 가입 여부를 알아내는 것 (리뷰 실측). 메일 실패가 기록만 되고 운영자에게 안 닿는 것
 TC-S3.T2.f  운영 환경에서는 콘솔 어댑터를 만들지 않는다 (S3 보안 리뷰 L3)
@@ -552,9 +555,9 @@ TC-S3.T2.f  운영 환경에서는 콘솔 어댑터를 만들지 않는다 (S3 �
 ```
 
 【통과】
-- [ ] G-S3.5 ~ G-S3.8, G-S3.15, G-S3.18 통과
+- [x] G-S3.5 ~ G-S3.8, G-S3.15, G-S3.18 통과
 
-### ☐ S3.T3 — 인증 경로 요청 수 제한과 클라이언트 IP
+### ☑ S3.T3 — 인증 경로 요청 수 제한과 클라이언트 IP
 선행 S3.T1 · 산출 `packages/auth/src/rate-limit.ts` · 되돌리기 커밋 1개
 
 【작업】
@@ -582,7 +585,7 @@ TC-S3.T3.d  HTTP 요청을 받는 함수는 감싼 handler 하나뿐이다 (S3 �
 ```
 
 【통과】
-- [ ] G-S3.9 ~ G-S3.11, G-S3.16 통과
+- [x] G-S3.9 ~ G-S3.11, G-S3.16 통과
 
 ## 🚪 GATE S3
 
@@ -614,11 +617,11 @@ TC-S3.T3.d  HTTP 요청을 받는 함수는 감싼 handler 하나뿐이다 (S3 �
 
 ---
 
-# S4 — 서버·런타임·화면·최초 설치 🔒 (S3 필요)
+# S4 — 서버·런타임·화면·최초 설치 ✅ (S3 필요)
 
 **브랜치** `s4/server`. 계획서 3.1, 3.2, 4.7(1·2·4·5번), 7장 "비밀 값".
 
-### ☐ S4.T1 — 런타임 어댑터 두 벌
+### ☑ S4.T1 — 런타임 어댑터 두 벌
 선행 없음 · 산출 `packages/runtime/src/{types,node,workers}.ts` · 되돌리기 커밋 1개
 
 【작업】
@@ -646,9 +649,9 @@ TC-S4.T1.e  clientIp 어댑터가 IP 를 못 정하면 서버가 시작을 거�
 ```
 
 【통과】
-- [ ] G-S4.1 ~ G-S4.3, G-S4.15, G-S4.16 통과
+- [x] G-S4.1 ~ G-S4.3, G-S4.15, G-S4.16 통과
 
-### ☐ S4.T2 — 암호화 유틸
+### ☑ S4.T2 — 암호화 유틸
 선행 없음 · 산출 `packages/runtime/src/crypto.ts` · 되돌리기 커밋 2개
 
 【작업】
@@ -673,9 +676,9 @@ TC-S4.T2.d  다른 AAD(저장 자리 이름)로는 복호화하지 못한다 (S4
 ```
 
 【통과】
-- [ ] G-S4.4 ~ G-S4.6, G-S4.18 통과
+- [x] G-S4.4 ~ G-S4.6, G-S4.18 통과
 
-### ☐ S4.T3 — Hono 서버와 SvelteKit SPA
+### ☑ S4.T3 — Hono 서버와 SvelteKit SPA
 선행 S4.T1 · 산출 `apps/server/src/`, `apps/web/`, `tsconfig.json`, `apps/*/tsconfig.json`, `packages/*/tsconfig.json` · 되돌리기 커밋 5개
 
 【작업】
@@ -713,9 +716,9 @@ TC-S4.T3.f  SPA·정적 파일·API 응답 모두 보안 헤더가 있고 SPA �
 ```
 
 【통과】
-- [ ] G-S4.7 ~ G-S4.9, G-S4.17, G-S4.19, G-S4.20 통과
+- [x] G-S4.7 ~ G-S4.9, G-S4.17, G-S4.19, G-S4.20 통과
 
-### ☐ S4.T4 — 최초 설치 흐름
+### ☑ S4.T4 — 최초 설치 흐름
 선행 S4.T2, S4.T3 · 산출 `apps/server/src/setup/`, `apps/web/src/routes/setup/` · 되돌리기 커밋 4개
 
 【작업】
@@ -749,7 +752,7 @@ TC-S4.T4.f  동시에 설치 요청 10건이 와도 관리자는 하나다
 ```
 
 【통과】
-- [ ] G-S4.10 ~ G-S4.13, G-S4.21, G-S4.22 통과
+- [x] G-S4.10 ~ G-S4.13, G-S4.21, G-S4.22 통과
 
 ## 🚪 GATE S4
 
@@ -784,11 +787,11 @@ TC-S4.T4.f  동시에 설치 요청 10건이 와도 관리자는 하나다
 
 ---
 
-# S5 — OmniRoute 어댑터·부트스트랩·계약 테스트 🔒 (S4 필요)
+# S5 — OmniRoute 어댑터·부트스트랩·계약 테스트 ✅ (S4 필요)
 
 **브랜치** `s5/omniroute`. 계획서 3.3, 4.7(3번), 5.6, 5.8.
 
-### ☐ S5.T1 — 계약 테스트 환경
+### ☑ S5.T1 — 계약 테스트 환경
 선행 없음 · 산출 `tests/contract/docker-compose.yml`, `tests/contract/mock-upstream.mjs`, `tests/contract/setup.mjs` · 되돌리기 커밋 1개
 
 【작업】
@@ -802,9 +805,9 @@ TC-S5.T1.a  계약 환경이 0단계 실측값을 재현한다
 ```
 
 【통과】
-- [ ] G-S5.1 통과
+- [x] G-S5.1 통과
 
-### ☐ S5.T2 — OmniRoute 어댑터
+### ☑ S5.T2 — OmniRoute 어댑터
 선행 S5.T1 · 산출 `packages/omniroute/src/` · 되돌리기 커밋 1개
 
 【작업】
@@ -823,6 +826,8 @@ TC-S5.T2.c  끈 키는 거부된다
   검출:  정지 회원이 계속 쓰는 것
 TC-S5.T2.d  예산을 넘으면 429 BUDGET_EXCEEDED
   단언:  월 예산 0.01(resetInterval monthly), 요청 3건(0.00221 + 0.0062115 × 2 = 0.014633) 후 → 429, code "BUDGET_EXCEEDED"
+         (S7 에서 고침: 같은 digest 의 amd64 빌드는 code "rate_limit_exceeded" 에 메시지 "Monthly budget exceeded: $0.0146 / $0.01" 이다.
+         429 이고 둘 중 하나면 통과. 예산 차단이 아닌 요청 수 제한은 통과하지 않는다)
   검출:  OmniRoute 업데이트로 예산 차단 동작·코드가 바뀌어 회원 한도가 무력화되는 것
 TC-S5.T2.e  분석이 키별 비용을 정확히 낸다 (스트리밍 포함)
   단언:  위 3건(스트리밍 1건 포함) 뒤 getAnalytics(apiKeyIds=[그 키]) → summary.totalCost = 0.014633 (오차 1e-9)
@@ -857,9 +862,9 @@ TC-S5.T2.m  비용이 음수인 응답은 오류다
 ```
 
 【통과】
-- [ ] G-S5.2 ~ G-S5.9, G-S5.14, G-S5.16, G-S5.17, G-S5.19, G-S5.20 통과
+- [x] G-S5.2 ~ G-S5.9, G-S5.14, G-S5.16, G-S5.17, G-S5.19, G-S5.20 통과
 
-### ☐ S5.T3 — OmniRoute 부트스트랩
+### ☑ S5.T3 — OmniRoute 부트스트랩
 선행 S5.T2 · 산출 `apps/server/src/setup/omniroute.ts` · 되돌리기 커밋 1개
 
 【작업】
@@ -890,7 +895,7 @@ TC-S5.T3.f  부트스트랩 전체가 제한 시간 하나 안에 끝난다
 ```
 
 【통과】
-- [ ] G-S5.10 ~ G-S5.12, G-S5.15, G-S5.18, G-S5.21 통과
+- [x] G-S5.10 ~ G-S5.12, G-S5.15, G-S5.18, G-S5.21 통과
 
 ## 🚪 GATE S5
 
@@ -916,11 +921,11 @@ TC-S5.T3.f  부트스트랩 전체가 제한 시간 하나 안에 끝난다
 
 ---
 
-# S6 — 배포 묶음과 여섯 조합 E2E 🔒 (S5 필요)
+# S6 — 배포 묶음과 여섯 조합 E2E ✅ (S5 필요)
 
 **브랜치** `s6/deploy`. 계획서 3.2 표, 4.7, 7장 "OmniRoute 노출".
 
-### ☐ S6.T1 — 설치 스크립트
+### ☑ S6.T1 — 설치 스크립트
 선행 없음 · 산출 `scripts/init.mjs`, `scripts/init.test.mjs`, `.env.example` · 되돌리기 커밋 1개
 
 【작업】
@@ -945,9 +950,9 @@ TC-S6.T1.d  OmniRoute 비밀번호는 설치 뒤 지울 파일에만 들어간�
 ```
 
 【통과】
-- [ ] G-S6.1 ~ G-S6.3, G-S6.26 통과
+- [x] G-S6.1 ~ G-S6.3, G-S6.26 통과
 
-### ☐ S6.T2 — Docker Compose와 Caddy
+### ☑ S6.T2 — Docker Compose와 Caddy
 선행 S6.T1 · 산출 `docker-compose.yml`, `deploy/Caddyfile`, `deploy/README.md`, `apps/server/Dockerfile`, `.dockerignore`, `apps/server/src/migrate.ts`, `tests/deploy/` (`pnpm test:deploy`) · 되돌리기 커밋 1개
 
 【작업】
@@ -968,6 +973,11 @@ TC-S6.T2.b  허용 목록 밖 /v1 경로는 Caddy 에서 404
 TC-S6.T2.c  /api/* 는 OmniRoute 가 아니라 회원 앱으로 간다
   단언:  Caddy 주소 /api/keys → 회원 앱 JSON 404, 본문에 "Invalid management token" 없음
   검출:  OmniRoute 관리 API 가 공개 주소로 노출되는 것
+  본문 상한(S6 보안 리뷰 L2, S7 에서 고침): 앱이 본문을 읽지 않는 경로(POST /, /api/keys)에 70KiB 를 길이 있게 20번, chunked 로
+         5번 보내 모두 413. 1KiB 대조는 413 이 아님. /v1/chat/completions 에 10MB 초과를 길이 있게 2번, chunked 로 1번 → 모두 413
+  검출:  413 이 경합으로 들쭉날쭉한 것. Caddy 의 max_size 는 본문을 읽다 넘을 때만 오류가 나서, 뒤가 본문을 안 읽고 먼저 답하면
+         그 답(404)이 이긴다 (CI 실측: 같은 커밋이 push 에선 413, pull_request 에선 404). Caddy 가 상한+1 바이트까지 먼저 읽고
+         넘으면 넘기기 전에 413 을 내야 한다
 TC-S6.T2.d  OmniRoute 포트는 루프백에만 열린다
   단언:  docker compose config --format json → omniroute.ports 의 모든 host_ip == "127.0.0.1"
   검출:  대시보드가 0.0.0.0 으로 열려 인터넷에서 관리 화면 접근
@@ -990,9 +1000,9 @@ TC-S6.T2.g  설치가 끝났는데 OmniRoute 비밀번호가 남아 있으면 �
 ```
 
 【통과】
-- [ ] G-S6.4 ~ G-S6.7, G-S6.19, G-S6.20, G-S6.25, G-S6.27 통과
+- [x] G-S6.4 ~ G-S6.7, G-S6.19, G-S6.20, G-S6.25, G-S6.27 통과
 
-### ☐ S6.T3 — Workers 설정
+### ☑ S6.T3 — Workers 설정
 선행 없음 · 산출 `apps/server/wrangler.toml` (환경 `d1`, `mysql`, `pg`), `deploy/workers-deploy.mjs`, `apps/server/test/workers.test.ts` (`pnpm -C apps/server test:workers`) · 되돌리기 커밋 1개
 
 【작업】
@@ -1036,9 +1046,9 @@ TC-S6.T3.f  설치 시도 횟수 제한 (S6 보안 리뷰 M1)
 ```
 
 【통과】
-- [ ] G-S6.8, G-S6.21 ~ G-S6.23, G-S6.28, G-S6.29 통과
+- [x] G-S6.8, G-S6.21 ~ G-S6.23, G-S6.28, G-S6.29 통과
 
-### ☐ S6.T4 — 여섯 조합 E2E
+### ☑ S6.T4 — 여섯 조합 E2E
 선행 S6.T2, S6.T3 · 산출 `tests/e2e/`, `package.json`의 `e2e` 스크립트 · 되돌리기 커밋 1개
 
 【작업】
@@ -1052,7 +1062,7 @@ TC-S6.T4.a ~ f  조합마다 설치 → 관리자 → 부트스트랩 → 로그
 ```
 
 【통과】
-- [ ] G-S6.9 ~ G-S6.14 통과
+- [x] G-S6.9 ~ G-S6.14 통과
 
 ## 🚪 GATE S6
 
@@ -1085,86 +1095,177 @@ TC-S6.T4.a ~ f  조합마다 설치 → 관리자 → 부트스트랩 → 로그
 
 ---
 
-# S7 — 재발 방지와 잔재 회수 🔒 (S6 필요)
+# S7 — 재발 방지와 잔재 회수 🔓 (S6 필요)
 
 **브랜치** `s7/guard`.
 
-**백로그** (S7 에서 계획서 2차 항목으로 옮길지 정한다)
-- S5: OmniRoute 토큰 붙여 넣기 화면. API(`GET`·`PUT /api/setup/omniroute`)만 있고 화면이 없다 → 관리 화면 단계.
-- S5: OmniRoute 접근 토큰 갱신. 부트스트랩 토큰은 3650일짜리이고 갱신·교체 흐름이 없다 → 운영 단계.
-- S5: 계약 테스트 TC-S5.T3 이 만든 접근 토큰 회수. apps/server 계약 테스트는 OmniRoute 에 시험 토큰을 남긴다 (컨테이너를 다시 만들면 사라진다).
-- S6 → S7.T1 (CI 에서 E2E·배포 시험 돌리기): `pnpm e2e --combo docker-*`·`pnpm test:deploy` 는 `apps/server/Dockerfile` 로 이미지를 만들고(`magnetosphere-app:local`) Compose 묶음을 빈 볼륨으로 띄운다. 호스트 포트는 28480·28490·28580 만 쓰고 OmniRoute 대시보드 포트는 시험 덧씌우기(`tests/deploy/compose.test.yml`)가 닫는다. `workers-*` 는 계약 환경 OmniRoute(`tests/contract`, 127.0.0.1:20170)와 `docker-compose.test.yml` 의 MySQL(33306)·Postgres(35432)를 쓴다 (없으면 띄운다). 잡마다 docker·pnpm install·`apps/web` 빌드가 필요하다. 묶음 하나가 1GB 남짓 메모리를 쓰므로 조합은 매트릭스 잡으로 나눈다.
-- S6: Workers 운영의 OmniRoute 연결(Caddy 관리 호스트 + 비밀 헤더 + Tunnel, V24)은 아직 없다. Workers 배포는 설치 화면에서 토큰을 붙여 넣는다 → 8단계.
-- S6: `wrangler.toml` 의 D1 `database_id`·Hyperdrive `id` 는 자리 표시 값이다. 실제 배포 때 운영자가 바꾼다 (deploy/README.md).
-- S6 보안 리뷰 L3: edge 망 신뢰를 caddy 고정 주소 /32 로 좁히고, TRUSTED_PROXIES 기본값을 EDGE_SUBNET 에 맞춘다 (지금은 둘을 따로 바꿔야 한다).
-- S6 보안 리뷰: Workers 쪽에서 OmniRoute 가 3xx 를 돌려줄 때 따라가지 않고 오류가 되는지 보는 테스트 (redirect: "manual" 로 바꾼 경로).
-- S6 보안 리뷰: compose.test.yml 로 덮어쓰지 않은 .env.setup 기본 경로(저장소 최상위)를 app 이 읽는지 확인하는 테스트.
-- S4 보안 리뷰 L4: `job_leases` 임대 TTL 이 주기보다 5초 짧을 뿐이라, 작업이 주기보다 오래 걸리면 다음 경계에서 다른 인스턴스가 같은 작업을 겹쳐 돈다. 작업 중 임대 연장(하트비트)과 펜싱 토큰(임대마다 늘어나는 번호를 작업 결과 쓰기에 붙여 늦게 끝난 쪽의 쓰기를 거부)을 검토한다.
+**백로그 결정** (S7 에서 할지, 계획서 2차·뒤 단계로 옮길지)
 
-### ☐ S7.T1 — CI 매트릭스
-선행 없음 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
+| 항목 | 결정 | 이유·자리 |
+|---|---|---|
+| S5: OmniRoute 토큰 붙여 넣기 화면 (API 만 있음) | 옮김 → 관리 화면 단계 | 화면 작업이다. API(`GET`·`PUT /api/setup/omniroute`)와 권한 검사(TC-S5.T3.d)는 있다 |
+| S5: OmniRoute 접근 토큰 갱신 (3650일 토큰, 갱신·교체 흐름 없음) | 옮김 → 운영 단계 | 교체 흐름은 관리 화면과 함께 설계한다 |
+| S5: 계약 테스트 TC-S5.T3 이 남기는 시험 토큰 회수 | 옮김 → 2차 (시험 도구) | CI 는 잡마다 계약 환경을 새로 띄워 남지 않는다. 로컬은 `docker compose -f tests/contract/docker-compose.yml down` 으로 지운다 |
+| S6 → S7.T1: CI 에서 E2E·배포 시험 돌리기 | 함 (S7.T1) | `ci.yml` 의 `deploy` 잡(S6 게이트)과 `e2e` 매트릭스 여섯 잡 |
+| S6: Workers 운영의 OmniRoute 연결 (Caddy 관리 호스트 + 비밀 헤더 + Tunnel, V24) | 옮김 → 계획서 9장 8단계 | 운영 연결 방식 자체가 8단계 설계 대상이다 |
+| S6: `wrangler.toml` 의 D1 `database_id`·Hyperdrive `id` 자리 표시 값 | 옮기지 않음 (운영자 몫) | 배포 계정마다 다르다. deploy/README.md 가 바꾸라고 안내한다 |
+| S6 보안 리뷰 L3: edge 망 신뢰를 caddy 고정 주소 /32 로, TRUSTED_PROXIES 기본값을 망 설정에 맞춤 | 함 (S7.T6) | CI 리눅스 러너에서 망 게이트웨이까지 신뢰해 TC-S6.T2.e 가 실패한 것이 실제 결함이었다 |
+| S6 보안 리뷰: Workers 에서 OmniRoute 3xx 를 따라가지 않는지 | 함 (S7.T4) | |
+| S6 보안 리뷰: 덧씌우지 않은 `.env.setup` 기본 경로를 app 이 읽는지 | 함 (S7.T5) | |
+| S4 보안 리뷰 L4: `job_leases` 임대 연장(하트비트)·펜싱 토큰 | 옮김 → 2차 | 주기 작업이 생기는 단계(사용량 동기화)에서 작업 길이를 보고 정한다. 지금 주기 작업은 짧다 |
+| (S7 에서 찾음) 가입 응답 시간이 새 가입의 DB 쓰기만큼 계정 존재를 드러낸다 | 옮김 → 2차 | CI 러너 디스크에서 있는 계정·없는 계정 차이 108ms (로컬 SSD 는 1ms 남짓). 메일 전송과는 무관하다 (TC-S3.T2.e). 응답 시간을 맞추려면 가입 응답을 일정 시간으로 채워야 한다 |
+| S7 리뷰 L1: TC-S3.T2.e 상한 250ms 를 150ms 로 낮출 수 있는지 | 옮김 → 2차 | 메일 지연 1000ms 대비 여유다. CI 러너에서 몇 번 돌려 두 측정 차이의 흩어짐을 본 뒤 정한다 |
+| S7 리뷰 L5: `ci.yml` 의 concurrency cancel-in-progress 가 main 에서 앞 커밋 실행을 취소한다 | 옮김 → 2차 (필수 검사 지정과 함께) | main 에서는 커밋마다 결과가 남아야 한다. `cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}` 처럼 main 에서만 끄는 방안 |
+| (S7 리뷰 M4 에서 고침) 봉인 재검이 pnpm install 실패를 넘김 | 함 (TC-S0.T2.n, G-S7.9) | 설치 실패를 넘기고 검사를 돌려 S4 10개가 한 번 엉뚱하게 실패한 일의 가장 유력한 원인 |
+| (S7 에서 찾음) OmniRoute `3.8.51@sha256:8bd462c9…` 의 amd64·arm64 가 다른 빌드다 | 옮김 → 2차 (운영 단계 전에 결정) | BUILD_ID 가 다르고(amd64 `z4X1_o4X…`, arm64 `d29tRSJd…`) amd64 빌드에는 `BUDGET_EXCEEDED` 코드가 없다. 예산 차단은 둘 다 429 지만 amd64 는 code `rate_limit_exceeded`. 0단계 실측(`../research/phase0-omniroute.md`)과 계획서 표는 arm64 값이다. 운영 서버는 대개 amd64 라 CI(amd64)와 로컬(arm64) 계약 테스트가 둘 다 돌아야 한다 (지금 그렇다). 아키텍처별 manifest digest 로 고정할지, 다음 OmniRoute 버전에서 같은 빌드인지 확인할지 정한다. 회원 앱은 이 code 에 기대지 않는다 |
+
+### ☑ S7.T1 — CI 매트릭스
+선행 없음 · 산출 `.github/workflows/ci.yml`, `.github/workflows/gate.yml`(SHA 고정·permissions), `scripts/check-ci-matrix.mjs`, `test/fixtures/ci-5combos.yml`, `test/fixtures/ci-guard/` · 되돌리기 커밋 1개
 
 【작업】
-1. 잡: 단위(`node --test scripts/`, 각 패키지 test), 스키마(G-S2 전부), 계약(G-S5 전부), E2E 매트릭스 여섯 조합, `gate --assert-order`. 원격이 정해지면 필수 검사로 지정한다 (원격 미정, 계획서 8장). 커밋.
+1. 잡: 단위(`node --test scripts/`, S0 게이트, 서비스 없이 도는 패키지 테스트, `pnpm -r typecheck`), 순서(`--assert-order` 처음 커밋부터, `--status`), 단계마다 그 단계 게이트(`node scripts/gate.mjs S2`~`S7`: 스키마·인증·서버·계약·배포·재발 방지), E2E 매트릭스 여섯 조합, S1 봉인 커밋 재검. 원격은 `henryj-dev/magnetosphere` 다. main 필수 검사 지정은 저장소 설정이라 사용자 결정 대기다. 커밋.
+   (실제: 단계 잡은 게이트 명령을 그대로 돌아 CI 와 로컬 게이트가 어긋나지 않는다. 테스트 DB·mailpit·계약 환경·배포 묶음은 각 검사의 실행기가 띄운다. 게이트에서 빼는 검사는 E2E 여섯(`--skip-ids G-S6.9~14`)뿐이고, 그 여섯은 `e2e` 매트릭스가 같은 명령으로 돈다. 액션은 커밋 SHA 로 고정하고 pnpm 저장소를 캐시한다. YAML 은 `yaml` 2.9.0(의존성 없음, 버전 고정)으로 읽는다.)
+2. S1: 확인용 코드를 S7.T2 에서 지우므로 S1 검사는 봉인 커밋에서만 돈다. `s1-seal` 잡이 봉인 커밋을 작업 트리로 꺼내 `node scripts/gate.mjs --root <작업 트리> S1` 을 돈다. 0단계의 손으로 준비한 OmniRoute(20140)는 같은 버전·같은 가짜 상위 서버를 붙인 계약 환경(20170, `OMNI_URL`·`OMNI_PASSWORD`)으로 대신하고, Keycloak·DB 는 그 커밋의 `up.sh` 가 띄운다. G-S1.4 의 수집 로그(`spikes/v16/paths.log`)는 봉인 뒤 커밋에 들어갔으므로 그 커밋에서 꺼내 둔다. (S1 을 "로컬 증거로 봉인 시점에 고정" 하는 대신 CI 재검을 고른 것은 17개 검사가 러너 하나에서 3분 남짓에 돌기 때문이다.)
 
 【테스트】
 ```
 TC-S7.T1.a  CI 매트릭스가 여섯 조합을 모두 돈다
-  단언:  ci.yml 의 e2e matrix.combo 목록 == 여섯 이름 (스크립트로 YAML 파싱)
-  검출:  조합 하나가 CI 에서 빠져 그 조합이 깨져도 아무도 모르는 것
+  단언:  ci.yml 의 e2e matrix.combo 목록 == 여섯 이름 == 게이트 S6 의 `pnpm e2e --combo` 검사 조합 (스크립트로 YAML 파싱).
+         include·exclude·continue-on-error 없음, 스텝이 `pnpm e2e --combo ${{ matrix.combo }}`. S1 을 뺀 모든 단계를
+         `node scripts/gate.mjs <단계>` 로 돌고 --skip-requires 를 쓰지 않으며 --skip-ids 는 E2E 검사만. S1 봉인 커밋 스텝 있음.
+         모든 uses 가 40자리 SHA
+  검출:  조합 하나가 CI 에서 빠져 그 조합이 깨져도 아무도 모르는 것. 단계 잡이 서비스 검사를 건너뛰어 CI 와 로컬 게이트가 어긋나는 것
 TC-S7.T1.b  매트릭스 검사에 이빨이 있다 (음성 대조)
-  단언:  조합 다섯만 있는 픽스처 YAML → 검사 실패
+  단언:  조합 다섯만 있는 픽스처 YAML → 매트릭스 문제(combo-count)로 검사 실패 (파일을 못 읽은 실패는 검출로 치지 않는다)
   검출:  검사가 YAML 을 못 읽고 늘 통과하는 것
+TC-S7.T1.c  게이트·E2E 가 조용히 빠지거나 실패가 삼켜지면 잡는다 (S7 리뷰 M1·M2)
+  단언:  test/fixtures/ci-guard/ 픽스처 19개가 각자 머리 주석 "# expect: <코드>" 의 문제로 잡힌다 — 잡·스텝 if, 잡·스텝
+         continue-on-error(단계·E2E), "|| true"·"; true"·"| tee"·set +e·shell 바꾸기, echo 로 감싼 명령(명령은 run 줄의 시작),
+         on 의 branches·paths 거르개, permissions 없음, 액션 태그. 기본 실행은 .github/workflows 의 모든 파일(gate.yml 포함)에
+         SHA 고정·permissions: contents: read·push·pull_request 트리거를 요구한다
+  검출:  CI 파일 한 줄(if: false, || true 등)로 단계 게이트가 꺼져도 매트릭스 검사는 초록인 것
 ```
 
 【통과】
-- [ ] G-S7.1 통과
+- [x] G-S7.1 통과
 
-### ☐ S7.T2 — 확인용 코드 회수
+### ☑ S7.T2 — 확인용 코드 회수
 선행 없음 · 산출 `spikes/` 삭제, `docs/verify/` 유지 · 되돌리기 커밋 1개
 
 【작업】
 1. `spikes/` 전체 삭제. 확인 결과 JSON과 근거는 `docs/verify/`에 남긴다. 가짜 상위 서버는 `tests/contract/`만 남기고 `docs/research/phase0-assets/`는 기록용으로 둔다. 커밋.
+   (실제: `.dockerignore` 의 `spikes` 줄도 지웠다. S1 검사 정의는 그대로 두고, 봉인 커밋에서만 돈다는 것을 `gates.config.mjs` 에 적었다. `gate --verify-seals --rerun --skip-requires local-services` 는 봉인 커밋 작업 트리에서 돌아 그대로 통과한다.)
 
 【테스트】
 ```
 TC-S7.T2.a  확인용 코드가 남지 않는다
-  단언:  test ! -e spikes, grep "spikes/" in apps/ packages/ scripts/ tests/ → 0
+  단언:  test ! -e spikes, grep "spikes/" in apps/ packages/ scripts/ tests/ (node_modules·빌드 산출 제외) → 0. grep 이 경로 오류로 끝나면 실패
   검출:  확인용 코드가 제품 코드에 import 된 채 남는 것
 ```
 
 【통과】
-- [ ] G-S7.2 통과
+- [x] G-S7.2 통과
 
-### ☐ S7.T3 — 가짜 완료 표식 0
+### ☑ S7.T3 — 가짜 완료 표식 0
 선행 없음 · 산출 없음 (검사만) · 되돌리기 해당 없음
 
 【작업】
 1. 제품 코드에 남은 `.only(`, `.skip(`, `TODO`, `FIXME`, `not implemented`를 없앤다. 필요한 것은 계획서 2차 항목으로 옮기고 지운다. 커밋.
+   (실제: 처음부터 0 이었다. 검사에 `.skipIf(`·`.todo(`·`xit(` 류, S7 리뷰 M3 에서 node:test 의 `{ skip: true }`·`{ todo: true }`, `.skip.each`·`.only.each`, `runIf(` 와 `scripts/` 범위를 더했다. `.svelte-kit` 빌드 출력에는 라이브러리의 TODO 가 있어 빌드 산출은 보지 않는다.)
+   백로그: gate 의 test 판정은 "통과 ≥ 1" 이라, `-t` 패턴이 여러 TC 에 걸릴 때 그중 하나가 꺼지거나 이름이 바뀌어 빠져도 초록이다. 검사마다 기대 통과 수(`expectPassed`)를 두고 `==` 로 비교하는 방안을 2차에서 정한다 (지금 고치지 않는다).
 
 【테스트】
 ```
 TC-S7.T3.a  건너뛴 테스트와 미구현 표식이 없다
-  단언:  grep -E "\.(only|skip)\(|TODO|FIXME|not implemented" in apps/ packages/ tests/ → 0
+  단언:  grep -E "\.(only|skip|skipIf|todo)\(|\.(skip|only)\.|runIf\(|\b(skip|todo)\s*:\s*true|\b(xit|xdescribe|xtest)\(|TODO|FIXME|not implemented"
+         in apps/ packages/ tests/ scripts/ (빌드 산출 build·.svelte-kit·.wrangler·dist 제외, scripts/gate.test.mjs 제외 — test 판정
+         음성 대조가 { skip: true }·{ todo: true } 테스트를 문자열로 만든다) → 0
   검출:  .skip 으로 꺼진 계약 테스트 때문에 G-S5 가 초록으로 보이는 것
+TC-S0.T2.n  봉인 재검은 봉인 커밋의 설치 실패를 그대로 보고한다 (S7 리뷰 M4, scripts/gate.test.mjs)
+  단언:  깨진 pnpm-lock.yaml 이 든 봉인 커밋 → gate --verify-seals --rerun 종료코드 ≠ 0, 출력에 "S0: 봉인 커밋 <sha> 설치 실패",
+         검사는 돌지 않음
+  검출:  설치 실패를 넘기고 검사를 돌려, 원인과 무관한 검사 실패 여러 개로 보이거나 설치와 무관한 검사만 있는 단계가 통과하는 것
 ```
 
 【통과】
-- [ ] G-S7.3 통과
+- [x] G-S7.3 통과
+- [x] G-S7.9 통과
+
+### ☑ S7.T4 — Workers 에서 OmniRoute 3xx 를 따라가지 않는다 (S6 보안 리뷰)
+선행 없음 · 산출 `apps/server/test/workers.test.ts` · 되돌리기 커밋 1개
+
+【작업】
+1. 어댑터는 Workers fetch 가 `redirect: "error"` 를 받지 않아 `"manual"` 로 받는다 (S6 E2E). Node 쪽은 TC-S5.T2.k 가 보지만 workerd 쪽 시험이 없었다. wrangler dev 로 확인한다. 커밋.
+
+【테스트】
+```
+TC-S7.T4.a  Workers 부트스트랩이 OmniRoute 의 307 을 따라가지 않는다
+  단언:  wrangler dev(d1)의 OMNIROUTE_URL 을 /api/cli/connect 에 307(다른 출처)을 돌려주는 로컬 서버로 두고 설치
+         → 201, omniroute "manual_required", 비밀번호 본문은 첫 서버에만, 리다이렉트 대상 서버 요청 0건
+  검출:  Workers 런타임에서 리다이렉트를 따라가 OmniRoute 비밀번호 본문이 다른 출처로 넘어가는 것
+```
+
+【통과】
+- [x] G-S7.6 통과
+
+### ☑ S7.T5 — 덧씌우지 않은 `.env.setup` 기본 경로 (S6 보안 리뷰)
+선행 없음 · 산출 `tests/deploy/deploy.test.mjs` · 되돌리기 커밋 1개 (S7.T6 과 같은 커밋)
+
+【작업】
+1. 시험 덧씌우기(`compose.test.yml`)는 `.env.setup` 을 시험 폴더에서 읽게 바꾸므로, 운영 기본 경로(저장소 최상위, `.env` 옆)는 시험되지 않았다. 운영자처럼 그 폴더에서 덧씌우기 없이 `docker compose config` 를 부른다 (저장소의 진짜 `.env`·`.env.setup` 은 건드리지 않게 임시 폴더에 같은 배치를 만든다). 커밋.
+
+【테스트】
+```
+TC-S7.T5.a  덧씌우기 없는 Compose 는 .env 옆의 .env.setup 을 app 에 넘긴다
+  단언:  init 으로 만든 폴더에서 docker compose config → app.environment.OMNIROUTE_INITIAL_PASSWORD == .env.setup 값 == omniroute INITIAL_PASSWORD.
+         .env.setup 을 지우면 그 변수가 빠지고 config 는 성공
+  검출:  운영 Compose 의 env_file 경로가 init 이 쓰는 자리와 어긋나 최초 설치의 OmniRoute 부트스트랩이 늘 manual_required 가 되는 것
+```
+
+【통과】
+- [x] G-S7.7 통과
+
+### ☑ S7.T6 — edge 망 신뢰를 Caddy 고정 주소 하나로 (S6 보안 리뷰 L3)
+선행 없음 · 산출 `docker-compose.yml`, `.env.example`, `deploy/README.md`, `tests/deploy/deploy.test.mjs` · 되돌리기 커밋 1개
+
+【작업】
+1. caddy 는 edge 망에서 고정 주소(`CADDY_EDGE_IP`, 기본 `10.203.57.2`)를 쓰고, app 의 `TRUSTED_PROXIES` 기본값은 `${CADDY_EDGE_IP}/32` 로 그 주소를 따라간다. 동적 배정은 `EDGE_IP_RANGE`(기본 `10.203.57.4/30`)에서만 해 app 이 Caddy 주소를 먼저 가져가지 않게 한다. 주소가 대역 밖이면 `docker compose up` 이 실패한다. 커밋.
+   (발견: CI 리눅스 러너에서 TC-S6.T2.e 가 실패했다. 호스트에서 들어온 연결의 출발지가 edge 망 게이트웨이(10.203.57.1)인데 app 이 망 전체(/29)를 믿어 그 주소까지 프록시로 걷어 내 세션 IP 가 Caddy 주소로 묶였다. Docker Desktop 에서는 출발지가 망 밖이라 보이지 않았다.)
+
+【테스트】
+```
+TC-S7.T6.a  TRUSTED_PROXIES 기본값은 Caddy 고정 주소/32 이고 CADDY_EDGE_IP 를 따라간다
+  단언:  docker compose config → caddy edge ipv4_address 10.203.57.2, app TRUSTED_PROXIES "10.203.57.2/32",
+         edge ipam subnet 10.203.57.0/29·ip_range 10.203.57.4/30. CADDY_EDGE_IP=10.203.57.3 → "10.203.57.3/32". TRUSTED_PROXIES 를 직접 주면 그 값
+  검출:  Caddy 주소와 신뢰 목록을 따로 바꿔야 해 둘이 어긋나는 것
+TC-S7.T6.b  edge 망의 Caddy 아닌 상대가 보낸 X-Forwarded-For 는 세션 IP 가 되지 않는다
+  단언:  묶음의 edge 망에 다른 컨테이너를 붙여 app-edge:3000 에 X-Forwarded-For 198.51.100.77 로 로그인 → 세션 IP 는 그 컨테이너 주소,
+         198.51.100.77 없음. 호스트에서 Caddy 를 거친 세션 IP 는 Caddy 주소가 아님
+  검출:  망 게이트웨이·잘못 붙은 컨테이너가 신뢰 프록시로 취급돼 클라이언트 IP 를 지어내거나 모든 요청이 한 주소로 세어지는 것
+```
+
+【통과】
+- [x] G-S7.8 통과
 
 ## 🚪 GATE S7
 
 | id | 검사 | 명령 | 통과 기준 |
 |---|---|---|---|
-| G-S7.1 | TC-S7.T1.a | `node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-5combos.yml --expect 6 --expect-fail` | 종료코드 0 |
-| G-S7.2 | TC-S7.T2.a | `test ! -e spikes && ! grep -r "spikes/" apps packages scripts tests` | 종료코드 0 |
-| G-S7.3 | TC-S7.T3.a | grep `\.(only\|skip)\(\|TODO\|FIXME\|not implemented` in `apps/ packages/ tests/` | 0 |
+| G-S7.1 | TC-S7.T1.a·b·c | `node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-5combos.yml --expect 6 --expect-fail && node scripts/check-ci-matrix.mjs --fixture-dir test/fixtures/ci-guard --expect 6 --expect-fail` | 종료코드 0 |
+| G-S7.2 | TC-S7.T2.a | `test ! -e spikes && { grep -rn --exclude-dir=node_modules … "spikes/" apps packages scripts tests; test $? -eq 1; }` | 종료코드 0 |
+| G-S7.3 | TC-S7.T3.a | grep `\.(only\|skip\|skipIf\|todo)\(\|\.(skip\|only)\.\|runIf\(\|\b(skip\|todo)\s*:\s*true\|\b(xit\|xdescribe\|xtest)\(\|TODO\|FIXME\|not implemented` in `apps/ packages/ tests/ scripts/` (빌드 산출·`scripts/gate.test.mjs` 제외) | 0 |
 | G-S7.4 | 앞 단계 봉인 모두 유효 | `node scripts/gate.mjs --status --json` | S0~S6 모두 ✅ (⚠ 0) |
 | G-S7.5 | 순서 위반 없음 | `node scripts/gate.mjs --assert-order --base $(git rev-list --max-parents=0 HEAD)` | 종료코드 0 |
+| G-S7.6 | TC-S7.T4.a | `pnpm -C apps/server test:workers -t "TC-S7.T4.a"` | 종료코드 0 |
+| G-S7.7 | TC-S7.T5.a | `pnpm test:deploy -t "TC-S7.T5.a"` | 종료코드 0 |
+| G-S7.8 | TC-S7.T6.a·b | `pnpm test:deploy -t "TC-S7.T6"` | 종료코드 0 |
+| G-S7.9 | TC-S0.T2.n | `node --test --test-reporter=tap --test-name-pattern="TC-S0.T2.n" scripts/gate.test.mjs` | 종료코드 0 |
 
 `node scripts/gate.mjs S7 --seal`
 
 가장 중요한 검사는 G-S7.3이다. 이 문서의 모든 통과가 테스트 종료코드에 기대므로, 꺼진 테스트 하나가 단계 전체를 거짓 초록으로 만든다.
+
+S7 을 하며 CI 에서 처음 드러나 고친 것 (봉인한 단계의 시험): TC-S3.T2.e 는 메일 지연이 더한 몫으로 잰다 (DB 쓰기 차이가 CI 에서 108ms), TC-S5.T2.d 는 amd64 빌드의 차단 코드도 받는다 (같은 digest 의 아키텍처별 빌드 차이), TC-S6.T2.e 는 S7.T6 으로 통과한다.
 
 ---
 
@@ -1208,3 +1309,5 @@ TC-S7.T3.a  건너뛴 테스트와 미구현 표식이 없다
 | TC-S4.T1.d | 연결 옵션(mysql2 `timezone`·세션 `time_zone`, postgres `TimeZone`)으로 세션 시간대를 UTC 로 강제할 수 있음 | S4.T1 (확인함: 로컬 MySQL·MariaDB·Postgres. 실제 Hyperdrive 는 확인 못 함 → TC-S6.T3.c) |
 | TC-S5.T3.b | 접근 토큰의 범위를 읽을 수 있음 | S1.T1 (확인함: 목록은 admin 필요, `whoami` 는 어떤 범위든 200 → TC 를 whoami 로 바꿈) |
 | TC-S6.T4.d·e·f | `wrangler dev` + Hyperdrive 로컬 연결로 E2E 가능 | S1.T7 (확인함: S6 에서 여섯 조합 모두 통과. 이때 Workers fetch 가 `redirect: "error"` 를 받지 않는 것을 찾아 OmniRoute 어댑터를 `"manual"` 로 바꿨다) |
+| TC-S5.T2.d | 예산 초과 뒤 요청이 429 `BUDGET_EXCEEDED` | S5.T2 (arm64 에서 확인함. S7 CI 의 amd64 빌드는 같은 429 지만 code `rate_limit_exceeded` 라 둘 다 받도록 바꿨다) |
+| TC-S7.T6.a·b | Docker IPAM 이 `ip_range` 밖의 고정 주소를 동적 배정에 쓰지 않음, 리눅스에서 호스트 연결의 출발지가 망 게이트웨이 | S7.T6 (확인함: 로컬 Docker Desktop·GitHub ubuntu 러너) |

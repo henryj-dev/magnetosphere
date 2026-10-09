@@ -1,0 +1,19 @@
+# TC-S7.T1.b 음성 대조 픽스처: E2E 매트릭스에서 workers-pg 하나가 빠진 워크플로.
+# node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-5combos.yml --expect 6 --expect-fail 이 매트릭스 문제를 잡아야 한다.
+# expect: combo-count
+name: ci
+on: push
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        combo:
+          - docker-sqlite
+          - docker-mysql
+          - docker-pg
+          - workers-d1
+          - workers-mysql
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: pnpm e2e --combo ${{ matrix.combo }}

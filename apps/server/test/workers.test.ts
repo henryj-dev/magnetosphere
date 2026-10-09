@@ -2,6 +2,8 @@
 // D1 은 --persist-to 폴더의 로컬 D1 이다. 마이그레이션은 배포 스크립트(deploy/workers-deploy.mjs --local)로 적용한다.
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -155,5 +157,46 @@ describe("TC-S6.T3.d Workers 배포 전에 마이그레이션이 적용된다", 
     const res = await fetch(`${d.baseUrl}/api/setup`);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ needed: true });
+  });
+});
+
+describe("TC-S7.T4.a Workers: OmniRoute 가 3xx 를 돌려주면 따라가지 않는다 (S6 보안 리뷰)", () => {
+  it("토큰 발급 307 → 다른 출처로 비밀번호 본문이 가지 않고, 설치는 201 manual_required", async () => {
+    // Workers fetch 는 redirect: "error" 를 받지 않아 어댑터가 "manual" 로 받는다 (S6 E2E). workerd 에서도 3xx 가 오류가 되는지 본다
+    const bodies = { omni: [] as string[], other: [] as string[] };
+    const listen = (name: "omni" | "other", handler: (res: ServerResponse) => void) =>
+      new Promise<{ url: string; close: () => Promise<void> }>((resolve) => {
+        const srv = createServer((req, res) => {
+          let b = "";
+          req.on("data", (d) => (b += d));
+          req.on("end", () => {
+            bodies[name].push(`${req.method} ${req.url} ${b}`);
+            handler(res);
+          });
+        });
+        srv.listen(0, "127.0.0.1", () => {
+          const { port } = srv.address() as AddressInfo;
+          resolve({ url: `http://127.0.0.1:${port}`, close: () => new Promise((r) => srv.close(() => r())) });
+        });
+      });
+    const other = await listen("other", (res) => res.writeHead(200, { "content-type": "application/json" }).end("{}"));
+    const omni = await listen("omni", (res) => res.writeHead(307, { location: `${other.url}/api/cli/connect` }).end());
+    cleanups.push(other.close, omni.close);
+
+    const persist = freshD1();
+    migrateLocal(persist);
+    const secret = "operator-chosen-setup-token-0123456789";
+    const password = "omniroute-password-must-not-leak-0123";
+    const d = await dev(persist, { SETUP_TOKEN: secret, OMNIROUTE_URL: omni.url, OMNIROUTE_INITIAL_PASSWORD: password });
+    const res = await fetch(`${d.baseUrl}/api/setup`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: d.baseUrl },
+      body: JSON.stringify({ token: secret, email: "admin@example.com", password: "admin-password-1234", publicBaseUrl: d.baseUrl }),
+    });
+    expect(res.status).toBe(201);
+    expect((await res.json()).omniroute).toBe("manual_required");
+    // 부트스트랩은 OmniRoute 에 비밀번호로 토큰 발급을 시도했고(307 을 받음) 그 뒤 다른 출처로는 아무것도 보내지 않았다
+    expect(bodies.omni.some((b) => b.startsWith("POST /api/cli/connect ") && b.includes(password))).toBe(true);
+    expect(bodies.other).toEqual([]);
   });
 });

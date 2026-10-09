@@ -3,7 +3,9 @@
 #   COMPOSE_PROFILES=mysql|postgres (.env)       MySQL·Postgres 프로필. init --db 가 DATABASE_URL 과 함께 넣는다
 # 최초 설치는 app 인스턴스 하나로 한다 (deploy/README.md). 설치가 끝나면 .env.setup 을 지우고 app 을 다시 띄운다.
 #
-# 망: internal (모든 서비스) · edge (caddy ↔ app 만). app 은 edge 망에서 온 X-Forwarded-For 만 믿는다 (TRUSTED_PROXIES).
+# 망: internal (모든 서비스) · edge (caddy ↔ app 만). caddy 는 edge 망에서 고정 주소(CADDY_EDGE_IP)를 쓰고,
+# app 은 그 주소 하나에서 온 X-Forwarded-For 만 믿는다 (TRUSTED_PROXIES 기본값 = CADDY_EDGE_IP/32, S6 보안 리뷰 L3).
+# 망 대역(EDGE_SUBNET)을 바꾸면 CADDY_EDGE_IP·EDGE_IP_RANGE 도 그 안으로 바꾼다. 어긋나면 docker compose up 이 실패한다.
 # 호스트에 여는 포트: Caddy 80·443, OmniRoute 대시보드는 127.0.0.1:20128 만 (SSH 터널로 접속). 그 밖의 OmniRoute 포트는 열지 않는다.
 name: magnetosphere
 
@@ -32,7 +34,11 @@ services:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
       - caddy-config:/config
-    networks: [internal, edge]
+    networks:
+      internal: {}
+      edge:
+        # app 이 믿는 유일한 프록시 주소. 동적 배정 범위(EDGE_IP_RANGE) 밖이라 다른 컨테이너가 먼저 가져가지 않는다
+        ipv4_address: ${CADDY_EDGE_IP:-10.203.57.2}
     depends_on:
       app:
         condition: service_healthy
@@ -72,8 +78,9 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?node scripts/init.mjs 로 .env 를 먼저 만든다}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?node scripts/init.mjs 로 .env 를 먼저 만든다}
       OMNIROUTE_URL: http://omniroute:20128
-      # Caddy 만 있는 edge 망. 이 밖의 상대가 보낸 X-Forwarded-For 는 무시하고 경고를 한 번 남긴다 (S4 보안 리뷰 M3)
-      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-10.203.57.0/29}
+      # edge 망의 Caddy 주소 하나. 그 밖의 상대가 보낸 X-Forwarded-For 는 무시하고 경고를 한 번 남긴다 (S4 보안 리뷰 M3).
+      # 망 전체(/29)를 믿으면 망 게이트웨이(호스트에서 들어온 연결의 출발지)까지 프록시로 보아 모든 요청이 Caddy 주소로 세어진다
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-${CADDY_EDGE_IP:-10.203.57.2}/32}
     # OMNIROUTE_INITIAL_PASSWORD 는 최초 설치 때만 .env.setup 으로 넘긴다. 파일을 지우고 다시 띄우면 사라진다 (S5 보안 리뷰 M2)
     env_file:
       - path: .env.setup
@@ -159,6 +166,8 @@ networks:
     ipam:
       config:
         - subnet: ${EDGE_SUBNET:-10.203.57.0/29}
+          # 동적 배정(app 등)은 .4~.7 에서만 한다. .2 는 caddy 고정 주소 (CADDY_EDGE_IP)
+          ip_range: ${EDGE_IP_RANGE:-10.203.57.4/30}
 
 volumes:
   app-data: {}

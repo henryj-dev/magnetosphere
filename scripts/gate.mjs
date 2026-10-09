@@ -232,13 +232,13 @@ function run(root, cmd) {
 
 // 통과한 테스트 수. 못 읽으면 null.
 // node --test 는 --test-reporter=tap 출력만 읽는다. 요약의 "# pass" 는 이름 패턴에 걸린 테스트가 0개여도
-// 파일 단위 항목을 1로 세므로 쓰지 않고, 파일 이름 항목과 SKIP·TODO 를 뺀 "ok N - <이름>" 줄을 센다.
+// 파일 단위 항목을 1로 세므로 쓰지 않고, 파일 이름 항목과 건너뜀·할 일 지시자(# skip, # todo)를 뺀 "ok N - <이름>" 줄을 센다.
 function passedCount(raw) {
   // vitest 는 FORCE_COLOR=0 이어도 색상 코드를 섞어 내보낸다. 읽기 전에 지운다.
   const output = raw.replace(/\x1b\[[0-9;]*m/g, "");
   if (/^TAP version/m.test(output)) {
     const names = [...output.matchAll(/^\s*ok \d+ - (.+)$/gm)].map((m) => m[1].trim());
-    return names.filter((n) => !/\.[cm]?[jt]sx?$/.test(n) && !/#\s*(SKIP|TODO)\b/i.test(n)).length;
+    return names.filter((n) => !/\.[cm]?[jt]sx?$/.test(n) && !/#\s*(skip|todo)\b/i.test(n)).length;
   }
   const vitest = output.match(/Tests\s+(\d+) passed/);
   return vitest ? Number(vitest[1]) : null;
@@ -316,7 +316,7 @@ function runChecks(root, phase, def, skipTag = null, skipIds = new Set()) {
   if (!def.checks?.length) fail(`${phase}: 검사 정의가 없다. 빈 단계는 실행·봉인하지 않는다`, 1);
   return def.checks.map((c) => {
     if ((skipTag && (c.requires ?? []).includes(skipTag)) || skipIds.has(c.id)) {
-      return { id: c.id, desc: c.desc ?? "", ok: true, skipped: true, measured: `requires ${skipTag}`, limit: "-" };
+      return { id: c.id, desc: c.desc ?? "", ok: true, skipped: true, measured: skipIds.has(c.id) ? "--skip-ids" : `requires ${skipTag}`, limit: "-" };
     }
     const impl = CHECKS[c.how];
     if (!impl) fail(`${c.id}: 알 수 없는 검사 종류 "${c.how}"`);
@@ -418,12 +418,19 @@ function cmdVerifySeals(root, gates, rerun, sinceRef, skipTag = null) {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), `gate-verify-${phase}-`));
       git(root, ["worktree", "add", "--detach", "--quiet", dir, seal.head]);
       try {
-        if (fs.existsSync(path.join(dir, "pnpm-lock.yaml"))) run(dir, "pnpm install --frozen-lockfile --silent");
+        // 설치가 실패하면 검사를 돌리지 않고 바로 보고한다. 설치 실패를 넘기면 검사 여러 개가 엉뚱한 이유로 실패해 원인이 가려진다
+        if (fs.existsSync(path.join(dir, "pnpm-lock.yaml"))) {
+          const inst = run(dir, "pnpm install --frozen-lockfile");
+          if (inst.code !== 0) {
+            problems.push(`${phase}: 봉인 커밋 ${seal.head.slice(0, 7)} 설치 실패 (pnpm install --frozen-lockfile 종료코드 ${inst.code})\n${inst.output.split("\n").slice(-30).join("\n")}`);
+            continue;
+          }
+        }
         // 어떤 검사가 이 환경에서 못 도는지는 봉인 커밋이 아니라 지금 설정(requires)으로 정한다.
-      // 봉인 뒤에 태그를 단 검사도 건너뛰되, 태그 없는 검사는 봉인 커밋 코드로 그대로 다시 돈다.
-      const skipIds = skipTag ? (def.checks ?? []).filter((c) => (c.requires ?? []).includes(skipTag)).map((c) => c.id) : [];
-      const extra = skipIds.length ? ["--skip-ids", skipIds.join(",")] : [];
-      const r = spawnSync(process.execPath, [SELF, "--root", dir, phase, ...extra], { encoding: "utf8" });
+        // 봉인 뒤에 태그를 단 검사도 건너뛰되, 태그 없는 검사는 봉인 커밋 코드로 그대로 다시 돈다.
+        const skipIds = skipTag ? (def.checks ?? []).filter((c) => (c.requires ?? []).includes(skipTag)).map((c) => c.id) : [];
+        const extra = skipIds.length ? ["--skip-ids", skipIds.join(",")] : [];
+        const r = spawnSync(process.execPath, [SELF, "--root", dir, phase, ...extra], { encoding: "utf8" });
         if (r.status !== 0) problems.push(`${phase}: 봉인 커밋 ${seal.head.slice(0, 7)} 에서 다시 돌린 검사 실패\n${r.stdout}${r.stderr}`);
       } finally {
         git(root, ["worktree", "remove", "--force", dir], { allowFail: true });
@@ -482,7 +489,7 @@ function cmdPhase(root, gates, phase, args) {
     console.log(`\n${phase} 봉인: ${SEAL_DIR}/${phase}.json — 커밋해서 main 에 합치면 ✅`);
   } else {
     const skipped = results.filter((r) => r.skipped).length;
-    console.log(`\n${phase}: ${results.length - skipped}/${results.length} 통과${skipped ? `, ${skipped}개 건너뜀 (requires ${skipTag})` : ""}`);
+    console.log(`\n${phase}: ${results.length - skipped}/${results.length} 통과${skipped ? `, ${skipped}개 건너뜀 (${skipTag ? `requires ${skipTag}` : "--skip-ids"})` : ""}`);
   }
 }
 
