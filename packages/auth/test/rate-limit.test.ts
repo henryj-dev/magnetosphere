@@ -98,7 +98,7 @@ describe("감싼 handler 만 내보낸다 (SQLite)", () => {
   test("TC-S3.T3.d HTTP 요청을 받는 함수는 감싼 handler 하나뿐이고 위조 헤더로 우회되지 않는다", async () => {
     // 패키지 진입점(".")이 내보내는 것과 createAuth 의 반환값
     const pkg = await import("../src/index.ts");
-    expect(Object.keys(pkg).sort()).toEqual(["CLIENT_IP_HEADER", "RATE_LIMIT_RULES", "SSO_DISABLED_PATHS", "authOptions", "createAuth", "resolveClientIp"]);
+    expect(Object.keys(pkg).sort()).toEqual(["CLIENT_IP_HEADER", "MIN_SECRET_LENGTH", "RATE_LIMIT_RULES", "SSO_DISABLED_PATHS", "authOptions", "createAuth", "resolveClientIp"]);
     const cfg = { clientIp: fakeAdapter([]) };
     const app = makeAuth(h, cfg);
     expect(Object.keys(app).filter((k) => !["outbox", "mailErrors", "settle"].includes(k)).sort()).toEqual(["api", "handler"]);

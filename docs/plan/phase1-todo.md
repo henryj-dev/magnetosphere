@@ -508,10 +508,13 @@ TC-S3.T1.e  Better Auth 구성과 스키마 생성기가 같은 옵션 객체를
   검출:  S3 에서 플러그인·rateLimit DB 저장소를 켜 테이블이 늘었는데 스키마가 그대로라 런타임에 실패하는 것 (S2 리뷰 M4)
   결정:  AUTH_SCHEMA_OPTIONS 에 sso 플러그인이 들어 있어 S3 부터 플러그인을 넣고, 공개 관리 경로는 TC-S3.T1.d 로 막는다.
          비교에서 플러그인 테이블을 빼면 스키마와 실제 구성이 다시 어긋나므로 그 방법은 쓰지 않는다
+TC-S3.T1.f  secret 이 32자 미만이면 시작을 거부한다 (S3 보안 리뷰 L1)
+  단언:  secret "", "short", 31자 → authOptions·createAuth 가 예외. 32자 → 예외 없음
+  검출:  짧은 BETTER_AUTH_SECRET 으로 조용히 운영돼 세션·토큰 서명이 무차별 대입에 약해지는 것 (Better Auth 1.7.7 은 거부하지 않는다)
 ```
 
 【통과】
-- [ ] G-S3.1 ~ G-S3.4, G-S3.14 통과
+- [ ] G-S3.1 ~ G-S3.4, G-S3.14, G-S3.17 통과
 
 ### ☐ S3.T2 — 메일 어댑터 네 종류
 선행 S3.T1 · 산출 `packages/auth/src/mail/{smtp,resend,cloudflare,console,types,messages,index}.ts`, `packages/auth/test/mailpit.compose.yml`, `packages/auth/scripts/test-smtp.mjs` · 되돌리기 커밋 1개
@@ -596,6 +599,7 @@ TC-S3.T3.d  HTTP 요청을 받는 함수는 감싼 handler 하나뿐이다 (S3 �
 | G-S3.14 | TC-S3.T1.e | `pnpm -C packages/auth test -t "TC-S3.T1.e"` | 종료코드 0 |
 | G-S3.15 | TC-S3.T2.e | `pnpm -C packages/auth test -t "TC-S3.T2.e"` | 종료코드 0 |
 | G-S3.16 | TC-S3.T3.d | `pnpm -C packages/auth test -t "TC-S3.T3.d"` | 종료코드 0 |
+| G-S3.17 | TC-S3.T1.f | `pnpm -C packages/auth test -t "TC-S3.T1.f"` | 종료코드 0 |
 
 `node scripts/gate.mjs S3 --seal`
 

@@ -4,7 +4,7 @@
 import { getAuthTables } from "better-auth/db";
 import { describe, expect, test } from "vitest";
 import { TABLES } from "@magnetosphere/db/src/schema/common.ts";
-import { authOptions } from "../src/index.ts";
+import { authOptions, createAuth } from "../src/index.ts";
 import { consoleMailer } from "../src/mail/index.ts";
 import { BASE } from "./client.ts";
 import { SECRET } from "./helpers.ts";
@@ -71,5 +71,16 @@ describe("TC-S3.T1.e 구성과 스키마", () => {
   test("TC-S3.T1.e 음성 대조: 추가 칼럼을 빼면 어긋남을 잡는다", () => {
     const o = options();
     expect(diffAuthTables({ ...o, user: {} })).toContain("user.role: 구성이 모르는 칼럼");
+  });
+});
+
+describe("TC-S3.T1.f 비밀 값 길이", () => {
+  test("TC-S3.T1.f secret 이 32자 미만이면 시작을 거부한다", () => {
+    const base = { database: { db: {}, provider: "sqlite" as const, schema: {} }, baseURL: BASE, mailer: consoleMailer(), clientIp: () => null, waitUntil: () => {}, onMailError: () => {} };
+    for (const secret of ["", "short", "x".repeat(31)]) {
+      expect(() => authOptions({ ...base, secret }), `${secret.length}자`).toThrow(/32자 이상/);
+      expect(() => createAuth({ ...base, secret }), `${secret.length}자`).toThrow(/32자 이상/);
+    }
+    expect(() => authOptions({ ...base, secret: "x".repeat(32) })).not.toThrow();
   });
 });

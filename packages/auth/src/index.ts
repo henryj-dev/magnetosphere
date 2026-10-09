@@ -29,6 +29,8 @@ export const SSO_DISABLED_PATHS = [
   "/sso/get-provider",
 ];
 
+export const MIN_SECRET_LENGTH = 32;
+
 export interface AuthDatabase {
   /** 생성 스키마(@magnetosphere/db/src/schema/{sqlite,mysql,pg}.ts)로 만든 Drizzle 연결 */
   db: any;
@@ -81,6 +83,10 @@ function deliverer(cfg: AuthConfig) {
  * 서버는 이것으로 betterAuth() 를 직접 만들지 않고 createAuth 를 쓴다 (직접 만들면 handler 가 감싸지지 않는다).
  */
 export function authOptions(cfg: AuthConfig) {
+  // 세션·토큰 서명 키. 짧으면 추측·무차별 대입에 약하므로 시작을 거부한다 (S3 보안 리뷰 L1)
+  if (typeof cfg.secret !== "string" || cfg.secret.length < MIN_SECRET_LENGTH) {
+    throw new Error(`BETTER_AUTH_SECRET 은 ${MIN_SECRET_LENGTH}자 이상이어야 한다 (지금 ${cfg.secret?.length ?? 0}자)`);
+  }
   const deliver = deliverer(cfg);
   return {
     ...AUTH_SCHEMA_OPTIONS,
