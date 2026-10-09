@@ -8,7 +8,7 @@
 // 관리자가 생긴 뒤에는 /api/setup 이 항상 409 다. 토큰도 다시 만들지 않는다.
 import { and, eq } from "drizzle-orm";
 import { hashPassword } from "better-auth/crypto";
-import { normalizeEmail } from "@magnetosphere/db/src/users.ts";
+import { findUserByEmail, normalizeEmail } from "@magnetosphere/db/src/users.ts";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import { MAIL_API_KEY_AAD, MAIL_SETTINGS_KEY } from "./mail.ts";
@@ -94,6 +94,8 @@ export type SetupResult =
   | { ok: true; userId: string }
   | { ok: false; status: 400 | 401 | 409; error: string };
 
+const EMAIL_TAKEN = { ok: false, status: 409, error: "email_taken" } as const;
+
 function invalid(input: Partial<SetupInput>): string | null {
   const isText = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
   if (!isText(input.email) || !/^[^\s@]+@[^\s@]+$/.test(input.email.trim())) return "email";
@@ -116,6 +118,8 @@ export async function runSetup(h: DbHandle, input: Partial<SetupInput>, cipher: 
   const bad = invalid(input);
   if (bad) return { ok: false, status: 400, error: `invalid_${bad}` };
   const v = input as SetupInput;
+  // 같은 이메일 계정이 이미 있으면 토큰을 소비하지 않고 알려 준다 (설치 전 가입은 서버가 막지만, 그 전에 생긴 계정도 있을 수 있다)
+  if (await findUserByEmail(h.db, { user: h.schema.user }, v.email)) return EMAIL_TAKEN;
 
   // 토큰을 먼저 지워 소비한다. 동시에 두 요청이 와도 지운 쪽 하나만 관리자를 만든다
   const s = h.schema.appSettings;
@@ -152,6 +156,8 @@ export async function runSetup(h: DbHandle, input: Partial<SetupInput>, cipher: 
     await h.db.delete(h.schema.account).where(eq(h.schema.account.userId, userId));
     await h.db.delete(h.schema.user).where(eq(h.schema.user.id, userId));
     await writeSetting(h, SETUP_TOKEN_KEY, stored, null);
+    // 위 검사와 관리자 생성 사이에 같은 이메일이 들어왔으면 고유 제약 위반이다. 500 대신 409 로 알린다
+    if (await findUserByEmail(h.db, { user: h.schema.user }, v.email)) return EMAIL_TAKEN;
     throw e;
   }
 

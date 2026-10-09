@@ -1,6 +1,7 @@
 // Hono 앱 (계획서 3.1). Node 진입점(node.ts)과 Workers 진입점(workers.ts)이 같은 앱을 쓴다.
 //   /healthz       상태 확인
 //   /api/auth/*    packages/auth 의 감싼 handler (clientIp 를 런타임 어댑터에서 받는다, S3 보안 리뷰 M2)
+//                  관리자가 없는 동안(설치 전)은 가입을 403 으로 막는다 (TC-S4.T4.e). 기본 가입 정책이 invite_only 다 (계획서 4.2)
 //   /api/setup     최초 설치 (setup/)
 //   /api/*         그 밖은 JSON 404. 모르는 API 경로가 index.html 200 이 되면 클라이언트가 오류를 성공으로 오인한다
 //   나머지         SPA 정적 파일 (apps/web 빌드). 없는 경로는 index.html (TC-S4.T3.a)
@@ -13,6 +14,7 @@ import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
+import { adminExists } from "./setup/index.ts";
 import { setupRoutes } from "./setup/routes.ts";
 
 /** /api/* 요청 본문 상한. 인증·설치 요청은 1KB 안팎이다 */
@@ -38,6 +40,21 @@ export interface AppDeps {
    * Node 런타임은 소켓 주소를 원래 Request 에 묶어 두므로 새 Request 로 옮겨야 clientIp 가 null 이 되지 않는다.
    */
   carryRequest?: (from: Request, to: Request) => void;
+}
+
+/**
+ * Better Auth 가입 경로인지. 대소문자·겹친 슬래시·끝 슬래시·%인코딩을 정리한 뒤 본다.
+ * Better Auth 라우터가 같은 엔드포인트로 받아 주는 변형으로 검사를 비켜 가지 못하게 한다.
+ */
+export function isSignUpPath(path: string): boolean {
+  let p = path;
+  try {
+    p = decodeURIComponent(path);
+  } catch {
+    // 잘못된 %인코딩은 그대로 본다
+  }
+  p = p.toLowerCase().replace(/\/+/g, "/").replace(/\/$/, "");
+  return p === "/api/auth/sign-up" || p.startsWith("/api/auth/sign-up/");
 }
 
 /** 응답 헤더 CSP. script-src·style-src 는 SPA 의 <meta> CSP 가 맡는다 */
@@ -66,6 +83,10 @@ export function createApp(deps: AppDeps) {
       if (c.req.raw !== original) deps.carryRequest?.(original, c.req.raw);
       await next();
     });
+  });
+  app.use("/api/auth/*", async (c, next) => {
+    if (isSignUpPath(c.req.path) && !(await adminExists((await deps.services()).db))) return c.json({ error: "setup_required" }, 403);
+    await next();
   });
   app.all("/api/auth/*", async (c) => (await deps.services()).auth.handler(c.req.raw));
   app.route("/api/setup", setupRoutes(deps.services, { issueTokenOnStatus: deps.issueSetupTokenOnStatus, log: deps.log }));

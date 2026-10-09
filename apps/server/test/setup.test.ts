@@ -111,6 +111,37 @@ describe("TC-S4.T4.d 관리자가 있으면 설치 토큰을 만들지 않는다
   });
 });
 
+describe("TC-S4.T4.e 설치 전에는 가입을 막고, 이미 있는 이메일로는 관리자를 만들지 않는다", () => {
+  const SIGNUP = { email: "early@example.com", password: "early-password-123", name: "early" };
+
+  it("관리자가 없으면 /api/auth/sign-up/email 과 경로 변형 → 403(또는 Better Auth 404), user 0. 설치 뒤에는 403 아님", async () => {
+    const r = await boot();
+    const variants = ["/api/auth/sign-up/email", "/api/auth/sign-up/email/", "/api/auth//sign-up/email", "/api/auth/Sign-Up/email", "/api/auth/sign%2Dup/email"];
+    for (const p of variants) {
+      const res = await post(r, p, SIGNUP);
+      expect([403, 404], p).toContain(res.status);
+      if (p === "/api/auth/sign-up/email") expect(await res.json()).toEqual({ error: "setup_required" });
+    }
+    expect(await sql(r.t, "SELECT id FROM user")).toHaveLength(0);
+
+    expect((await post(r, "/api/setup", { token: tokenIn(r.logs), ...ADMIN })).status).toBe(201);
+    const after = await post(r, "/api/auth/sign-up/email", SIGNUP);
+    expect(after.status).toBe(200);
+    expect(await sql(r.t, "SELECT email FROM user WHERE email = 'early@example.com'")).toHaveLength(1);
+  });
+
+  it("같은 이메일 계정이 먼저 있으면 /setup → 409 email_taken (500 아님), 토큰은 남아 다른 이메일로 설치된다", async () => {
+    const r = await boot();
+    const token = tokenIn(r.logs)!;
+    await sql(r.t, "INSERT INTO user (id, name, email, email_verified) VALUES ('squatter', 'x', 'admin@example.com', 0)");
+    const res = await post(r, "/api/setup", { token, ...ADMIN });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "email_taken" });
+    expect(await sql(r.t, "SELECT 1 FROM app_settings WHERE key = 'setup_token_hash'")).toHaveLength(1);
+    expect((await post(r, "/api/setup", { token, ...ADMIN, email: "real-admin@example.com" })).status).toBe(201);
+  });
+});
+
 describe("메일 발송 설정 (계획서 4.7 5번)", () => {
   it("설치 때 넣은 Resend 설정으로 비밀번호 재설정 메일을 보낸다 (복호화한 API 키)", async () => {
     const r = await boot();

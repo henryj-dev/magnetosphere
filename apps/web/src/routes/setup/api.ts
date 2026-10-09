@@ -14,6 +14,7 @@ export type SetupSubmit = { ok: true } | { ok: false; reason: string };
 const REASONS: Record<string, string> = {
   invalid_token: "설치 토큰이 맞지 않습니다. 서버 콘솔에 출력된 토큰을 그대로 넣어 주세요.",
   already_set_up: "이미 설치가 끝났습니다.",
+  email_taken: "이 이메일로 이미 만든 계정이 있습니다. 다른 이메일로 관리자를 만들어 주세요.",
   invalid_email: "이메일 형식을 확인해 주세요.",
   invalid_password: "비밀번호는 8자 이상 128자 이하로 정해 주세요.",
   invalid_publicBaseUrl: "공개 주소는 http:// 또는 https:// 로 시작해야 합니다.",

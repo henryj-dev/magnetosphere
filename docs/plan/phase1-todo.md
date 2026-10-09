@@ -716,10 +716,11 @@ TC-S4.T3.f  SPA·정적 파일·API 응답 모두 보안 헤더가 있고 SPA �
 - [ ] G-S4.7 ~ G-S4.9, G-S4.17, G-S4.19, G-S4.20 통과
 
 ### ☐ S4.T4 — 최초 설치 흐름
-선행 S4.T2, S4.T3 · 산출 `apps/server/src/setup/`, `apps/web/src/routes/setup/` · 되돌리기 커밋 1개
+선행 S4.T2, S4.T3 · 산출 `apps/server/src/setup/`, `apps/web/src/routes/setup/` · 되돌리기 커밋 4개
 
 【작업】
 1. 관리자가 없으면 시작 시 일회용 설치 토큰을 생성해 콘솔에 한 번 출력하고 해시만 저장. `/setup`에서 토큰 + 이메일·비밀번호 → 최초 관리자(`role=admin`, `is_bootstrap_admin=1`, 이메일 인증 완료 처리) 생성. 공개 주소 입력. OmniRoute 단계는 S5에서 붙인다. 커밋.
+2. 설치 전(관리자 없음)에는 서버가 Better Auth 가입 경로를 403 으로 막는다. 같은 이메일 계정이 있으면 `/setup`은 409 `email_taken`, 화면에 이유를 보인다 (S4 보안 리뷰 L2). packages/auth 구성은 바꾸지 않아 S3 테스트는 그대로다. 커밋.
 
 【테스트】
 ```
@@ -735,10 +736,15 @@ TC-S4.T4.c  토큰 원문이 DB 에 없다
 TC-S4.T4.d  관리자가 있으면 설치 토큰을 만들지 않는다
   단언:  관리자 존재 상태로 재시작 → 콘솔에 토큰 출력 없음, /setup → 409
   검출:  재시작할 때마다 새 설치 토큰이 생겨 로그에 남는 것
+TC-S4.T4.e  설치 전에는 가입을 막고, 이미 있는 이메일로는 관리자를 만들지 않는다 (S4 보안 리뷰 L2)
+  단언:  관리자가 없을 때 POST /api/auth/sign-up/email → 403 {error:"setup_required"}, 경로 변형(끝 슬래시·겹친 슬래시·대소문자·%2D)은
+         403 또는 404, user 0. 설치 뒤 같은 가입 → 200. 같은 이메일 user 가 먼저 있으면 /setup → 409 {error:"email_taken"}(500 아님),
+         토큰은 남아 다른 이메일로 201
+  검출:  설치 전 열린 가입으로 공격자가 관리자 이메일을 선점해 /setup 이 500 으로 막히는 것 (기본 정책 invite_only, 계획서 4.2)
 ```
 
 【통과】
-- [ ] G-S4.10 ~ G-S4.13 통과
+- [ ] G-S4.10 ~ G-S4.13, G-S4.21 통과
 
 ## 🚪 GATE S4
 
@@ -764,6 +770,7 @@ TC-S4.T4.d  관리자가 있으면 설치 토큰을 만들지 않는다
 | G-S4.18 | TC-S4.T2.d | `pnpm -C packages/runtime test -t "TC-S4.T2.d"` | 종료코드 0 |
 | G-S4.19 | TC-S4.T3.e | `pnpm -C apps/server test -t "TC-S4.T3.e" && pnpm -C apps/server test:both-runtimes -t "TC-S4.T3.e"` | 종료코드 0 |
 | G-S4.20 | TC-S4.T3.f | `pnpm -C apps/server test:both-runtimes -t "TC-S4.T3.f"` | 종료코드 0 |
+| G-S4.21 | TC-S4.T4.e | `pnpm -C apps/server test -t "TC-S4.T4.e"` | 종료코드 0 |
 
 `node scripts/gate.mjs S4 --seal`
 
