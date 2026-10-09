@@ -649,10 +649,11 @@ TC-S4.T1.e  clientIp 어댑터가 IP 를 못 정하면 서버가 시작을 거�
 - [ ] G-S4.1 ~ G-S4.3, G-S4.15, G-S4.16 통과
 
 ### ☐ S4.T2 — 암호화 유틸
-선행 없음 · 산출 `packages/runtime/src/crypto.ts` · 되돌리기 커밋 1개
+선행 없음 · 산출 `packages/runtime/src/crypto.ts` · 되돌리기 커밋 2개
 
 【작업】
 1. WebCrypto AES-256-GCM, 키는 `APP_ENCRYPTION_KEY`(32바이트 base64). 출력 형식에 버전 접두사(`v1:`). Node·Workers 같은 코드. 커밋.
+2. AAD 로 저장 자리 이름을 묶는다: `encrypt(평문, aad)`·`decrypt(암호문, aad)`. 운영 데이터가 아직 없어 형식은 `v1` 그대로 둔다 (S4 보안 리뷰 L3). 커밋.
 
 【테스트】
 ```
@@ -665,10 +666,14 @@ TC-S4.T2.b  변조된 암호문은 복호화에 실패한다
 TC-S4.T2.c  키가 32바이트가 아니면 시작을 거부한다
   단언:  16바이트 키로 초기화 → 예외
   검출:  약한 키로 조용히 운영되는 것
+TC-S4.T2.d  다른 AAD(저장 자리 이름)로는 복호화하지 못한다 (S4 보안 리뷰 L3)
+  단언:  encrypt(평문, "app_settings.mail_settings.apiKey") → 같은 AAD 로 decrypt 는 평문, 다른 AAD("app_settings.omniroute_token",
+         대소문자만 다른 이름)로는 예외. 빈 AAD 는 예외. 교차 벡터도 자리마다 AAD 를 넣고 Workers 쪽에서도 다른 AAD 는 실패
+  검출:  DB 쓰기 권한을 얻은 공격자가 암호문을 다른 칼럼·키로 옮겨 붙여, 앱이 그 비밀 값을 다른 용도로 복호화해 쓰거나 노출하는 것
 ```
 
 【통과】
-- [ ] G-S4.4 ~ G-S4.6 통과
+- [ ] G-S4.4 ~ G-S4.6, G-S4.18 통과
 
 ### ☐ S4.T3 — Hono 서버와 SvelteKit SPA
 선행 S4.T1 · 산출 `apps/server/src/`, `apps/web/`, `tsconfig.json`, `apps/*/tsconfig.json`, `packages/*/tsconfig.json` · 되돌리기 커밋 3개
@@ -743,6 +748,7 @@ TC-S4.T4.d  관리자가 있으면 설치 토큰을 만들지 않는다
 | G-S4.15 | TC-S4.T1.d | `pnpm -C packages/runtime test:db -t "TC-S4.T1.d" --db mysql,mariadb,pg` | 종료코드 0 |
 | G-S4.16 | TC-S4.T1.e | `pnpm -C packages/runtime test -t "TC-S4.T1.e"` | 종료코드 0 |
 | G-S4.17 | TC-S4.T3.d | `pnpm -r typecheck` | 종료코드 0 |
+| G-S4.18 | TC-S4.T2.d | `pnpm -C packages/runtime test -t "TC-S4.T2.d"` | 종료코드 0 |
 
 `node scripts/gate.mjs S4 --seal`
 

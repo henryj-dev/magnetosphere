@@ -8,6 +8,8 @@ import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 
 export const MAIL_SETTINGS_KEY = "mail_settings";
+/** API 키 암호문의 AAD. 다른 자리로 옮겨 붙인 암호문은 열리지 않는다 */
+export const MAIL_API_KEY_AAD = "app_settings.mail_settings.apiKey";
 
 interface StoredMailSettings {
   provider: "resend";
@@ -24,7 +26,7 @@ export function settingsMailer(db: () => Promise<DbHandle>, cipher: () => Promis
       const [row] = await h.db.select({ value: t.value }).from(t).where(eq(t.key, MAIL_SETTINGS_KEY));
       if (!row) return fallback.send(msg);
       const s = JSON.parse(row.value) as StoredMailSettings;
-      const apiKey = await (await cipher()).decrypt(s.apiKey);
+      const apiKey = await (await cipher()).decrypt(s.apiKey, MAIL_API_KEY_AAD);
       return resendMailer({ apiKey, from: s.from }).send(msg);
     },
   };

@@ -137,6 +137,7 @@ export const GATES = {
       { id: "G-S4.15", how: "test", desc: "TC-S4.T1.d DB 세션 시간대 UTC 강제", cmd: 'pnpm -C packages/runtime test:db -t "TC-S4.T1.d" --db mysql,mariadb,pg' },
       { id: "G-S4.16", how: "test", desc: "TC-S4.T1.e clientIp 가 null 이면 시작 거부", cmd: 'pnpm -C packages/runtime test -t "TC-S4.T1.e"' },
       { id: "G-S4.17", how: "cmd", desc: "TC-S4.T3.d 모든 패키지 타입 검사", cmd: "pnpm -r typecheck" },
+      { id: "G-S4.18", how: "test", desc: "TC-S4.T2.d 다른 AAD 로 복호화 거부", cmd: 'pnpm -C packages/runtime test -t "TC-S4.T2.d"' },
     ],
   },
   S5: {

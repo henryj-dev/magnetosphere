@@ -11,7 +11,7 @@ import { hashPassword } from "better-auth/crypto";
 import { normalizeEmail } from "@magnetosphere/db/src/users.ts";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
-import { MAIL_SETTINGS_KEY } from "./mail.ts";
+import { MAIL_API_KEY_AAD, MAIL_SETTINGS_KEY } from "./mail.ts";
 
 export const SETUP_TOKEN_KEY = "setup_token_hash";
 export const PUBLIC_BASE_URL_KEY = "public_base_url";
@@ -158,7 +158,7 @@ export async function runSetup(h: DbHandle, input: Partial<SetupInput>, cipher: 
   await writeSetting(h, PUBLIC_BASE_URL_KEY, v.publicBaseUrl.trim(), userId);
   if (v.mail) {
     const c = await cipher();
-    await writeSetting(h, MAIL_SETTINGS_KEY, { provider: "resend", from: v.mail.from.trim(), apiKey: await c.encrypt(v.mail.apiKey.trim()) }, userId);
+    await writeSetting(h, MAIL_SETTINGS_KEY, { provider: "resend", from: v.mail.from.trim(), apiKey: await c.encrypt(v.mail.apiKey.trim(), MAIL_API_KEY_AAD) }, userId);
   }
   // OmniRoute 부트스트랩 자리 (계획서 4.7 3번, S5 의 setup/omniroute.ts)
   return { ok: true, userId };

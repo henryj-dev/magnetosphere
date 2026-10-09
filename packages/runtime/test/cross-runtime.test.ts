@@ -9,7 +9,7 @@ import { createCipher } from "../src/crypto.ts";
 
 const VECTORS = JSON.parse(readFileSync(new URL("./fixtures/crypto-vectors.json", import.meta.url), "utf8")) as {
   key: string;
-  cases: { plain: string; token: string }[];
+  cases: { plain: string; aad: string; token: string }[];
 };
 const plains = VECTORS.cases.map((c) => c.plain);
 
@@ -34,25 +34,33 @@ describe("TC-S4.T2.a Node 에서 암호화한 값을 Workers 에서 복호화한
 
   it("고정 벡터 → Node 복호화가 같은 평문", async () => {
     const cipher = await createCipher(VECTORS.key);
-    expect(await Promise.all(VECTORS.cases.map((c) => cipher.decrypt(c.token)))).toEqual(plains);
+    expect(await Promise.all(VECTORS.cases.map((c) => cipher.decrypt(c.token, c.aad)))).toEqual(plains);
   });
 
   it("고정 벡터 → Workers(workerd) 복호화가 같은 평문", async () => {
-    const { plains: got } = await call<{ plains: string[] }>("/decrypt", { key: VECTORS.key, tokens: VECTORS.cases.map((c) => c.token) });
+    const { plains: got } = await call<{ plains: string[] }>("/decrypt", { key: VECTORS.key, items: VECTORS.cases });
     expect(got).toEqual(plains);
   });
 
   it("Node 에서 새로 암호화 → Workers 복호화", async () => {
     const cipher = await createCipher(VECTORS.key);
-    const tokens = await Promise.all(plains.map((p) => cipher.encrypt(p)));
-    const { plains: got } = await call<{ plains: string[] }>("/decrypt", { key: VECTORS.key, tokens });
+    const tokens = await Promise.all(VECTORS.cases.map((c) => cipher.encrypt(c.plain, c.aad)));
+    const items = tokens.map((token, i) => ({ token, aad: VECTORS.cases[i].aad }));
+    const { plains: got } = await call<{ plains: string[] }>("/decrypt", { key: VECTORS.key, items });
     expect(got).toEqual(plains);
   });
 
+  it("Workers 에서도 다른 AAD 로는 복호화하지 못한다", async () => {
+    const [c] = VECTORS.cases.slice(1);
+    const res = await worker.fetch("http://worker/decrypt", { method: "POST", body: JSON.stringify({ key: VECTORS.key, items: [{ token: c.token, aad: "other.field" }] }) });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/복호화 실패/);
+  });
+
   it("Workers 에서 새로 암호화 → Node 복호화", async () => {
-    const { tokens } = await call<{ tokens: string[] }>("/encrypt", { key: VECTORS.key, plains });
+    const { tokens } = await call<{ tokens: string[] }>("/encrypt", { key: VECTORS.key, items: VECTORS.cases.map(({ plain, aad }) => ({ plain, aad })) });
     expect(tokens.every((t) => t.startsWith("v1:"))).toBe(true);
     const cipher = await createCipher(VECTORS.key);
-    expect(await Promise.all(tokens.map((t) => cipher.decrypt(t)))).toEqual(plains);
+    expect(await Promise.all(tokens.map((t, i) => cipher.decrypt(t, VECTORS.cases[i].aad)))).toEqual(plains);
   });
 });
