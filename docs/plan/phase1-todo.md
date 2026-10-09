@@ -985,6 +985,8 @@ TC-S6.T2.g  설치가 끝났는데 OmniRoute 비밀번호가 남아 있으면 �
   단언:  관리자 있음 + OMNIROUTE_INITIAL_PASSWORD 있음 → 시작 로그에 경고 정확히 1줄, 비밀번호 값 0건. 관리자 없음 또는 변수 없음 → 경고 0줄.
          .env.setup 을 지우고 docker compose up -d app → 컨테이너 환경(docker compose exec app env)에 OMNIROUTE_INITIAL_PASSWORD 0건
   검출:  설치 뒤에도 관리 비밀번호가 회원 앱에 남아 write 최소 범위가 무력해지는데 아무 신호가 없는 것
+  추가(S6 보안 리뷰 L5): Workers 도 본다 (pnpm -C apps/server test:workers). 설치 전 요청 경고 0줄, 관리자 생성 뒤 요청에서 정확히 1줄.
+         설치 전 첫 요청에서 확인을 멈추면 설치 뒤 경고가 영영 안 나오는 것을 잡는다
 ```
 
 【통과】
@@ -1072,7 +1074,7 @@ TC-S6.T4.a ~ f  조합마다 설치 → 관리자 → 부트스트랩 → 로그
 | G-S6.24 | 설치 운영 안내 | grep `한 인스턴스` in `deploy/README.md` | ≥ 1 |
 | G-S6.25 | Compose 신뢰 프록시 기본값 | grep `TRUSTED_PROXIES` in `docker-compose.yml` | ≥ 1 |
 | G-S6.26 | TC-S6.T1.d | `node --test --test-name-pattern="TC-S6.T1.d" scripts/init.test.mjs` | 종료코드 0 |
-| G-S6.27 | TC-S6.T2.g | `pnpm test:deploy -t "TC-S6.T2.g"` | 종료코드 0 |
+| G-S6.27 | TC-S6.T2.g | `pnpm test:deploy -t "TC-S6.T2.g" && pnpm -C apps/server test:workers -t "TC-S6.T2.g"` | 종료코드 0 |
 | G-S6.28 | TC-S6.T3.e | `pnpm -C apps/server test -t "TC-S6.T3.e" && pnpm -C apps/server test:workers -t "TC-S6.T3.e"` | 종료코드 0 |
 | G-S6.29 | TC-S6.T3.f | `pnpm -C apps/server test -t "TC-S6.T3.f" && pnpm -C apps/server test:workers -t "TC-S6.T3.f"` | 종료코드 0 |
 | G-S6.30 | OmniRoute 비공개 안내 (S6 보안 리뷰 M3) | grep `OmniRoute 20128 포트와 /api/\* 는 공개로 열지 않는다\|Workers 조합은 Cloudflare Tunnel·Access 로만 연결한다` in `deploy/README.md` | 2 |

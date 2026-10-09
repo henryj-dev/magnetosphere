@@ -116,6 +116,24 @@ describe("TC-S6.T3.f 설치 시도 횟수 제한", () => {
   });
 });
 
+describe("TC-S6.T2.g Workers: 설치가 끝났는데 OmniRoute 비밀번호가 남아 있으면 경고한다", () => {
+  it("설치 전 요청에는 경고 0줄, 관리자를 만든 뒤 요청에서 경고 정확히 1줄, 비밀번호 값은 찍지 않는다 (S6 보안 리뷰 L5)", async () => {
+    const persist = freshD1();
+    migrateLocal(persist);
+    const secret = "operator-chosen-setup-token-0123456789";
+    const password = "leftover-omniroute-password-0123";
+    const d = await dev(persist, { SETUP_TOKEN: secret, OMNIROUTE_INITIAL_PASSWORD: password });
+    const WARN = /OMNIROUTE_INITIAL_PASSWORD 가 남아 있다/g;
+    for (let i = 0; i < 2; i++) expect((await fetch(`${d.baseUrl}/api/setup`)).status).toBe(200);
+    expect(count(await d.waitOutput(WARN, 1, 1500), WARN)).toBe(0);
+    expect(await setup(d.baseUrl, secret)).toBe(201);
+    for (let i = 0; i < 3; i++) expect((await fetch(`${d.baseUrl}/api/setup`)).status).toBe(200);
+    const out = await d.waitOutput(WARN, 2, 2000);
+    expect(count(out, WARN)).toBe(1);
+    expect(out).not.toContain(password);
+  });
+});
+
 describe("TC-S6.T3.d Workers 배포 전에 마이그레이션이 적용된다", () => {
   it("배포 스크립트 --dry-run 은 마이그레이션 단계를 배포보다 먼저 낸다 (d1·mysql·pg)", () => {
     for (const env of ["d1", "mysql", "pg"]) {

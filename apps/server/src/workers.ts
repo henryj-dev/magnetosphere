@@ -19,8 +19,9 @@ interface ScheduledController {
   cron: string;
 }
 
-// isolate 하나에서 OMNIROUTE_INITIAL_PASSWORD 남음 경고를 한 번만 확인한다 (Workers 는 시작 시점이 없어 첫 요청 때, TC-S6.T2.g)
-let leftoverChecked = false;
+// isolate 하나에서 OMNIROUTE_INITIAL_PASSWORD 남음 경고를 한 번만 낸다 (Workers 는 시작 시점이 없어 요청 때, TC-S6.T2.g).
+// 관리자가 생겨 경고를 낸 뒤에만 멈춘다. 설치 전 첫 요청에서 멈추면 설치 뒤에도 경고가 나오지 않는다 (S6 보안 리뷰 L5)
+let leftoverWarned = false;
 
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -29,9 +30,14 @@ export default {
     const waitUntil = (p: Promise<unknown>) => void pending.push(p.catch((e) => console.error("[server] 백그라운드 작업 실패", e)));
     let services: Promise<Services> | undefined;
     const log = (line: string) => console.log(line);
-    if (!leftoverChecked && typeof env.OMNIROUTE_INITIAL_PASSWORD === "string" && env.OMNIROUTE_INITIAL_PASSWORD) {
-      leftoverChecked = true;
-      waitUntil((services ??= buildServices(runtime, { waitUntil })).then((s) => warnLeftoverInitialPassword(s.db, s.omniroute.initialPassword, log)));
+    if (!leftoverWarned && typeof env.OMNIROUTE_INITIAL_PASSWORD === "string" && env.OMNIROUTE_INITIAL_PASSWORD) {
+      waitUntil(
+        (services ??= buildServices(runtime, { waitUntil }))
+          .then((s) => (leftoverWarned ? false : warnLeftoverInitialPassword(s.db, s.omniroute.initialPassword, log)))
+          .then((warned) => {
+            if (warned) leftoverWarned = true;
+          }),
+      );
     }
     const app = createApp({
       services: () => (services ??= buildServices(runtime, { waitUntil })),
