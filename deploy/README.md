@@ -45,8 +45,10 @@ SQLite 는 인스턴스 하나만 쓴다.
 | mysql / postgres | 프로필 `mysql`(8.0) · `postgres`(14) | 없음 |
 
 - OmniRoute 대시보드는 서버의 루프백에만 열린다. 제공자 등록은 SSH 터널로 한다: `ssh -L 20128:127.0.0.1:20128 <서버>` 뒤 `http://localhost:20128`.
-- app 은 `edge` 망(Caddy 만 있는 망)에서 온 `X-Forwarded-For` 만 믿는다 (`TRUSTED_PROXIES`, 기본 `10.203.57.0/29` = `EDGE_SUBNET`).
-  이 망 대역이 서버의 다른 망과 겹치면 `.env` 에 `EDGE_SUBNET` 과 `TRUSTED_PROXIES` 를 같은 값으로 바꾼다.
+- app 은 `edge` 망의 Caddy 고정 주소에서 온 `X-Forwarded-For` 만 믿는다 (`TRUSTED_PROXIES`, 기본 `CADDY_EDGE_IP/32` = `10.203.57.2/32`).
+  망 전체가 아니라 Caddy 주소 하나만 믿는다. 망 게이트웨이(호스트에서 들어온 연결의 출발지)를 프록시로 보지 않게 하려는 것이다.
+  이 망 대역이 서버의 다른 망과 겹치면 `.env` 에 `EDGE_SUBNET`, 그 안의 `CADDY_EDGE_IP`, 그 안이면서 Caddy 주소 밖인 `EDGE_IP_RANGE` 를 함께 바꾼다.
+  `TRUSTED_PROXIES` 는 `CADDY_EDGE_IP` 를 따라가므로 따로 바꾸지 않는다. 주소가 대역 밖이면 `docker compose up` 이 실패한다.
   신뢰 목록 밖의 상대가 `X-Forwarded-For` 를 보내면 app 이 경고를 한 번 남긴다. 이 경고가 보이면 프록시 설정을 확인한다.
 - Caddy 앞에 다른 부하 분산기가 있으면 `deploy/Caddyfile` 전역 옵션에 `servers { trusted_proxies static <주소> }` 를 더한다.
   그러지 않으면 모든 요청이 그 부하 분산기 주소 하나로 세어진다.
