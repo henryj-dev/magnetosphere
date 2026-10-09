@@ -16,21 +16,22 @@ export const DEFAULT_SETTINGS = {
 type AnyDb = any;
 type Schema = { appSettings: any };
 
-/** 없는 기본값만 넣는다. 넣은 키 목록을 돌려준다. */
+/** 없는 기본값만 넣는다. 이 호출이 실제로 넣은 키 목록(INSERT 결과로 판정)을 돌려준다. */
 export async function seedAppSettings(db: AnyDb, schema: Schema, now: Date = new Date()): Promise<string[]> {
   const t = schema.appSettings;
-  const existing = new Set((await db.select({ key: t.key }).from(t)).map((r: { key: string }) => r.key));
-  const rows = Object.entries(DEFAULT_SETTINGS)
-    .filter(([key]) => !existing.has(key))
-    .map(([key, value]) => ({ key, value: JSON.stringify(value), updatedAt: now, updatedBy: null }));
-  if (rows.length === 0) return [];
-  // 다른 인스턴스가 같은 순간 시드해도 실패하지 않고 먼저 들어간 값을 남긴다.
+  const rows = Object.entries(DEFAULT_SETTINGS).map(([key, value]) => ({ key, value: JSON.stringify(value), updatedAt: now, updatedBy: null }));
+  // 이미 있는 키는 충돌로 건너뛴다. 다른 인스턴스가 같은 순간 시드해도 실패하지 않고 먼저 들어간 값을 남긴다.
   if (is(db, MySqlDatabase)) {
-    await db.insert(t).values(rows).onDuplicateKeyUpdate({ set: { key: t.key } });
-  } else {
-    await db.insert(t).values(rows).onConflictDoNothing();
+    // MySQL 은 RETURNING 이 없다. 한 행씩 INSERT IGNORE 하고 영향 행 수로 판정한다.
+    const inserted: string[] = [];
+    for (const row of rows) {
+      const [result] = await db.insert(t).ignore().values(row);
+      if (result.affectedRows === 1) inserted.push(row.key);
+    }
+    return inserted;
   }
-  return rows.map((r) => r.key);
+  const returned: { key: string }[] = await db.insert(t).values(rows).onConflictDoNothing().returning({ key: t.key });
+  return returned.map((r) => r.key);
 }
 
 /** app_settings 를 키 → 파싱한 값으로 읽는다. */

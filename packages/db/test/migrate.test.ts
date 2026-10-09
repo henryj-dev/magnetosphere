@@ -37,7 +37,9 @@ describe.each(cases)("$label", (d) => {
     expect(await h.tables()).toEqual(EXPECTED_TABLES);
 
     // 두 인스턴스가 동시에 시드해도 실패하지 않고 기본값이 한 번만 들어간다.
-    await Promise.all([seedAppSettings(h.db, h.schema), seedAppSettings(h.db, h.schema)]);
+    const [first, second] = await Promise.all([seedAppSettings(h.db, h.schema), seedAppSettings(h.db, h.schema)]);
+    expect([...first, ...second].sort(), "두 시드가 돌려준 키를 합치면 기본값 키가 한 번씩").toEqual(Object.keys(DEFAULT_SETTINGS).sort());
+    expect(await seedAppSettings(h.db, h.schema), "세 번째 시드는 넣은 것이 없다").toEqual([]);
     expect(await readAppSettings(h.db, h.schema)).toEqual(DEFAULT_SETTINGS);
 
     // user 권한 칼럼 기본값과 금액 DECIMAL(12,6) 왕복
