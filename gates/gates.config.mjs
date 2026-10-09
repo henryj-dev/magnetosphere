@@ -69,7 +69,11 @@ export const GATES = {
       { id: "G-S2.3", how: "cmd", desc: "TC-S2.T1.c 린트 음성 대조 (픽스처 위반 3)", cmd: "node scripts/schema-lint.mjs --fixture test/fixtures/bad-schema.ts --expect 3" },
       { id: "G-S2.4", how: "test", desc: "TC-S2.T2.a 시드 기본값", cmd: 'pnpm -C packages/db test -t "TC-S2.T2.a"' },
       { id: "G-S2.5", how: "test", desc: "TC-S2.T2.b 시드가 운영자 값을 덮지 않음", cmd: 'pnpm -C packages/db test -t "TC-S2.T2.b"' },
+      { id: "G-S2.6", how: "test", desc: "TC-S2.T3.a 다섯 DB 빈 상태 → 최신 마이그레이션", cmd: "pnpm -C packages/db test:migrate --db sqlite,mysql,mariadb,pg,d1" },
       { id: "G-S2.7", how: "cmd", desc: "TC-S2.T3.b 마이그레이션과 스키마가 같음", cmd: "pnpm -C packages/db check:drift" },
+      { id: "G-S2.8", how: "test", desc: "TC-S2.T3.c 이메일 소문자 저장·대소문자 중복 거부", cmd: 'pnpm -C packages/db test:migrate -t "TC-S2.T3.c"' },
+      { id: "G-S2.9", how: "grep", desc: "MySQL id 는 VARCHAR(36)", pattern: 'varchar\\("id", \\{ length: 36', in: ["packages/db/src/schema/mysql.ts"], op: ">=", limit: 4 },
+      { id: "G-S2.10", how: "grep", desc: "지원 DB 최소 버전 고정", pattern: "mysql:8.0|mariadb:10.11|postgres:14", in: ["docker-compose.test.yml"], op: "==", limit: 3 },
     ],
   },
   S3: {

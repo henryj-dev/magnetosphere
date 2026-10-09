@@ -373,7 +373,7 @@ TC-S1.G.d  resolved 는 막았던 항목이 현재 계획서 버전을 가리켜
 **브랜치** `s2/db`. 계획서 3.2 "DB 지원 원칙", 5.9 데이터 모델.
 
 ### ☐ S2.T1 — 공통 스키마 정의와 DB별 세 벌 생성
-선행 없음 · 산출 `packages/db/src/schema/common.ts`, `packages/db/src/schema/{sqlite,mysql,pg}.ts`, `packages/db/scripts/gen-schema.mjs`, `scripts/schema-lint.mjs` · 되돌리기 커밋 2개
+선행 없음 · 산출 `packages/db/src/schema/common.ts`, `packages/db/src/schema/{sqlite,mysql,pg}.ts`, `packages/db/scripts/gen-schema.mjs`, `scripts/schema-lint.mjs`, `test/fixtures/bad-schema.ts` · 되돌리기 커밋 2개
 
 【작업】
 1. 공통 정의(테이블·칼럼·의미) 하나에서 `sqlite`·`mysql`·`pg` Drizzle 스키마 세 벌을 생성하는 스크립트. D1은 `sqlite`를 공유. 테이블: Better Auth 다섯 + `app_settings`, `sso_provider_settings`, `invites`, `api_keys`, `omniroute_jobs`, `job_leases`, `audit_log`. 커밋.
@@ -415,7 +415,7 @@ TC-S2.T2.b  시드는 두 번 돌려도 운영자 값을 덮지 않는다
 - [ ] G-S2.4, G-S2.5 통과
 
 ### ☐ S2.T3 — DB별 마이그레이션과 적용 테스트
-선행 S2.T2 · 산출 `packages/db/migrations/{sqlite,mysql,pg}/`, `packages/db/test/migrate.test.ts`, `docker-compose.test.yml` · 되돌리기 커밋 2개
+선행 S2.T2 · 산출 `packages/db/migrations/{sqlite,mysql,pg}/`, `packages/db/drizzle.{sqlite,mysql,pg}.config.ts`, `packages/db/scripts/{check-drift,test-migrate}.mjs`, `packages/db/src/users.ts`(이메일 소문자 저장 계층), `packages/db/test/migrate.test.ts`, `docker-compose.test.yml` · 되돌리기 커밋 2개
 
 【작업】
 1. drizzle-kit으로 DB별 마이그레이션 생성, 저장소에 커밋. 커밋.
@@ -427,7 +427,7 @@ TC-S2.T3.a  다섯 DB 에서 빈 상태 → 최신 마이그레이션이 성공�
   단언:  DB 다섯 × migrate 종료코드 0, 테이블 12개 존재
   검출:  한 DB 에서만 문법 오류로 설치가 실패하는 것 (MariaDB 의 JSON·DEFAULT 표현 차이 등)
 TC-S2.T3.b  마이그레이션과 스키마가 어긋나지 않는다
-  단언:  drizzle-kit generate --dry → 세 벌 모두 "변경 없음"
+  단언:  커밋된 마이그레이션 사본 위에서 drizzle-kit generate → 세 벌 모두 "변경 없음", 새 파일 0 (0.31 에는 --dry 가 없다)
   검출:  스키마만 고치고 마이그레이션을 안 만들어 운영 DB 와 코드가 어긋나는 것
 TC-S2.T3.c  이메일은 소문자로 저장되고 대소문자 중복이 막힌다
   단언:  DB 다섯 × 저장 계층에 "A@x.test" 저장 → 저장값 "a@x.test", 이어서 "a@x.test" 저장 → 고유 제약 오류

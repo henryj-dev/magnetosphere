@@ -1,0 +1,14 @@
+{
+  // D1 마이그레이션 테스트 전용 (test/migrate.test.ts). 로컬(--local)에서만 쓰고 배포하지 않는다.
+  // database_id 는 가짜 값이다. 마이그레이션은 sqlite 것을 그대로 쓴다.
+  "name": "magnetosphere-db-test",
+  "compatibility_date": "2026-07-29",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "mg-test",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "../../migrations/sqlite"
+    }
+  ]
+}

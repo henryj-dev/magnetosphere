@@ -1,0 +1,50 @@
+# packages/db 마이그레이션 테스트용 DB (pnpm -C packages/db test:migrate 가 띄운다).
+# 지원 최소 버전으로 고정한다 (계획서 3.2): MySQL 8.0, MariaDB 10.11, Postgres 14.
+# 데이터는 남기지 않는다. 포트는 127.0.0.1 에만 연다.
+name: magnetosphere-test
+
+services:
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: mgroot
+      MYSQL_DATABASE: mg
+      MYSQL_USER: mg
+      MYSQL_PASSWORD: mgpass
+    ports: ["127.0.0.1:33306:3306"]
+    tmpfs: [/var/lib/mysql]
+    # 초기화 중 임시 서버도 ping 에는 응답하므로 앱 계정으로 TCP 쿼리가 되는지 본다 (V26).
+    healthcheck:
+      test: ["CMD", "mysql", "-h127.0.0.1", "-P3306", "-umg", "-pmgpass", "mg", "-e", "SELECT 1"]
+      interval: 2s
+      timeout: 5s
+      retries: 90
+
+  mariadb:
+    image: mariadb:10.11
+    environment:
+      MARIADB_ROOT_PASSWORD: mgroot
+      MARIADB_DATABASE: mg
+      MARIADB_USER: mg
+      MARIADB_PASSWORD: mgpass
+    ports: ["127.0.0.1:33307:3306"]
+    tmpfs: [/var/lib/mysql]
+    healthcheck:
+      test: ["CMD", "mariadb", "-h127.0.0.1", "-P3306", "-umg", "-pmgpass", "mg", "-e", "SELECT 1"]
+      interval: 2s
+      timeout: 5s
+      retries: 90
+
+  postgres:
+    image: postgres:14
+    environment:
+      POSTGRES_USER: mg
+      POSTGRES_PASSWORD: mgpass
+      POSTGRES_DB: mg
+    ports: ["127.0.0.1:35432:5432"]
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD", "psql", "-h127.0.0.1", "-Umg", "-dmg", "-c", "SELECT 1"]
+      interval: 2s
+      timeout: 5s
+      retries: 90
