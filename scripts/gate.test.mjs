@@ -347,3 +347,46 @@ test("TC-S0.T2.j --assert-order --head 는 지정한 커밋을 본다", () => {
   assert.notEqual(r.code, 0, r.out);
   assert.match(r.out, /s1\/f\.txt → S1/);
 });
+
+test("TC-S0.T2.k --skip-requires 는 태그 붙은 검사만 건너뛰고, 건너뛴 실행으로는 봉인하지 않는다", () => {
+  const dir = repo({
+    S0: { needs: [], checks: [
+      { id: "plain", how: "cmd", cmd: "true" },
+      { id: "local", how: "cmd", requires: ["local-services"], cmd: "false" },
+    ] },
+  });
+  const full = gate(dir, "S0");
+  assert.notEqual(full.code, 0, "태그가 있어도 옵션 없이는 그대로 돈다");
+  assert.match(full.out, /FAIL\s+local/);
+
+  const skipped = gate(dir, "S0", "--skip-requires", "local-services");
+  assert.equal(skipped.code, 0, skipped.out);
+  assert.match(skipped.out, /SKIP\s+local/);
+  assert.match(skipped.out, /PASS\s+plain/);
+
+  const other = gate(dir, "S0", "--skip-requires", "다른-태그");
+  assert.notEqual(other.code, 0, "다른 태그로는 건너뛰지 않는다");
+
+  const seal = gate(dir, "S0", "--seal", "--skip-requires", "local-services");
+  assert.notEqual(seal.code, 0);
+  assert.equal(sealExists(dir, "S0"), false, "건너뛴 실행으로 봉인 파일이 생기면 안 된다");
+});
+
+test("TC-S0.T2.l --verify-seals --rerun --skip-requires 는 태그 없는 검사를 여전히 다시 돌린다", () => {
+  const dir = repo({
+    S0: { needs: [], checks: [ok("G0")] },
+    S1: { needs: ["S0"], checks: [
+      { id: "G1", how: "cmd", cmd: "test -f done.txt" },
+      { id: "G1L", how: "cmd", requires: ["local-services"], cmd: "test -f local.txt" },
+    ] },
+  });
+  sealAndCommit(dir, "S0");
+  const head = sh(dir, "git rev-parse HEAD");
+  write(dir, "gates/seals/S1.json", JSON.stringify({ phase: "S1", sealed: true, head, at: "x", waived: false, reason: null,
+    checks: [{ id: "G1", ok: true }, { id: "G1L", ok: true }] }));
+  commit(dir, "forged S1 seal");
+  const r = gate(dir, "--verify-seals", "--rerun", "--skip-requires", "local-services");
+  assert.notEqual(r.code, 0, `태그 없는 G1 은 다시 돌아 위조를 잡아야 한다\n${r.out}`);
+  assert.match(r.out, /FAIL\s+G1 /);
+  assert.match(r.out, /SKIP\s+G1L/);
+});

@@ -8,8 +8,12 @@
 //   gate --status [--json]               단계별 상태
 //   gate --assert-order [--base <ref>] [--head <ref>]
 //                                        잠긴 단계의 산출 경로·설정 변경이 있으면 실패
-//   gate --verify-seals [--rerun] [--since <ref>]
+//   gate --verify-seals [--rerun] [--since <ref>] [--skip-requires <태그>]
 //                                        봉인 구조 검사, --rerun 이면 봉인 커밋에서 검사를 다시 돌린다
+//
+// --skip-requires <태그>: 검사 정의의 requires 에 그 태그가 있는 검사를 SKIP 으로 표시하고 돌리지 않는다.
+//   이 컴퓨터에만 준비된 서비스(시험용 OmniRoute·Keycloak 등)가 필요한 검사를 CI 재검에서 빼는 용도다.
+//   하나라도 건너뛰면 그 실행으로는 봉인하지 않는다.
 //
 // 공통 옵션: --root <dir> (기본: git 최상위)
 
@@ -38,7 +42,7 @@ function parseArgs(argv) {
       continue;
     }
     const key = a.slice(2);
-    if (["root", "base", "head", "since", "waived"].includes(key)) {
+    if (["root", "base", "head", "since", "waived", "skip-requires"].includes(key)) {
       const next = argv[i + 1];
       if (next === undefined || next.startsWith("--")) fail(`--${key} 에 값이 필요하다`);
       args[key] = next;
@@ -308,9 +312,12 @@ const CHECKS = {
   },
 };
 
-function runChecks(root, phase, def) {
+function runChecks(root, phase, def, skipTag = null) {
   if (!def.checks?.length) fail(`${phase}: 검사 정의가 없다. 빈 단계는 실행·봉인하지 않는다`, 1);
   return def.checks.map((c) => {
+    if (skipTag && (c.requires ?? []).includes(skipTag)) {
+      return { id: c.id, desc: c.desc ?? "", ok: true, skipped: true, measured: `requires ${skipTag}`, limit: "-" };
+    }
     const impl = CHECKS[c.how];
     if (!impl) fail(`${c.id}: 알 수 없는 검사 종류 "${c.how}"`);
     let r;
@@ -386,7 +393,7 @@ async function cmdAssertOrder(root, baseArg, headArg) {
 }
 
 // sinceRef 가 있으면 그 커밋 이후 봉인 파일이 바뀐 단계만 다시 돌린다 (CI 에서 매 push 전부 재실행하지 않으려고).
-function cmdVerifySeals(root, gates, rerun, sinceRef) {
+function cmdVerifySeals(root, gates, rerun, sinceRef, skipTag = null) {
   const head = resolveRef(root, "HEAD");
   const since = sinceRef ? resolveRef(root, sinceRef) : null;
   if (sinceRef && !since) fail(`기준 ref 를 찾을 수 없다: ${sinceRef}`);
@@ -412,7 +419,7 @@ function cmdVerifySeals(root, gates, rerun, sinceRef) {
       git(root, ["worktree", "add", "--detach", "--quiet", dir, seal.head]);
       try {
         if (fs.existsSync(path.join(dir, "pnpm-lock.yaml"))) run(dir, "pnpm install --frozen-lockfile --silent");
-        const r = spawnSync(process.execPath, [SELF, "--root", dir, phase], { encoding: "utf8" });
+        const r = spawnSync(process.execPath, [SELF, "--root", dir, phase, ...(skipTag ? ["--skip-requires", skipTag] : [])], { encoding: "utf8" });
         if (r.status !== 0) problems.push(`${phase}: 봉인 커밋 ${seal.head.slice(0, 7)} 에서 다시 돌린 검사 실패\n${r.stdout}${r.stderr}`);
       } finally {
         git(root, ["worktree", "remove", "--force", dir], { allowFail: true });
@@ -424,7 +431,7 @@ function cmdVerifySeals(root, gates, rerun, sinceRef) {
     for (const p of problems) console.error(`  ${p}`);
     process.exit(1);
   }
-  console.log(`봉인 ${count}개 검증${rerun ? " (재실행 포함)" : ""}`);
+  console.log(`봉인 ${count}개 검증${rerun ? ` (재실행 포함${skipTag ? `, requires ${skipTag} 건너뜀` : ""})` : ""}`);
 }
 
 function cmdPhase(root, gates, phase, args) {
@@ -447,8 +454,10 @@ function cmdPhase(root, gates, phase, args) {
   }
 
   // R3 재검: 봉인 때도 이전 결과를 읽지 않고 다시 돌린다.
-  const results = runChecks(root, phase, def);
-  for (const r of results) console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.id.padEnd(10)} ${r.desc}  (${r.measured} / ${r.limit})`);
+  const skipTag = args["skip-requires"] ?? null;
+  if (skipTag && args.seal) fail("--skip-requires 로 건너뛴 실행으로는 봉인하지 않는다", 1);
+  const results = runChecks(root, phase, def, skipTag);
+  for (const r of results) console.log(`${r.skipped ? "SKIP" : r.ok ? "PASS" : "FAIL"}  ${r.id.padEnd(10)} ${r.desc}  (${r.measured} / ${r.limit})`);
   const failed = results.filter((r) => !r.ok);
 
   if (args.explain) {
@@ -467,7 +476,8 @@ function cmdPhase(root, gates, phase, args) {
     writeSeal(root, phase, { waived: false, reason: null, checks: results.map(({ id, ok, measured, limit }) => ({ id, ok, measured, limit })) });
     console.log(`\n${phase} 봉인: ${SEAL_DIR}/${phase}.json — 커밋해서 main 에 합치면 ✅`);
   } else {
-    console.log(`\n${phase}: ${results.length}/${results.length} 통과`);
+    const skipped = results.filter((r) => r.skipped).length;
+    console.log(`\n${phase}: ${results.length - skipped}/${results.length} 통과${skipped ? `, ${skipped}개 건너뜀 (requires ${skipTag})` : ""}`);
   }
 }
 
@@ -489,7 +499,7 @@ if (args["assert-order"]) {
 } else {
   const gates = await loadGates(view(root));
   if (args.status) cmdStatus({ root, gates, seals: view(root), tip: defaultTip(root) }, args.json === true);
-  else if (args["verify-seals"]) cmdVerifySeals(root, gates, args.rerun === true, args.since);
+  else if (args["verify-seals"]) cmdVerifySeals(root, gates, args.rerun === true, args.since, args["skip-requires"] ?? null);
   else if (args._[0]) cmdPhase(root, gates, args._[0], args);
   else fail("사용법: gate <단계> [--seal|--explain|--waived <사유>] | --status [--json] | --assert-order [--base <ref>] [--head <ref>] | --verify-seals [--rerun]");
 }

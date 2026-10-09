@@ -34,9 +34,11 @@ jobs:
           fi
           echo "GATE_BASE=$base" >> "$GITHUB_ENV"
       - name: 봉인 검증 (바뀐 봉인은 봉인 커밋에서 검사를 다시 돌린다)
+        # 시험용 OmniRoute·Keycloak·docker DB 가 필요한 검사(requires: local-services)는 여기서 건너뛰고,
+        # S7 의 CI 매트릭스가 서비스를 띄워 다시 돈다.
         run: |
           if [ -n "$GATE_BASE" ]; then
-            node scripts/gate.mjs --verify-seals --rerun --since "$GATE_BASE"
+            node scripts/gate.mjs --verify-seals --rerun --since "$GATE_BASE" --skip-requires local-services
           else
-            node scripts/gate.mjs --verify-seals --rerun
+            node scripts/gate.mjs --verify-seals --rerun --skip-requires local-services
           fi
