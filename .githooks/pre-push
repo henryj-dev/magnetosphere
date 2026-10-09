@@ -1,0 +1,8 @@
+#!/bin/sh
+# 잠긴 단계의 산출 경로 변경을 push 에서 막는다 (docs/plan/phase1-todo.md 0절).
+# 원격 추적 브랜치가 있으면 그 뒤의 변경만, 없으면(첫 push) 저장소 전체 이력을 본다.
+remote="$1"
+if git rev-parse --verify --quiet "refs/remotes/$remote/main" >/dev/null; then
+  exec node scripts/gate.mjs --assert-order --base "$remote/main"
+fi
+exec node scripts/gate.mjs --assert-order

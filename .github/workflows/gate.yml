@@ -1,0 +1,25 @@
+name: gate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: 게이트 장치 음성 대조
+        run: node --test --test-reporter=tap scripts/
+      - name: 순서 위반 검사
+        run: |
+          if git rev-parse --verify --quiet origin/main >/dev/null; then
+            node scripts/gate.mjs --assert-order --base origin/main
+          else
+            node scripts/gate.mjs --assert-order
+          fi
