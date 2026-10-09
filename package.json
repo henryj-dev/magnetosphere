@@ -1,0 +1,17 @@
+{
+  "name": "magnetosphere",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Member & usage layer for OmniRoute",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "prepare": "git config core.hooksPath .githooks",
+    "gate": "node scripts/gate.mjs",
+    "test:scripts": "node --test scripts/"
+  }
+}
