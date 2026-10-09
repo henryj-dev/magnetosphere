@@ -316,7 +316,7 @@ function runChecks(root, phase, def, skipTag = null, skipIds = new Set()) {
   if (!def.checks?.length) fail(`${phase}: 검사 정의가 없다. 빈 단계는 실행·봉인하지 않는다`, 1);
   return def.checks.map((c) => {
     if ((skipTag && (c.requires ?? []).includes(skipTag)) || skipIds.has(c.id)) {
-      return { id: c.id, desc: c.desc ?? "", ok: true, skipped: true, measured: `requires ${skipTag}`, limit: "-" };
+      return { id: c.id, desc: c.desc ?? "", ok: true, skipped: true, measured: skipIds.has(c.id) ? "--skip-ids" : `requires ${skipTag}`, limit: "-" };
     }
     const impl = CHECKS[c.how];
     if (!impl) fail(`${c.id}: 알 수 없는 검사 종류 "${c.how}"`);
@@ -482,7 +482,7 @@ function cmdPhase(root, gates, phase, args) {
     console.log(`\n${phase} 봉인: ${SEAL_DIR}/${phase}.json — 커밋해서 main 에 합치면 ✅`);
   } else {
     const skipped = results.filter((r) => r.skipped).length;
-    console.log(`\n${phase}: ${results.length - skipped}/${results.length} 통과${skipped ? `, ${skipped}개 건너뜀 (requires ${skipTag})` : ""}`);
+    console.log(`\n${phase}: ${results.length - skipped}/${results.length} 통과${skipped ? `, ${skipped}개 건너뜀 (${skipTag ? `requires ${skipTag}` : "--skip-ids"})` : ""}`);
   }
 }
 
