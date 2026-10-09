@@ -22,6 +22,9 @@ export default {
     const app = createApp({
       services: () => (services ??= buildServices(runtime, { waitUntil })),
       assets: (c) => env.ASSETS.fetch(c.req.raw),
+      // Workers 에는 시작 시점이 없어 설치 화면이 처음 상태를 물을 때 토큰을 만든다 (wrangler tail 로그에 한 번 나온다)
+      issueSetupTokenOnStatus: true,
+      log: (line) => console.log(line),
     });
     try {
       return await app.fetch(req);

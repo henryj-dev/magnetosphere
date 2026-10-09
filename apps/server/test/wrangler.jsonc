@@ -16,6 +16,7 @@
   ],
   "vars": {
     "BETTER_AUTH_URL": "http://localhost:3000",
-    "BETTER_AUTH_SECRET": "mg-server-test-secret-mg-server-test-secret"
+    "BETTER_AUTH_SECRET": "mg-server-test-secret-mg-server-test-secret",
+    "APP_ENCRYPTION_KEY": "CzBVep/E6Q4zWH2ix+wRNluApcrvFDleg6jN8hc8YYY="
   }
 }

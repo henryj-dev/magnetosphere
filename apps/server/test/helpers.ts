@@ -10,6 +10,8 @@ import { migrate } from "drizzle-orm/libsql/migrator";
 const MIGRATIONS = fileURLToPath(new URL("../../../packages/db/migrations/sqlite", import.meta.url));
 
 export const TEST_SECRET = "mg-server-test-secret-mg-server-test-secret";
+/** 테스트 전용 32바이트 키 */
+export const TEST_ENCRYPTION_KEY = "CzBVep/E6Q4zWH2ix+wRNluApcrvFDleg6jN8hc8YYY=";
 
 export interface TestEnv {
   dir: string;
@@ -31,6 +33,7 @@ export async function makeTestEnv(): Promise<TestEnv> {
       DATABASE_URL: `file:${dbFile}`,
       BETTER_AUTH_URL: "http://localhost:3000",
       BETTER_AUTH_SECRET: TEST_SECRET,
+      APP_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY,
       NODE_ENV: "test",
     },
     cleanup: () => rmSync(dir, { recursive: true, force: true }),

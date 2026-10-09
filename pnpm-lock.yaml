@@ -22,6 +22,12 @@ importers:
       '@magnetosphere/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
+      better-auth:
+        specifier: 1.7.7
+        version: 1.7.7(@sveltejs/kit@2.70.3(@sveltejs/vite-plugin-svelte@7.3.0(svelte@5.57.1)(vite@8.3.3(@types/node@24.13.6)(esbuild@0.28.2)(tsx@4.23.15)))(svelte@5.57.1)(typescript@6.0.3)(vite@8.3.3(@types/node@24.13.6)(esbuild@0.28.2)(tsx@4.23.15)))(drizzle-kit@0.31.11)(drizzle-orm@0.45.4(@libsql/client@0.18.0)(kysely@0.29.6)(mysql2@3.24.5(@types/node@24.13.6))(postgres@3.4.9))(mysql2@3.24.5(@types/node@24.13.6))(svelte@5.57.1)(vitest@5.0.3(@types/node@24.13.6)(vite@8.3.3(@types/node@24.13.6)(esbuild@0.28.2)(tsx@4.23.15)))
+      drizzle-orm:
+        specifier: 0.45.4
+        version: 0.45.4(@libsql/client@0.18.0)(kysely@0.29.6)(mysql2@3.24.5(@types/node@24.13.6))(postgres@3.4.9)
       hono:
         specifier: 4.13.8
         version: 4.13.8
@@ -32,9 +38,6 @@ importers:
       '@types/node':
         specifier: 24.13.6
         version: 24.13.6
-      drizzle-orm:
-        specifier: 0.45.4
-        version: 0.45.4(@libsql/client@0.18.0)(kysely@0.29.6)(mysql2@3.24.5(@types/node@24.13.6))(postgres@3.4.9)
       typescript:
         specifier: 6.0.3
         version: 6.0.3

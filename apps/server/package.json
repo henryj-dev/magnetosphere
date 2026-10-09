@@ -14,12 +14,13 @@
     "@magnetosphere/auth": "workspace:*",
     "@magnetosphere/db": "workspace:*",
     "@magnetosphere/runtime": "workspace:*",
+    "better-auth": "1.7.7",
+    "drizzle-orm": "0.45.4",
     "hono": "4.13.8"
   },
   "devDependencies": {
     "@libsql/client": "0.18.0",
     "@types/node": "24.13.6",
-    "drizzle-orm": "0.45.4",
     "typescript": "6.0.3",
     "vitest": "5.0.3",
     "wrangler": "4.115.0"
