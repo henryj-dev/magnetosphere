@@ -6,6 +6,9 @@ import type { TestDb } from "./db.ts";
 
 export const SECRET = "mg-test-secret-mg-test-secret-mg-test-secret";
 
+/** 요청마다 다른 IP. 요청 수 제한을 보지 않는 TC 가 한도에 걸리지 않게 한다 */
+export const randomIp = () => `198.18.${Math.floor(Math.random() * 256)}.${Math.floor(Math.random() * 254) + 1}`;
+
 /** 보낸 메일을 모아 두는 어댑터 */
 export function outboxMailer() {
   const outbox: MailMessage[] = [];
@@ -14,7 +17,7 @@ export function outboxMailer() {
 
 export function makeAuth(h: TestDb, extra: Partial<AuthConfig> = {}) {
   const { outbox, mailer } = outboxMailer();
-  return { ...createAuth({ database: h, baseURL: BASE, secret: SECRET, trustedOrigins: [BASE], mailer, ...extra }), outbox };
+  return { ...createAuth({ database: h, baseURL: BASE, secret: SECRET, trustedOrigins: [BASE], mailer, clientIp: randomIp, ...extra }), outbox };
 }
 
 /** 메일 본문에서 링크 하나를 꺼낸다 */

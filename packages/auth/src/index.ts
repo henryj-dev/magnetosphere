@@ -8,8 +8,10 @@ import { createAuthMiddleware } from "better-auth/api";
 import { AUTH_SCHEMA_OPTIONS } from "@magnetosphere/db/src/auth-options.ts";
 import { resetPasswordMessage, verifyEmailMessage } from "./mail/messages.ts";
 import type { Mailer } from "./mail/types.ts";
+import { ipAddressOptions, rateLimitOptions, withClientIp, type ClientIp } from "./rate-limit.ts";
 
 export type { Mailer, MailMessage } from "./mail/types.ts";
+export { CLIENT_IP_HEADER, RATE_LIMIT_RULES, resolveClientIp, type ClientIp } from "./rate-limit.ts";
 
 // @better-auth/sso 1.7.7 이 공개 경로로 여는 관리 엔드포인트 전부 (dist/index.mjs 의 createAuthEndpoint 경로).
 // 기본값은 로그인한 누구나 IdP 를 등록·수정·삭제할 수 있고, 0단계에서 /sso/register 로 관리자 계정을 가로챘다
@@ -42,6 +44,8 @@ export interface AuthConfig {
   trustedOrigins?: string[];
   /** 인증·비밀번호 재설정 메일을 보낼 어댑터 (src/mail) */
   mailer: Mailer;
+  /** 런타임 어댑터의 clientIp(req). 요청 수 제한과 세션 IP 기록이 이 값을 쓴다 (src/rate-limit.ts) */
+  clientIp: ClientIp;
 }
 
 /** 가입·로그인 요청의 이메일을 다듬는다. Better Auth 도 소문자로 바꾸지만 앞뒤 공백까지 우리가 먼저 정리한다 (V26). */
@@ -72,9 +76,12 @@ export function authOptions(cfg: AuthConfig) {
       sendOnSignUp: true,
       sendVerificationEmail: async ({ user, url }) => cfg.mailer.send(verifyEmailMessage(user.email, url)),
     },
+    // 로그인·가입·비밀번호 재설정 요청 수 제한. 저장소는 AUTH_SCHEMA_OPTIONS 의 DB(rate_limit)
+    rateLimit: rateLimitOptions(AUTH_SCHEMA_OPTIONS.rateLimit),
     disabledPaths: SSO_DISABLED_PATHS,
     hooks: { before: normalizeEmailBody },
     advanced: {
+      ipAddress: ipAddressOptions,
       // 개발용 http 기준 주소에서도 Secure 를 붙인다. 쿠키 이름에 __Secure- 접두사가 붙는다.
       useSecureCookies: true,
       defaultCookieAttributes: { httpOnly: true, secure: true, sameSite: "lax" },
@@ -85,5 +92,5 @@ export function authOptions(cfg: AuthConfig) {
 
 export function createAuth(cfg: AuthConfig) {
   const auth = betterAuth(authOptions(cfg));
-  return { auth, handler: (req: Request) => auth.handler(req) };
+  return { auth, handler: withClientIp(auth.handler, cfg.clientIp) };
 }

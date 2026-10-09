@@ -95,6 +95,9 @@ export const GATES = {
       { id: "G-S3.6", how: "test", desc: "TC-S3.T2.b SMTP 어댑터 → mailpit", cmd: "pnpm -C packages/auth test:smtp" },
       { id: "G-S3.7", how: "test", desc: "TC-S3.T2.c Resend·Cloudflare 요청과 오류 전달", cmd: 'pnpm -C packages/auth test -t "TC-S3.T2.c"' },
       { id: "G-S3.8", how: "test", desc: "TC-S3.T2.d 재설정 토큰 1회용", cmd: 'pnpm -C packages/auth test -t "TC-S3.T2.d"' },
+      { id: "G-S3.9", how: "test", desc: "TC-S3.T3.a 같은 IP 반복 로그인 실패 → 429 (네 DB)", cmd: 'pnpm -C packages/auth test -t "TC-S3.T3.a"' },
+      { id: "G-S3.10", how: "test", desc: "TC-S3.T3.b 비신뢰 출처 X-Forwarded-For 무시", cmd: 'pnpm -C packages/auth test -t "TC-S3.T3.b"' },
+      { id: "G-S3.11", how: "test", desc: "TC-S3.T3.c 신뢰 프록시 뒤 클라이언트별 계산", cmd: 'pnpm -C packages/auth test -t "TC-S3.T3.c"' },
       { id: "G-S3.12", how: "json", desc: "Better Auth 버전 고정", file: "packages/auth/package.json", path: "dependencies.better-auth", op: "==", value: "1.7.7" },
       // 권한 칼럼 다섯은 packages/db 의 USER_ADDITIONAL_FIELDS 에 정의되고 auth 구성이 AUTH_SCHEMA_OPTIONS 로 그대로 쓴다.
       // 칼럼 이름과 input: false 가 한 줄에 있는 정의만 센다 (주석·TABLES 의 칼럼 정의는 걸리지 않는다).

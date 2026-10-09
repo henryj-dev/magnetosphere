@@ -544,12 +544,14 @@ TC-S3.T2.d  비밀번호 재설정 메일의 토큰은 한 번만 쓰인다
 선행 S3.T1 · 산출 `packages/auth/src/rate-limit.ts` · 되돌리기 커밋 1개
 
 【작업】
-1. 로그인·가입·비밀번호 재설정에 요청 수 제한. 클라이언트 IP는 런타임 어댑터의 `clientIp()`에서 받는다 (S4.T2와 인터페이스만 맞추고, 여기서는 가짜 어댑터로 테스트). 신뢰할 프록시에서 온 요청만 `X-Forwarded-For`를 믿는다. 커밋.
+1. 로그인·가입·비밀번호 재설정에 요청 수 제한. 클라이언트 IP는 런타임 어댑터의 `clientIp()`에서 받는다 (S4.T1과 인터페이스만 맞추고, 여기서는 가짜 어댑터로 테스트). 신뢰할 프록시에서 온 요청만 `X-Forwarded-For`를 믿는다. 커밋.
+   - Better Auth 1.7.7 내장 rateLimit(저장소 DB `rate_limit`, `enabled: true`)과 경로별 `customRules`(`RATE_LIMIT_RULES`: 로그인·가입 60초 5회, 재설정 요청 300초 3회 등)를 쓴다.
+   - Better Auth 는 IP 를 헤더에서만 읽고 소켓 상대 주소를 모른다 (`advanced.ipAddress.trustedProxies`는 X-Forwarded-For 안의 홉만 걷어낸다). 그래서 "신뢰 프록시에서 온 요청만"을 표현하지 못한다. handler 를 감싸 `clientIp(req)` 결과를 우리 전용 헤더 `x-magnetosphere-client-ip`에 넣고(들어온 같은 이름 헤더는 지움) `ipAddressHeaders`를 그 헤더 하나로 둔다. 신뢰 프록시 판정은 `resolveClientIp(상대 주소, X-Forwarded-For, 신뢰 목록)` — S4.T1 Node 어댑터가 쓴다.
 
 【테스트】
 ```
 TC-S3.T3.a  같은 IP 의 반복 로그인 실패는 429 가 된다
-  단언:  같은 IP 로 틀린 비밀번호 N+1 회 → 마지막 429
+  단언:  같은 IP 로 틀린 비밀번호 N+1 회(N = 로그인 한도 5) → 앞 N 회 401, 마지막 429, rate_limit 행의 count = N. 다른 IP 는 401 (네 DB)
   검출:  비밀번호 대입 공격 무방비
 TC-S3.T3.b  신뢰하지 않는 출처의 X-Forwarded-For 는 무시된다
   단언:  신뢰 목록 밖 출처에서 X-Forwarded-For 를 매번 바꿔 N+1 회 → 429 (헤더 위조로 우회 불가)
