@@ -1,0 +1,47 @@
+{
+  "item": "V27",
+  "question": "Workers 런타임에서 Drizzle + MySQL 드라이버가 Hyperdrive 바인딩을 거쳐 MySQL 8.0 에 쓰기·읽기·대화형 트랜잭션(롤백 포함)을 할 수 있는가? 같은 방식으로 Postgres 도 되는가 (대조)?",
+  "answer": {
+    "mysql": {
+      "write": true,
+      "read": true,
+      "txRollback": true,
+      "server": "MySQL 8.0.46 (Docker mysql:8.0, InnoDB)",
+      "driver": "mysql2 3.24.5 + drizzle-orm 0.45.3 (drizzle-orm/mysql2), createConnection 에 Hyperdrive 바인딩의 host·port·user·password·database 를 넘김",
+      "caveats": [
+        "mysql2 는 createConnection 에 disableEval: true 를 줘야 한다 (Workers 에는 eval 이 없다). Cloudflare 문서도 같은 설정과 mysql2 3.13.0 이상을 요구한다.",
+        "compatibility_flags 에 nodejs_compat 이 필요하다 (mysql2 가 net·tls 등 Node API 를 쓴다).",
+        "로컬 wrangler dev 는 바인딩 host 를 <해시>.hyperdrive.local:3306 같은 가상 주소로 내주고 localConnectionString 의 DB 로 바로 넘긴다. 실제 Hyperdrive 의 연결 풀링·질의 캐시·지역 간 지연은 로컬에서 확인할 수 없다 (문서: localConnectionString 사용 시 캐시는 로컬에서 동작하지 않는다).",
+        "운영 Hyperdrive 를 거친 MySQL 대화형 트랜잭션의 동작(트랜잭션 동안 연결 고정 등)은 배포 환경에서 따로 확인해야 한다. 이번 확인은 Cloudflare 계정에 아무것도 만들지 않았다.",
+        "요청마다 연결을 만들고 요청 끝에 end() 로 닫는다. Workers 는 요청 사이에 연결을 들고 있을 수 없으므로 전역 풀을 쓰지 않는 구조로 짜야 한다.",
+        "wrangler 4.115.0 에 딸린 workerd(1.20260722.1)는 compatibility_date 2026-07-29 까지만 받는다. 더 늦은 날짜를 쓰면 wrangler dev 가 시작하지 못한다."
+      ]
+    },
+    "pg": {
+      "write": true,
+      "read": true,
+      "txRollback": true,
+      "server": "PostgreSQL 14.24 (Docker postgres:14)",
+      "driver": "pg 8.23.1 + drizzle-orm 0.45.3 (drizzle-orm/node-postgres), pg.Client 에 바인딩의 connectionString 을 넘김",
+      "caveats": [
+        "nodejs_compat 이 필요하다.",
+        "로컬에서는 <해시>.hyperdrive.local:5432 가상 주소로 연결된다. 실제 Hyperdrive 풀링·캐시는 로컬에서 확인할 수 없다.",
+        "MySQL 과 같은 코드 모양(요청마다 연결, Drizzle transaction 콜백 안 예외로 롤백)으로 동작했다."
+      ]
+    },
+    "notes": "Workers + MySQL(Hyperdrive) 조합은 로컬에서 동작한다. MySQL 드라이버가 net/tls 의존 때문에 Workers 에서 로드되지 않는 문제는 없었다. /probe 는 표를 만들고(CREATE TABLE IF NOT EXISTS), Drizzle insert 로 쓰고, select 로 다시 읽고, db.transaction 안에서 insert 뒤 예외를 던진 다음 그 행이 없는지 확인한다. 설계(계획서 3.2)를 바꿀 필요는 없다. Workers 조합의 DB 연결 어댑터는 요청 단위 연결 + mysql2 disableEval 을 전제로 짠다."
+  },
+  "evidence": [
+    "spikes/v27/wrangler.jsonc — HYPERDRIVE_MYSQL·HYPERDRIVE_PG 바인딩, 가짜 id + localConnectionString (mysql://…@127.0.0.1:23306, postgres://…@127.0.0.1:25432)",
+    "spikes/v27/src/index.js — /probe?db=mysql|pg 구현",
+    "spikes/v27/probe.mjs — `node spikes/v27/probe.mjs` 종료코드 0 (2026-10-09). 출력: mysql {\"write\":true,\"read\":true,\"txRollback\":true,\"server\":\"8.0.46\",\"binding\":{\"host\":\"fb910634ad74d3b1fe67fb8b35515bbf.hyperdrive.local\",\"port\":3306}}, pg {\"write\":true,\"read\":true,\"txRollback\":true,\"server\":\"14.24\",\"binding\":{\"host\":\"90892aa96769972595f16ca60c262266.hyperdrive.local\",\"port\":5432}}",
+    "v27-pg 를 멈춘 상태에서 probe.mjs 는 '컨테이너가 실행 중이 아니다' 로 종료코드 1",
+    "https://developers.cloudflare.com/hyperdrive/configuration/local-development/ — localConnectionString, CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_<BINDING>",
+    "https://developers.cloudflare.com/hyperdrive/examples/connect-to-mysql/ — mysql2 3.13.0 이상, disableEval: true, nodejs_compat",
+    "https://developers.cloudflare.com/changelog/post/2026-08-07-hyperdrive-mysql-ga/ — Hyperdrive MySQL 정식 지원(GA)",
+    "https://developers.cloudflare.com/hyperdrive/examples/connect-to-postgres/postgres-drivers-and-libraries/drizzle-orm/ — Drizzle + pg + Hyperdrive"
+  ],
+  "blocking": false,
+  "was_blocking": false,
+  "resolved_in": null
+}
