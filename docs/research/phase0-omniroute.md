@@ -59,6 +59,7 @@
 ## 5. 관리 API 인증
 
 - 대시보드 비밀번호 로그인 → `auth_token` 쿠키. 조회는 쿠키만으로 되고, 변경 요청은 `Origin` 헤더가 맞아야 통과한다 (없으면 `AUTH_001`).
+  - S5 정정: 3.8.51 은 쿠키 인증 변경 요청에 `Origin` 이 **없으면 통과**시키고, 있는데 OmniRoute 주소와 다르면 `INVALID_ORIGIN` 으로 막는다 (`src/server/origin/publicOrigin.ts`, 계약 환경 실측). 위 `AUTH_001` 은 쿠키가 실리지 않은 요청이었다.
 - 서버 간 호출에는 `oma_live_…` 접근 토큰(Settings → Access Tokens, 범위 `read`/`write`/`admin`)을 쓴다. 추론용 `sk-…` 키는 `manage` 범위를 주지 않으면 관리 API를 못 쓴다 (`docs/guides/MANAGEMENT-AUTH.md`).
 - 이번 실측은 쿠키 방식만 했다. 접근 토큰 방식은 1단계에서 확인한다.
 
@@ -73,6 +74,7 @@
 
 - `POST {apiKeyId, dailyLimitUsd, weeklyLimitUsd, monthlyLimitUsd}`, 경고 기준 기본 80%.
 - 한도를 넘은 뒤 요청 → `429 {"code":"BUDGET_EXCEEDED","type":"rate_limit_error"}`.
+- S5 실측: OmniRoute 는 `resetInterval`(기본 `daily`)에 맞는 한도 하나만 본다. 월 한도를 걸려면 `monthlyLimitUsd` 와 함께 `resetInterval: "monthly"` 를 보내야 한다. 빼면 `monthlyLimitUsd` 가 저장만 되고 차단하지 않는다. 지출은 요청이 끝난 직후 반영돼 다음 요청부터 막혔다 (계약 환경, 요청 간격 1초 미만).
 - 주의: 키별 지출은 60초마다 모아서 기록된다 (`OMNIROUTE_SPEND_FLUSH_INTERVAL_MS`). 짧은 시간에 몰아서 쓰면 한도를 조금 넘길 수 있다.
 
 ## 추가 3. 비용은 추정치

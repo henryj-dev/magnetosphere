@@ -3,10 +3,16 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "test": "vitest run",
     "test:contract": "vitest run --config vitest.contract.config.ts",
-    "typecheck": "test ! -d src || tsc --noEmit"
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@types/node": "24.13.6",

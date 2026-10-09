@@ -1,6 +1,5 @@
 {
-  // src 가 생기면(S5) typecheck 스크립트가 tsc --noEmit 를 돈다
+  // src 는 Node 전용 API 를 쓰지 않는다 (Workers 에서도 돈다). node 타입은 테스트(process.env 등) 때문에 둔다.
   "extends": "../../tsconfig.json",
-  "compilerOptions": { "types": [] },
-  "include": ["src/**/*.ts", "test/**/*.ts"]
+  "include": ["src/**/*.ts", "test/**/*.ts", "*.config.ts"]
 }

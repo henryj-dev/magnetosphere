@@ -158,7 +158,17 @@ export const GATES = {
     // 계약 테스트는 tests/contract 의 OmniRoute 컨테이너(127.0.0.1:20170)를 띄우고 돈다 (tests/contract/run.mjs).
     checks: [
       { id: "G-S5.1", how: "test", requires: ["local-services"], desc: "TC-S5.T1.a 계약 환경이 0단계 실측값 재현", cmd: 'pnpm test:contract -t "TC-S5.T1.a"' },
+      { id: "G-S5.2", how: "test", requires: ["local-services"], desc: "TC-S5.T2.a 키 없는 /v1 → 401", cmd: 'pnpm test:contract -t "TC-S5.T2.a"' },
+      { id: "G-S5.3", how: "test", requires: ["local-services"], desc: "TC-S5.T2.b 생성 → 끄기 → 예산 → 켜기 → 요청", cmd: 'pnpm test:contract -t "TC-S5.T2.b"' },
+      { id: "G-S5.4", how: "test", requires: ["local-services"], desc: "TC-S5.T2.c 끈 키 즉시 거부", cmd: 'pnpm test:contract -t "TC-S5.T2.c"' },
+      { id: "G-S5.5", how: "test", requires: ["local-services"], desc: "TC-S5.T2.d 예산 초과 429 BUDGET_EXCEEDED", cmd: 'pnpm test:contract -t "TC-S5.T2.d"' },
+      { id: "G-S5.6", how: "test", requires: ["local-services"], desc: "TC-S5.T2.e 키별 분석 비용 (스트리밍 포함)", cmd: 'pnpm test:contract -t "TC-S5.T2.e"' },
+      { id: "G-S5.7", how: "test", requires: ["local-services"], desc: "TC-S5.T2.f 응답 형식 변화 → 오류", cmd: 'pnpm test:contract -t "TC-S5.T2.f"' },
+      { id: "G-S5.8", how: "test", requires: ["local-services"], desc: "TC-S5.T2.g 쿠키 변경 요청에 Origin", cmd: 'pnpm test:contract -t "TC-S5.T2.g"' },
+      // apps/server/test/app.test.ts 의 "/api/keys/1" 은 우리 서버의 모르는 /api 경로가 JSON 404 인지 보는 요청이다 (OmniRoute 호출 아님)
+      { id: "G-S5.9", how: "grep", desc: "TC-S5.T2.h 어댑터 밖 OmniRoute 관리 호출 0", pattern: "/api/(keys|usage)", in: ["apps", "packages"], exclude: ["packages/omniroute/**", "apps/server/test/app.test.ts"], op: "==", limit: 0 },
       { id: "G-S5.13", how: "grep", desc: "OmniRoute 버전 고정 (태그 + digest)", pattern: "diegosouzapw/omniroute:3\\.8\\.51@sha256:", in: ["tests/contract/docker-compose.yml"], op: "==", limit: 1 },
+      { id: "G-S5.14", how: "test", requires: ["local-services"], desc: "TC-S5.T2.i 어댑터는 키 scopes 를 보내지 않음", cmd: 'pnpm test:contract -t "TC-S5.T2.i"' },
     ],
   },
   S6: {

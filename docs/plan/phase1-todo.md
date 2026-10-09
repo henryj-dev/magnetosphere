@@ -808,7 +808,7 @@ TC-S5.T1.a  계약 환경이 0단계 실측값을 재현한다
 선행 S5.T1 · 산출 `packages/omniroute/src/` · 되돌리기 커밋 1개
 
 【작업】
-1. 함수: `loginWithPassword`, `createAccessToken(scope)`, `listKeys`, `createKey`, `setKeyActive`, `deleteKey`, `setBudget`, `getAnalytics({apiKeyIds, startDate, endDate})`, `getCallLogs`. 쓰는 응답 필드만 zod로 검사. 쿠키 인증 변경 요청에는 `Origin` 헤더를 붙인다. OmniRoute 호출은 이 패키지 밖에서 하지 않는다. 커밋.
+1. 함수: `loginWithPassword`, `createAccessToken(scope)`, `whoami`, `listKeys`, `createKey`, `setKeyActive`, `renameKey`, `deleteKey`, `setBudget`, `getAnalytics({apiKeyIds, startDate, endDate})`, `getCallLogs`. 쓰는 응답 필드만 zod로 검사. 쿠키 인증 변경 요청에는 `Origin` 헤더를 붙인다. 키 수정 본문은 `isActive` 또는 `name` 하나뿐이고 `scopes`는 보내지 않는다 (계획서 5.8). OmniRoute 호출은 이 패키지 밖에서 하지 않는다. 커밋.
 
 【테스트】
 ```
@@ -819,10 +819,10 @@ TC-S5.T2.b  생성 → 끄기 → 예산 → 켜기 → 요청 순서가 동작�
   단언:  createKey → setKeyActive(false) → setBudget(monthly 1.0) → setKeyActive(true) → 요청 200
   검출:  2단계 발급 순서(계획서 5.2)가 OmniRoute 에서 실제로 성립하지 않는 것
 TC-S5.T2.c  끈 키는 거부된다
-  단언:  setKeyActive(false) 직후 요청 → 4xx (V11 결과의 지연 이내)
+  단언:  setKeyActive(false) 직후 기다리지 않고 요청 → 403 permission_denied (V11 delayMs 0)
   검출:  정지 회원이 계속 쓰는 것
 TC-S5.T2.d  예산을 넘으면 429 BUDGET_EXCEEDED
-  단언:  예산 0.01, 요청 3건(0.00221 + 0.0062115 × 2 = 0.014633) 후 → 429, code "BUDGET_EXCEEDED"
+  단언:  월 예산 0.01(resetInterval monthly), 요청 3건(0.00221 + 0.0062115 × 2 = 0.014633) 후 → 429, code "BUDGET_EXCEEDED"
   검출:  OmniRoute 업데이트로 예산 차단 동작·코드가 바뀌어 회원 한도가 무력화되는 것
 TC-S5.T2.e  분석이 키별 비용을 정확히 낸다 (스트리밍 포함)
   단언:  위 3건(스트리밍 1건 포함) 뒤 getAnalytics(apiKeyIds=[그 키]) → summary.totalCost = 0.014633 (오차 1e-9)
@@ -831,15 +831,20 @@ TC-S5.T2.f  응답 형식이 바뀌면 조용히 넘어가지 않고 오류를 �
   단언:  getAnalytics 응답에서 summary.totalCost 를 문자열로 바꾼 가짜 응답 → 어댑터가 예외
   검출:  형식 변화가 NaN·0 으로 흘러 한도가 무제한처럼 동작하는 것
 TC-S5.T2.g  쿠키 인증 변경 요청에 Origin 이 붙는다
-  단언:  Origin 없이 보낸 대조 요청 → AUTH_001, 어댑터 경유 → 2xx
-  검출:  0단계 실측대로 Origin 없는 변경 요청이 거부돼 부트스트랩이 실패하는 것
+  단언:  다른 Origin 을 단 대조 요청 → 403 INVALID_ORIGIN, 어댑터 경유 → 2xx 이고 보낸 Origin 이 OmniRoute 주소
+  검출:  Origin 이 빠지거나 틀려 쿠키 인증 변경 요청이 CSRF 검사에 막히는 것
+         (S5 실측: 3.8.51 은 Origin 이 없으면 통과, 다르면 INVALID_ORIGIN. 0단계의 AUTH_001 은 쿠키 없는 요청이었다)
 TC-S5.T2.h  어댑터 밖에서 OmniRoute 를 직접 부르지 않는다
   단언:  grep "/api/keys\|/api/usage" in apps/ packages/ (packages/omniroute 제외) → 0
   검출:  호출이 흩어져 OmniRoute 버전 변경 영향 범위를 못 잡는 것 (계획서 5.6)
+TC-S5.T2.i  어댑터는 키 범위(scopes)를 보내지 않는다
+  단언:  어댑터 함수 전부를 가짜 fetch 로 부름 → 요청 본문에 "scopes" 0건, 키 PATCH 본문은 {isActive} 또는 {name} 하나.
+         다른 값을 끼운 setKeyActive·renameKey·createKey → TypeError, 요청 0건
+  검출:  write 토큰으로 키에 manage 를 붙여 admin 토큰까지 가는 경로(V10)를 회원 앱이 스스로 여는 것 (계획서 5.8)
 ```
 
 【통과】
-- [ ] G-S5.2 ~ G-S5.9 통과
+- [ ] G-S5.2 ~ G-S5.9, G-S5.14 통과
 
 ### ☐ S5.T3 — OmniRoute 부트스트랩
 선행 S5.T2 · 산출 `apps/server/src/setup/omniroute.ts` · 되돌리기 커밋 1개
@@ -872,6 +877,7 @@ TC-S5.T3.c  INITIAL_PASSWORD 가 틀리면 설치가 그 단계에서 멈추고 
 | G-S5.9 | TC-S5.T2.h | grep `/api/(keys\|usage)` in `apps/ packages/` 제외 `packages/omniroute` | 0 |
 | G-S5.10 ~ G-S5.12 | TC-S5.T3.a ~ c | `pnpm test:contract -t "TC-S5.T3.<x>"` (3개 각각) | 종료코드 0 |
 | G-S5.13 | OmniRoute 버전 고정 | grep `diegosouzapw/omniroute:3\.8\.51@sha256:` in `tests/contract/docker-compose.yml` | 1 |
+| G-S5.14 | TC-S5.T2.i | `pnpm test:contract -t "TC-S5.T2.i"` | 종료코드 0 |
 
 `node scripts/gate.mjs S5 --seal`
 

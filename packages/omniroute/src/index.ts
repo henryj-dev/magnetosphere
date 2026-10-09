@@ -1,0 +1,261 @@
+// OmniRoute 관리 API 어댑터 (계획서 5.6). 회원 앱의 OmniRoute 호출은 이 패키지에서만 한다 (TC-S5.T2.h).
+// 대상 버전은 3.8.51 이다 (tests/contract/docker-compose.yml 의 digest). 버전을 올리면 계약 테스트가 통과해야 한다.
+//
+// 인증 두 가지 (0단계 5절, V10)
+//   - 접근 토큰: oma_live_… 를 Bearer 로. 회원 앱이 서버 간 호출에 쓴다 (범위 write, 계획서 5.8)
+//   - 대시보드 쿠키: auth_token. 변경 요청(GET 이 아닌 것)에는 OmniRoute 주소의 Origin 을 붙인다 (TC-S5.T2.g).
+//     3.8.51 은 Origin 이 없으면 통과시키고, 있는데 다르면 INVALID_ORIGIN 으로 막는다 (계약 환경 실측, src/server/origin/publicOrigin.ts).
+//     0단계 메모의 "없으면 AUTH_001" 은 쿠키가 없던 요청이었다. 브라우저가 아닌 호출의 예외가 닫혀도 깨지지 않게 맞는 Origin 을 보낸다
+//
+// 키 범위(scopes)는 절대 보내지 않는다. write 토큰이 키에 manage 를 붙이면 admin 토큰까지 만들 수 있다 (V10 privilegeEscalation).
+// 키 수정은 setKeyActive(isActive) 와 renameKey(name) 둘뿐이고, 본문은 그 필드 하나로만 만든다 (계획서 5.8, TC-S5.T2.i).
+//
+// Node 전용 API 를 쓰지 않는다 (Workers 에서도 같은 코드).
+import type { z } from "zod";
+import {
+  accessTokenSchema,
+  analyticsSchema,
+  budgetSchema,
+  callLogsSchema,
+  createdKeySchema,
+  keyActiveSchema,
+  keyListSchema,
+  keyNameSchema,
+  unusedBodySchema,
+  whoamiSchema,
+  type SCOPES,
+} from "./schemas.ts";
+
+export type Scope = (typeof SCOPES)[number];
+
+/** OmniRoute 가 2xx 가 아닌 응답을 줬다 */
+export class OmniRouteError extends Error {
+  readonly status: number;
+  /** 응답 본문의 오류 코드 (예: AUTH_001, BUDGET_EXCEEDED). 없으면 null */
+  readonly code: string | null;
+  constructor(method: string, path: string, status: number, code: string | null, detail: string) {
+    super(`OmniRoute ${method} ${path} → ${status}${code ? ` ${code}` : ""}: ${detail}`);
+    this.name = "OmniRouteError";
+    this.status = status;
+    this.code = code;
+  }
+}
+
+/** 응답이 2xx 지만 우리가 쓰는 필드의 형식이 맞지 않는다 (OmniRoute 버전 변화 의심) */
+export class OmniRouteFormatError extends Error {
+  readonly issues: z.core.$ZodIssue[];
+  constructor(method: string, path: string, issues: z.core.$ZodIssue[]) {
+    super(`OmniRoute ${method} ${path} 응답 형식이 다르다: ${issues.map((i) => `${i.path.join(".") || "(본문)"} ${i.message}`).join("; ")}`);
+    this.name = "OmniRouteFormatError";
+    this.issues = issues;
+  }
+}
+
+export interface ConnectOptions {
+  /** OmniRoute 주소 (예: http://omniroute:20128). 끝 슬래시는 무시한다 */
+  baseUrl: string;
+  fetch?: typeof fetch;
+  /** 요청 하나의 제한 시간 (기본 15초) */
+  timeoutMs?: number;
+}
+
+export type Credential = { token: string } | { cookie: string };
+
+interface Request {
+  method: "GET" | "POST" | "PATCH" | "DELETE";
+  path: string;
+  body?: Record<string, unknown>;
+  credential?: Credential;
+  /** 쿠키 없이도 Origin 을 붙인다 (대시보드 로그인) */
+  origin?: boolean;
+}
+
+function base(o: ConnectOptions): string {
+  return o.baseUrl.replace(/\/+$/, "");
+}
+
+function errorCode(json: any): string | null {
+  const c = json?.error?.code ?? json?.code;
+  return typeof c === "string" ? c : null;
+}
+
+async function call<S extends z.ZodType>(o: ConnectOptions, req: Request, schema: S): Promise<{ data: z.infer<S>; headers: Headers }> {
+  const url = base(o) + req.path;
+  const headers: Record<string, string> = { accept: "application/json" };
+  if (req.credential && "token" in req.credential) headers.authorization = `Bearer ${req.credential.token}`;
+  if (req.credential && "cookie" in req.credential) headers.cookie = req.credential.cookie;
+  // 쿠키 인증 변경 요청에는 OmniRoute 주소의 Origin 을 붙인다 (CSRF 방어 검사, 위 머리 주석)
+  if (req.origin || (req.credential && "cookie" in req.credential && req.method !== "GET")) headers.origin = new URL(url).origin;
+  if (req.body !== undefined) headers["content-type"] = "application/json";
+  const res = await (o.fetch ?? fetch)(url, {
+    method: req.method,
+    headers,
+    body: req.body === undefined ? undefined : JSON.stringify(req.body),
+    signal: AbortSignal.timeout(o.timeoutMs ?? 15_000),
+  });
+  const text = await res.text();
+  let json: unknown = undefined;
+  try {
+    json = text === "" ? undefined : JSON.parse(text);
+  } catch {
+    // JSON 이 아니면 아래에서 형식 오류나 HTTP 오류로 처리한다
+  }
+  if (!res.ok) throw new OmniRouteError(req.method, req.path, res.status, errorCode(json), text.slice(0, 300));
+  const parsed = schema.safeParse(json);
+  if (!parsed.success) throw new OmniRouteFormatError(req.method, req.path, parsed.error.issues);
+  return { data: parsed.data, headers: res.headers };
+}
+
+function requireText(name: string, v: unknown): string {
+  if (typeof v !== "string" || v.trim() === "") throw new TypeError(`${name} 는 비어 있지 않은 문자열이어야 한다`);
+  return v;
+}
+
+const keyPath = (id: string) => `/api/keys/${encodeURIComponent(requireText("키 id", id))}`;
+
+/** 대시보드 비밀번호 로그인. 돌려준 쿠키로 createClient({ credential: { cookie } }) 를 만든다 */
+export async function loginWithPassword(o: ConnectOptions, password: string): Promise<{ cookie: string }> {
+  const path = "/api/auth/login";
+  const { headers } = await call(o, { method: "POST", path, body: { password: requireText("password", password) }, origin: true }, unusedBodySchema);
+  const cookie = headers.getSetCookie().map((s) => s.split(";")[0]).find((s) => s.startsWith("auth_token="));
+  if (!cookie) throw new OmniRouteFormatError("POST", path, [{ code: "custom", path: ["set-cookie"], message: "auth_token 쿠키가 없다", input: undefined }]);
+  return { cookie };
+}
+
+export interface AccessToken {
+  token: string;
+  id: string;
+  scope: Scope;
+  expiresAt: string | null;
+}
+
+/**
+ * 관리 비밀번호(INITIAL_PASSWORD)로 oma_live_ 접근 토큰을 만든다 (V10 mintApi, 계획서 4.7 3번).
+ * 공개 경로라 다른 인증이 필요 없다. 비밀번호가 틀리면 401, 실패가 5번 쌓이면 15분 동안 429 다.
+ */
+export async function createAccessToken(
+  o: ConnectOptions,
+  input: { password: string; scope: Scope; name: string; expiresInDays: number },
+): Promise<AccessToken> {
+  const { data } = await call(
+    o,
+    {
+      method: "POST",
+      path: "/api/cli/connect",
+      body: {
+        password: requireText("password", input.password),
+        name: requireText("name", input.name),
+        scope: input.scope,
+        expiresInDays: input.expiresInDays,
+      },
+    },
+    accessTokenSchema,
+  );
+  return data;
+}
+
+export interface KeyInfo {
+  id: string;
+  name: string;
+  isActive: boolean;
+  /** OmniRoute 키 범위. 회원 앱은 쓰지 않고 읽기만 한다 (정합성 점검, 계획서 5.8) */
+  scopes: string[];
+}
+
+export interface Analytics {
+  totalCost: number;
+  totalRequests: number;
+  promptTokens: number;
+  completionTokens: number;
+  byApiKey: { apiKeyId: string | null; requests: number; cost: number }[];
+}
+
+export interface CallLog {
+  id: string;
+  timestamp: string;
+  status: number;
+  model: string | null;
+  requestedModel: string | null;
+  apiKeyId: string;
+  tokens: { in: number | null; out: number | null; cacheRead?: number | null; cacheWrite?: number | null };
+}
+
+const isoTime = (name: string, v: Date | string): string => {
+  const d = v instanceof Date ? v : new Date(v);
+  if (Number.isNaN(d.getTime())) throw new TypeError(`${name} 가 올바른 시각이 아니다`);
+  return d.toISOString();
+};
+
+export function createClient(o: ConnectOptions & { credential: Credential }) {
+  const credential = o.credential;
+  const req = <S extends z.ZodType>(r: Omit<Request, "credential">, s: S) => call(o, { ...r, credential }, s).then((x) => x.data);
+
+  return {
+    /** 이 자격 증명의 범위. 접근 토큰이면 어떤 범위든 200 이다 (V10 tokenScopeVisibility) */
+    whoami: () => req({ method: "GET", path: "/api/cli/whoami" }, whoamiSchema),
+
+    async listKeys(): Promise<KeyInfo[]> {
+      return (await req({ method: "GET", path: "/api/keys" }, keyListSchema)).keys;
+    },
+
+    /** 원문 키는 이 응답에 한 번만 온다. 저장하지 않고 회원에게 한 번 보여 준다 (계획서 5.2) */
+    async createKey(name: string) {
+      return req({ method: "POST", path: "/api/keys", body: { name: requireText("name", name) } }, createdKeySchema);
+    },
+
+    async setKeyActive(id: string, active: boolean): Promise<void> {
+      if (typeof active !== "boolean") throw new TypeError("active 는 boolean 이어야 한다");
+      const r = await req({ method: "PATCH", path: keyPath(id), body: { isActive: active } }, keyActiveSchema);
+      if (r.isActive !== active) throw new OmniRouteFormatError("PATCH", keyPath(id), [{ code: "custom", path: ["isActive"], message: `요청 ${active}, 응답 ${r.isActive}`, input: r.isActive }]);
+    },
+
+    async renameKey(id: string, name: string): Promise<void> {
+      await req({ method: "PATCH", path: keyPath(id), body: { name: requireText("name", name) } }, keyNameSchema);
+    },
+
+    async deleteKey(id: string): Promise<void> {
+      await call(o, { method: "DELETE", path: keyPath(id), credential }, unusedBodySchema);
+    },
+
+    /**
+     * 키 하나의 월 예산. 넘으면 OmniRoute 가 429 BUDGET_EXCEEDED 로 막는다 (TC-S5.T2.d).
+     * OmniRoute 는 resetInterval 에 맞는 한도 하나만 본다. monthly 로 두지 않으면 monthlyLimitUsd 가 무시된다 (계약 환경 실측).
+     */
+    async setBudget(id: string, budget: { monthlyUsd: number }): Promise<void> {
+      const monthly = budget.monthlyUsd;
+      if (typeof monthly !== "number" || !Number.isFinite(monthly) || monthly < 0) throw new TypeError("monthlyUsd 는 0 이상의 수여야 한다");
+      const r = await req(
+        {
+          method: "POST",
+          path: "/api/usage/budget",
+          body: { apiKeyId: requireText("키 id", id), dailyLimitUsd: 0, weeklyLimitUsd: 0, monthlyLimitUsd: monthly, resetInterval: "monthly" },
+        },
+        budgetSchema,
+      );
+      if (r.budget.resetInterval !== "monthly" || r.budget.monthlyLimitUsd !== monthly) {
+        throw new OmniRouteFormatError("POST", "/api/usage/budget", [{ code: "custom", path: ["budget"], message: `월 예산이 반영되지 않았다: ${JSON.stringify(r.budget)}`, input: r.budget }]);
+      }
+    },
+
+    /** 키별 사용량 (스트리밍 포함, 0단계 추가 1). startDate·endDate 는 ISO 시각으로 보낸다 (날짜만 보내면 0 이 나온다) */
+    async getAnalytics(q: { apiKeyIds: string[]; startDate: Date | string; endDate: Date | string }): Promise<Analytics> {
+      if (!Array.isArray(q.apiKeyIds) || q.apiKeyIds.length === 0) throw new TypeError("apiKeyIds 가 비어 있다");
+      const p = new URLSearchParams({
+        apiKeyIds: q.apiKeyIds.map((x) => requireText("키 id", x)).join(","),
+        startDate: isoTime("startDate", q.startDate),
+        endDate: isoTime("endDate", q.endDate),
+      });
+      const r = await req({ method: "GET", path: `/api/usage/analytics?${p}` }, analyticsSchema);
+      return { ...r.summary, byApiKey: r.byApiKey };
+    },
+
+    /** 최근 호출 기록 중 완료 기록만 (apiKeyId 가 있는 줄, 0단계 2절). 비용은 없다 */
+    async getCallLogs(q: { limit?: number; offset?: number } = {}): Promise<CallLog[]> {
+      const p = new URLSearchParams({ limit: String(q.limit ?? 50), offset: String(q.offset ?? 0) });
+      const rows = await req({ method: "GET", path: `/api/usage/call-logs?${p}` }, callLogsSchema);
+      return rows.filter((r): r is CallLog => typeof r.apiKeyId === "string" && r.apiKeyId !== "");
+    },
+  };
+}
+
+export type OmniRouteClient = ReturnType<typeof createClient>;

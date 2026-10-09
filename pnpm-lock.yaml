@@ -153,6 +153,10 @@ importers:
         version: 4.115.0
 
   packages/omniroute:
+    dependencies:
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
     devDependencies:
       '@types/node':
         specifier: 24.13.6
