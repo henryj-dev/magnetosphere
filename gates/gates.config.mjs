@@ -65,6 +65,8 @@ export const GATES = {
     ],
     checks: [
       { id: "G-S2.1", how: "cmd", desc: "TC-S2.T1.a 생성물이 공통 정의와 같음", cmd: "pnpm -C packages/db gen && git diff --exit-code packages/db/src/schema/" },
+      { id: "G-S2.2", how: "cmd", desc: "TC-S2.T1.b 스키마 규칙 위반 0", cmd: "node scripts/schema-lint.mjs" },
+      { id: "G-S2.3", how: "cmd", desc: "TC-S2.T1.c 린트 음성 대조 (픽스처 위반 3)", cmd: "node scripts/schema-lint.mjs --fixture test/fixtures/bad-schema.ts --expect 3" },
     ],
   },
   S3: {
