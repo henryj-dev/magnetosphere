@@ -1,3 +1,10 @@
 packages:
   - "apps/*"
   - "packages/*"
+# 설치 스크립트를 허용할 패키지. drizzle-kit·wrangler 가 esbuild 를, wrangler 가 workerd 를 쓴다.
+allowBuilds:
+  esbuild: true
+  workerd: true
+# 발행 직후 보류 정책의 예외. V26 에서 검증한 고정 버전이다.
+minimumReleaseAgeExclude:
+  - drizzle-orm@0.45.4

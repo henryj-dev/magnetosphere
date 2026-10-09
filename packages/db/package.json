@@ -2,5 +2,23 @@
   "name": "@magnetosphere/db",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "gen": "node scripts/gen-schema.mjs",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@libsql/client": "0.18.0",
+    "drizzle-orm": "0.45.4",
+    "mysql2": "3.24.5",
+    "postgres": "3.4.9"
+  },
+  "devDependencies": {
+    "@better-auth/drizzle-adapter": "1.7.7",
+    "@better-auth/sso": "1.7.7",
+    "better-auth": "1.7.7",
+    "drizzle-kit": "0.31.11",
+    "vitest": "5.0.3",
+    "wrangler": "4.115.0"
+  }
 }

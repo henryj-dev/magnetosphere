@@ -60,10 +60,12 @@ export const GATES = {
     needs: ["S1"],
     waivable: false,
     outputs: [
-      "packages/db/src/**", "packages/db/scripts/**", "packages/db/migrations/**", "packages/db/test/**",
-      "scripts/schema-lint.mjs", "docker-compose.test.yml",
+      "packages/db/package.json", "packages/db/src/**", "packages/db/scripts/**", "packages/db/migrations/**", "packages/db/test/**",
+      "packages/db/*.config.ts", "scripts/schema-lint.mjs", "test/fixtures/**", "docker-compose.test.yml",
     ],
-    checks: [],
+    checks: [
+      { id: "G-S2.1", how: "cmd", desc: "TC-S2.T1.a 생성물이 공통 정의와 같음", cmd: "pnpm -C packages/db gen && git diff --exit-code packages/db/src/schema/" },
+    ],
   },
   S3: {
     needs: ["S2"],

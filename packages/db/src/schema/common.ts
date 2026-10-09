@@ -1,0 +1,246 @@
+// 네 DB 공통 스키마 정의. 테이블·칼럼 이름과 의미의 유일한 원본이다 (계획서 3.2 "DB 지원 원칙", 5.9).
+// sqlite·mysql·pg Drizzle 스키마는 이 파일에서 생성한다: pnpm -C packages/db gen
+// 생성물(src/schema/{sqlite,mysql,pg}.ts)은 손으로 고치지 않는다. D1 은 sqlite 를 같이 쓴다.
+//
+// 칼럼 종류와 DB별 타입 (생성기 packages/db/scripts/gen-schema.mjs 가 이 표대로 바꾼다)
+//   id        문자열 id          sqlite text · mysql varchar(36) · pg varchar(36)
+//   string    길이 있는 문자열   sqlite text · mysql/pg varchar(length)  — 기본 키·고유 키·인덱스는 이것만 쓴다
+//   text      긴 문자열          text
+//   json      JSON 문자열        text. 앱에서 파싱한다. DB 전용 JSON 타입·연산은 쓰지 않는다
+//   integer   정수               sqlite integer · mysql int · pg integer
+//   boolean   참·거짓            sqlite integer(boolean) · mysql boolean(tinyint(1)) · pg boolean
+//   timestamp 시각 (UTC)         sqlite integer(timestamp_ms) · mysql timestamp(3) · pg timestamp  — Better Auth 생성기와 같은 규칙 (V26)
+//   usd       금액               sqlite real · mysql/pg decimal(12,6). 칼럼 이름은 *_usd
+
+export type ColumnKind = "id" | "string" | "text" | "json" | "integer" | "boolean" | "timestamp" | "usd";
+
+export interface Column {
+  /** DB 칼럼 이름 (snake_case). 객체 키는 Drizzle·Better Auth 가 쓰는 필드 이름이다. */
+  name: string;
+  kind: ColumnKind;
+  /** kind "string" 의 최대 길이 */
+  length?: number;
+  notNull?: boolean;
+  primaryKey?: boolean;
+  unique?: boolean;
+  default?: string | number | boolean;
+  /** 행을 만들 때 DB 가 현재 시각을 넣는다 */
+  defaultNow?: boolean;
+  /** Drizzle 로 고칠 때 현재 시각으로 바꾼다 */
+  onUpdateNow?: boolean;
+  references?: { table: string; column: string; onDelete?: "cascade" };
+  /** 의미. 값의 종류처럼 칼럼 타입이 말하지 않는 것 */
+  doc?: string;
+}
+
+export interface Table {
+  /** DB 테이블 이름 */
+  name: string;
+  /** better-auth: Better Auth 가 읽고 쓰는 테이블. 칼럼은 Better Auth 1.7.7 + sso 플러그인이 기대하는 것과 같아야 한다 (생성기가 검사) */
+  owner: "better-auth" | "app";
+  doc: string;
+  columns: Record<string, Column>;
+  indexes?: { name: string; columns: string[] }[];
+}
+
+const now = { kind: "timestamp", notNull: true, defaultNow: true } as const;
+
+// Better Auth user 테이블에 더하는 칼럼 (계획서 4.6). 모두 input: false — 가입·회원정보 수정 요청으로 바꾸지 못한다.
+// S3 의 Better Auth 구성은 이 객체를 그대로 user.additionalFields 로 넘긴다.
+export const USER_ADDITIONAL_FIELDS = {
+  role: { type: "string", required: false, defaultValue: "member", input: false },
+  status: { type: "string", required: false, defaultValue: "active", input: false },
+  monthlyLimitUsd: { type: "number", required: false, input: false },
+  maxKeys: { type: "number", required: false, input: false },
+  isBootstrapAdmin: { type: "boolean", required: false, defaultValue: false, input: false },
+} as const;
+
+export const TABLES: Record<string, Table> = {
+  // ---------- Better Auth (1.7.7 + @better-auth/sso) ----------
+  user: {
+    name: "user",
+    owner: "better-auth",
+    doc: "회원. Better Auth 칼럼 + 권한 칼럼 다섯",
+    columns: {
+      id: { name: "id", kind: "id", primaryKey: true },
+      name: { name: "name", kind: "string", length: 255, notNull: true },
+      email: { name: "email", kind: "string", length: 255, notNull: true, unique: true, doc: "항상 소문자로 저장한다 (V26)" },
+      emailVerified: { name: "email_verified", kind: "boolean", notNull: true, default: false },
+      image: { name: "image", kind: "text" },
+      createdAt: { name: "created_at", ...now },
+      updatedAt: { name: "updated_at", ...now, onUpdateNow: true },
+      role: { name: "role", kind: "string", length: 16, notNull: true, default: "member", doc: "member | admin" },
+      status: { name: "status", kind: "string", length: 16, notNull: true, default: "active", doc: "pending | active | suspended | deleted" },
+      monthlyLimitUsd: { name: "monthly_limit_usd", kind: "usd", doc: "NULL 이면 무제한" },
+      maxKeys: { name: "max_keys", kind: "integer", doc: "NULL 이면 설정 기본값" },
+      isBootstrapAdmin: { name: "is_bootstrap_admin", kind: "boolean", notNull: true, default: false },
+    },
+  },
+  session: {
+    name: "session",
+    owner: "better-auth",
+    doc: "로그인 세션",
+    columns: {
+      id: { name: "id", kind: "id", primaryKey: true },
+      expiresAt: { name: "expires_at", kind: "timestamp", notNull: true },
+      token: { name: "token", kind: "string", length: 255, notNull: true, unique: true },
+      createdAt: { name: "created_at", ...now },
+      updatedAt: { name: "updated_at", kind: "timestamp", notNull: true, onUpdateNow: true },
+      ipAddress: { name: "ip_address", kind: "text" },
+      userAgent: { name: "user_agent", kind: "text" },
+      userId: { name: "user_id", kind: "id", notNull: true, references: { table: "user", column: "id", onDelete: "cascade" } },
+    },
+    indexes: [{ name: "session_userId_idx", columns: ["userId"] }],
+  },
+  account: {
+    name: "account",
+    owner: "better-auth",
+    doc: "로그인 방식 (비밀번호, OAuth, SSO)",
+    columns: {
+      id: { name: "id", kind: "id", primaryKey: true },
+      accountId: { name: "account_id", kind: "text", notNull: true },
+      providerId: { name: "provider_id", kind: "text", notNull: true },
+      userId: { name: "user_id", kind: "id", notNull: true, references: { table: "user", column: "id", onDelete: "cascade" } },
+      accessToken: { name: "access_token", kind: "text" },
+      refreshToken: { name: "refresh_token", kind: "text" },
+      idToken: { name: "id_token", kind: "text" },
+      accessTokenExpiresAt: { name: "access_token_expires_at", kind: "timestamp" },
+      refreshTokenExpiresAt: { name: "refresh_token_expires_at", kind: "timestamp" },
+      scope: { name: "scope", kind: "text" },
+      password: { name: "password", kind: "text" },
+      createdAt: { name: "created_at", ...now },
+      updatedAt: { name: "updated_at", kind: "timestamp", notNull: true, onUpdateNow: true },
+    },
+    indexes: [{ name: "account_userId_idx", columns: ["userId"] }],
+  },
+  verification: {
+    name: "verification",
+    owner: "better-auth",
+    doc: "메일 인증·비밀번호 재설정 등 일회용 값",
+    columns: {
+      id: { name: "id", kind: "id", primaryKey: true },
+      identifier: { name: "identifier", kind: "string", length: 255, notNull: true },
+      value: { name: "value", kind: "text", notNull: true },
+      expiresAt: { name: "expires_at", kind: "timestamp", notNull: true },
+      createdAt: { name: "created_at", ...now },
+      updatedAt: { name: "updated_at", ...now, onUpdateNow: true },
+    },
+    indexes: [{ name: "verification_identifier_idx", columns: ["identifier"] }],
+  },
+  ssoProvider: {
+    name: "sso_provider",
+    owner: "better-auth",
+    doc: "SSO 제공자 (@better-auth/sso). 우리 쪽 추가 설정은 sso_provider_settings",
+    columns: {
+      id: { name: "id", kind: "id", primaryKey: true },
+      issuer: { name: "issuer", kind: "text", notNull: true },
+      oidcConfig: { name: "oidc_config", kind: "text", doc: "Better Auth 가 쓰는 JSON 문자열" },
+      samlConfig: { name: "saml_config", kind: "text", doc: "Better Auth 가 쓰는 JSON 문자열" },
+      userId: { name: "user_id", kind: "id", references: { table: "user", column: "id", onDelete: "cascade" } },
+      providerId: { name: "provider_id", kind: "string", length: 255, notNull: true, unique: true },
+      organizationId: { name: "organization_id", kind: "text" },
+      domain: { name: "domain", kind: "text", notNull: true },
+    },
+  },
+
+  // ---------- 회원 앱 ----------
+  appSettings: {
+    name: "app_settings",
+    owner: "app",
+    doc: "운영 설정. 키마다 한 행, 값은 JSON",
+    columns: {
+      key: { name: "key", kind: "string", length: 64, primaryKey: true, doc: "signup_mode, allowed_domains, default_limit_usd, default_max_keys, signup_requires_approval, daily_signup_cap, public_base_url, ..." },
+      value: { name: "value", kind: "json", notNull: true },
+      updatedAt: { name: "updated_at", kind: "timestamp", notNull: true },
+      updatedBy: { name: "updated_by", kind: "id", doc: "바꾼 회원 id. 시드는 NULL" },
+    },
+  },
+  ssoProviderSettings: {
+    name: "sso_provider_settings",
+    owner: "app",
+    doc: "SSO 제공자마다 우리 쪽 설정 (계획서 4.3)",
+    columns: {
+      providerId: { name: "provider_id", kind: "string", length: 255, primaryKey: true, doc: "Better Auth sso_provider.provider_id" },
+      displayName: { name: "display_name", kind: "string", length: 255, notNull: true },
+      showButton: { name: "show_button", kind: "boolean", notNull: true, default: true },
+      enabled: { name: "enabled", kind: "boolean", notNull: true, default: true },
+      jitEnabled: { name: "jit_enabled", kind: "boolean", notNull: true, default: true },
+      defaultRole: { name: "default_role", kind: "string", length: 16, notNull: true, default: "member" },
+      defaultLimitUsd: { name: "default_limit_usd", kind: "usd" },
+      defaultMaxKeys: { name: "default_max_keys", kind: "integer" },
+      groupClaim: { name: "group_claim", kind: "string", length: 255 },
+      adminGroups: { name: "admin_groups", kind: "json", doc: "JSON 배열" },
+    },
+  },
+  invites: {
+    name: "invites",
+    owner: "app",
+    doc: "초대 링크. 관리자 역할 초대는 이메일 필수 (앱에서 검사, 계획서 4.2)",
+    columns: {
+      id: { name: "id", kind: "id", primaryKey: true },
+      email: { name: "email", kind: "string", length: 255, doc: "소문자. role = admin 이면 필수" },
+      tokenHash: { name: "token_hash", kind: "string", length: 128, notNull: true, unique: true },
+      role: { name: "role", kind: "string", length: 16, notNull: true, default: "member" },
+      expiresAt: { name: "expires_at", kind: "timestamp", notNull: true },
+      usedAt: { name: "used_at", kind: "timestamp" },
+      createdBy: { name: "created_by", kind: "id", notNull: true },
+    },
+  },
+  apiKeys: {
+    name: "api_keys",
+    owner: "app",
+    doc: "회원 키와 OmniRoute 키의 대응 (계획서 5.2, 5.7)",
+    columns: {
+      id: { name: "id", kind: "id", primaryKey: true },
+      userId: { name: "user_id", kind: "id", notNull: true, references: { table: "user", column: "id" } },
+      omnirouteKeyId: { name: "omniroute_key_id", kind: "string", length: 255, notNull: true, unique: true },
+      keyPreview: { name: "key_preview", kind: "string", length: 16, notNull: true, doc: "끝 4자리" },
+      label: { name: "label", kind: "string", length: 255 },
+      state: { name: "state", kind: "string", length: 16, notNull: true, doc: "active | disabled | deleted" },
+      disabledReason: { name: "disabled_reason", kind: "string", length: 16, doc: "member | admin | user_status" },
+      syncState: { name: "sync_state", kind: "string", length: 16, notNull: true, default: "synced", doc: "synced | pending | failed" },
+      budgetUsd: { name: "budget_usd", kind: "usd", doc: "마지막으로 OmniRoute 에 건 월 예산" },
+      createdAt: { name: "created_at", kind: "timestamp", notNull: true },
+      deletedAt: { name: "deleted_at", kind: "timestamp" },
+    },
+    indexes: [{ name: "idx_api_keys_user", columns: ["userId"] }],
+  },
+  omnirouteJobs: {
+    name: "omniroute_jobs",
+    owner: "app",
+    doc: "OmniRoute 에 보낼 작업 대기열 (재시도)",
+    columns: {
+      id: { name: "id", kind: "id", primaryKey: true },
+      action: { name: "action", kind: "string", length: 64, notNull: true, doc: "key.apply_state, key.delete, budget.set, key.rollback, ..." },
+      payload: { name: "payload", kind: "json", notNull: true },
+      attempts: { name: "attempts", kind: "integer", notNull: true, default: 0 },
+      lastError: { name: "last_error", kind: "text" },
+      nextRunAt: { name: "next_run_at", kind: "timestamp", notNull: true },
+      doneAt: { name: "done_at", kind: "timestamp" },
+    },
+  },
+  jobLeases: {
+    name: "job_leases",
+    owner: "app",
+    doc: "여러 인스턴스에서 주기 작업 중복 실행 방지 (임대 잠금)",
+    columns: {
+      name: { name: "name", kind: "string", length: 64, primaryKey: true, doc: "budget_rebalance, reconcile, ..." },
+      holder: { name: "holder", kind: "string", length: 255, notNull: true },
+      lockedUntil: { name: "locked_until", kind: "timestamp", notNull: true },
+    },
+  },
+  auditLog: {
+    name: "audit_log",
+    owner: "app",
+    doc: "감사 기록",
+    columns: {
+      id: { name: "id", kind: "id", primaryKey: true },
+      actorId: { name: "actor_id", kind: "id" },
+      action: { name: "action", kind: "string", length: 64, notNull: true },
+      target: { name: "target", kind: "string", length: 255 },
+      detail: { name: "detail", kind: "json", doc: "비밀 값 제외" },
+      ip: { name: "ip", kind: "string", length: 64 },
+      createdAt: { name: "created_at", kind: "timestamp", notNull: true },
+    },
+  },
+};
