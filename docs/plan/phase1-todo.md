@@ -545,10 +545,13 @@ TC-S3.T2.e  메일 전송 시간으로 계정 존재 여부가 드러나지 않�
          응답 시간 중앙값 차이 < 50ms. 메일 전송 실패 → onMailError 로 그 예외가 넘어감 (L4)
   검출:  메일 전송을 기다려 재설정은 있는 계정 306ms·없는 계정 4ms, 가입은 있는 계정 61ms·없는 계정 355ms 로 갈려
          요청 몇 번으로 가입 여부를 알아내는 것 (리뷰 실측). 메일 실패가 기록만 되고 운영자에게 안 닿는 것
+TC-S3.T2.f  운영 환경에서는 콘솔 어댑터를 만들지 않는다 (S3 보안 리뷰 L3)
+  단언:  NODE_ENV=production 에서 consoleMailer() → 예외. development 에서는 예외 없음
+  검출:  운영에서 콘솔 어댑터가 켜져 인증·재설정 토큰이 든 링크가 로그에 그대로 남는 것
 ```
 
 【통과】
-- [ ] G-S3.5 ~ G-S3.8, G-S3.15 통과
+- [ ] G-S3.5 ~ G-S3.8, G-S3.15, G-S3.18 통과
 
 ### ☐ S3.T3 — 인증 경로 요청 수 제한과 클라이언트 IP
 선행 S3.T1 · 산출 `packages/auth/src/rate-limit.ts` · 되돌리기 커밋 1개
@@ -601,6 +604,7 @@ TC-S3.T3.d  HTTP 요청을 받는 함수는 감싼 handler 하나뿐이다 (S3 �
 | G-S3.15 | TC-S3.T2.e | `pnpm -C packages/auth test -t "TC-S3.T2.e"` | 종료코드 0 |
 | G-S3.16 | TC-S3.T3.d | `pnpm -C packages/auth test -t "TC-S3.T3.d"` | 종료코드 0 |
 | G-S3.17 | TC-S3.T1.f | `pnpm -C packages/auth test -t "TC-S3.T1.f"` | 종료코드 0 |
+| G-S3.18 | TC-S3.T2.f | `pnpm -C packages/auth test -t "TC-S3.T2.f"` | 종료코드 0 |
 
 `node scripts/gate.mjs S3 --seal`
 

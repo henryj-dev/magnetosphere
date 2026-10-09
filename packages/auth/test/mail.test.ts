@@ -76,6 +76,20 @@ describe("인증·재설정 메일 (SQLite)", () => {
   });
 });
 
+describe("TC-S3.T2.f 콘솔 어댑터", () => {
+  test("TC-S3.T2.f NODE_ENV=production 이면 콘솔 어댑터를 만들지 않는다", () => {
+    const before = process.env.NODE_ENV;
+    try {
+      process.env.NODE_ENV = "production";
+      expect(() => consoleMailer()).toThrow(/production/);
+      process.env.NODE_ENV = "development";
+      expect(() => consoleMailer()).not.toThrow();
+    } finally {
+      process.env.NODE_ENV = before;
+    }
+  });
+});
+
 describe("TC-S3.T2.c Resend·Cloudflare 어댑터 요청", () => {
   test("TC-S3.T2.c Resend: 엔드포인트·인증 헤더·수신자", async () => {
     const f = fakeFetch(200, { id: "re_1" });
