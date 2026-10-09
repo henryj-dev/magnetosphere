@@ -92,6 +92,8 @@ async function call<S extends z.ZodType>(o: ConnectOptions, req: Request, schema
     headers,
     body: req.body === undefined ? undefined : JSON.stringify(req.body),
     signal: AbortSignal.timeout(o.timeoutMs ?? 15_000),
+    // 리다이렉트를 따라가지 않는다. 307·308 은 본문({password} 포함)과 함께 다른 출처로 넘어간다 (S5 보안 리뷰 L1)
+    redirect: "error",
   });
   const text = await res.text();
   let json: unknown = undefined;

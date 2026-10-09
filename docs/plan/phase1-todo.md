@@ -845,10 +845,13 @@ TC-S5.T2.j  월 예산은 양수만 받는다 (0 은 OmniRoute 에서 무제한)
   단언:  setBudget(monthlyUsd 0·음수·NaN·Infinity) → TypeError, 요청 0건.
          대조: 어댑터 없이 monthlyLimitUsd 0 을 넣은 키 → 3건(0.014633) 뒤 4번째 요청도 200
   검출:  남은 한도 0 을 예산 0 으로 걸어 회원 한도가 아무도 모르게 무제한이 되는 것 (S5 보안 리뷰 M1). 0원 차단은 setKeyActive(false)
+TC-S5.T2.k  리다이렉트를 따라가지 않는다
+  단언:  OmniRoute 자리의 가짜 서버가 307 로 다른 출처를 가리킴 → createAccessToken 오류, 다른 출처 서버가 받은 본문 0건
+  검출:  주소 설정 실수·중간자가 준 리다이렉트로 {password} 본문이 다른 서버로 넘어가는 것 (S5 보안 리뷰 L1)
 ```
 
 【통과】
-- [ ] G-S5.2 ~ G-S5.9, G-S5.14, G-S5.16 통과
+- [ ] G-S5.2 ~ G-S5.9, G-S5.14, G-S5.16, G-S5.17 통과
 
 ### ☐ S5.T3 — OmniRoute 부트스트랩
 선행 S5.T2 · 산출 `apps/server/src/setup/omniroute.ts` · 되돌리기 커밋 1개
@@ -889,6 +892,7 @@ TC-S5.T3.d  붙여 넣기 입력은 관리자 세션만, write 범위 토큰만 
 | G-S5.14 | TC-S5.T2.i | `pnpm test:contract -t "TC-S5.T2.i"` | 종료코드 0 |
 | G-S5.15 | TC-S5.T3.d | `pnpm test:contract -t "TC-S5.T3.d"` | 종료코드 0 |
 | G-S5.16 | TC-S5.T2.j | `pnpm test:contract -t "TC-S5.T2.j"` | 종료코드 0 |
+| G-S5.17 | TC-S5.T2.k | `pnpm test:contract -t "TC-S5.T2.k"` | 종료코드 0 |
 
 `node scripts/gate.mjs S5 --seal`
 

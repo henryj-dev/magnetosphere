@@ -1,6 +1,8 @@
 // 어댑터 단위 테스트 (OmniRoute 없이 가짜 fetch). 계약 테스트 설정(pnpm test:contract)에서도 같이 돈다.
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";
-import { createClient, OmniRouteError, OmniRouteFormatError } from "../src/index.ts";
+import { createAccessToken, createClient, OmniRouteError, OmniRouteFormatError } from "../src/index.ts";
 
 interface Sent {
   method: string;
@@ -117,5 +119,37 @@ describe("TC-S5.T2.j 월 예산은 양수만 받는다 (0 은 OmniRoute 에서 �
     expect(sent).toHaveLength(0);
     await c.setBudget("k1", { monthlyUsd: 0.5 });
     expect(sent.map((x) => JSON.parse(x.body!).monthlyLimitUsd)).toEqual([0.5]);
+  });
+});
+
+/** 요청을 받아 기록하고 handler 로 답하는 127.0.0.1 서버 */
+async function server(handler: (req: http.IncomingMessage, body: string, res: http.ServerResponse) => void) {
+  const bodies: string[] = [];
+  const srv = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      bodies.push(body);
+      handler(req, body, res);
+    });
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const url = `http://127.0.0.1:${(srv.address() as AddressInfo).port}`;
+  return { url, bodies, close: () => new Promise<void>((r) => srv.close(() => r())) };
+}
+
+describe("TC-S5.T2.k 리다이렉트를 따라가지 않는다", () => {
+  it("307 로 다른 출처에 보내면 비밀번호 본문이 그쪽에 닿지 않고 오류", async () => {
+    const other = await server((_q, _b, res) => res.writeHead(200, { "content-type": "application/json" }).end("{}"));
+    const omni = await server((_q, _b, res) => res.writeHead(307, { location: `${other.url}/api/cli/connect` }).end());
+    try {
+      const err = await createAccessToken({ baseUrl: omni.url }, { password: "secret-pass", scope: "write", name: "x", expiresInDays: 1 }).catch((e) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect(omni.bodies).toHaveLength(1);
+      expect(other.bodies).toEqual([]);
+    } finally {
+      await other.close();
+      await omni.close();
+    }
   });
 });
