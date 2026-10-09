@@ -94,8 +94,9 @@ async function call<S extends z.ZodType>(o: ConnectOptions, req: Request, schema
     headers,
     body: req.body === undefined ? undefined : JSON.stringify(req.body),
     signal: o.signal ?? AbortSignal.timeout(o.timeoutMs ?? 15_000),
-    // 리다이렉트를 따라가지 않는다. 307·308 은 본문({password} 포함)과 함께 다른 출처로 넘어간다 (S5 보안 리뷰 L1)
-    redirect: "error",
+    // 리다이렉트를 따라가지 않는다. 307·308 은 본문({password} 포함)과 함께 다른 출처로 넘어간다 (S5 보안 리뷰 L1).
+    // "error" 는 Workers fetch 가 받지 않아(TypeError, S6 E2E workers-* 에서 발견) "manual" 로 받고, 3xx 는 아래 !res.ok 로 오류가 된다
+    redirect: "manual",
   });
   const text = await res.text();
   let json: unknown = undefined;
