@@ -741,10 +741,14 @@ TC-S4.T4.e  설치 전에는 가입을 막고, 이미 있는 이메일로는 관
          403 또는 404, user 0. 설치 뒤 같은 가입 → 200. 같은 이메일 user 가 먼저 있으면 /setup → 409 {error:"email_taken"}(500 아님),
          토큰은 남아 다른 이메일로 201
   검출:  설치 전 열린 가입으로 공격자가 관리자 이메일을 선점해 /setup 이 500 으로 막히는 것 (기본 정책 invite_only, 계획서 4.2)
+TC-S4.T4.f  동시에 설치 요청 10건이 와도 관리자는 하나다
+  단언:  SQLite·MySQL·Postgres 각각 Node 진입점에 같은 토큰으로 POST /api/setup 10건 동시(이메일은 서로 다름) → 201 정확히 1개,
+         나머지는 409(이미 설치) 또는 401(이미 소비된 토큰), user 행 1개
+  검출:  토큰 확인과 소비가 원자적이지 않아 동시 요청마다 관리자가 생기는 것 (설치 직후 공개 인터넷에서 경쟁)
 ```
 
 【통과】
-- [ ] G-S4.10 ~ G-S4.13, G-S4.21 통과
+- [ ] G-S4.10 ~ G-S4.13, G-S4.21, G-S4.22 통과
 
 ## 🚪 GATE S4
 
@@ -771,6 +775,7 @@ TC-S4.T4.e  설치 전에는 가입을 막고, 이미 있는 이메일로는 관
 | G-S4.19 | TC-S4.T3.e | `pnpm -C apps/server test -t "TC-S4.T3.e" && pnpm -C apps/server test:both-runtimes -t "TC-S4.T3.e"` | 종료코드 0 |
 | G-S4.20 | TC-S4.T3.f | `pnpm -C apps/server test:both-runtimes -t "TC-S4.T3.f"` | 종료코드 0 |
 | G-S4.21 | TC-S4.T4.e | `pnpm -C apps/server test -t "TC-S4.T4.e"` | 종료코드 0 |
+| G-S4.22 | TC-S4.T4.f | `pnpm -C apps/server test:db -t "TC-S4.T4.f" --db sqlite,mysql,pg` | 종료코드 0 |
 
 `node scripts/gate.mjs S4 --seal`
 

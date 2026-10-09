@@ -115,7 +115,7 @@ export const GATES = {
     waivable: false,
     outputs: [
       "packages/runtime/src/**", "packages/runtime/test/**", "packages/runtime/scripts/**", "packages/runtime/*.config.ts",
-      "apps/server/src/**", "apps/server/test/**", "apps/server/*.config.ts",
+      "apps/server/src/**", "apps/server/test/**", "apps/server/scripts/**", "apps/server/*.config.ts",
       "apps/web/src/**", "apps/web/static/**", "apps/web/svelte.config.js", "apps/web/vite.config.ts",
       "tsconfig.json", "apps/*/tsconfig.json", "packages/*/tsconfig.json",
     ],
@@ -141,6 +141,7 @@ export const GATES = {
       { id: "G-S4.19", how: "test", desc: "TC-S4.T3.e /api 본문 64KB 상한 (Node·Workers)", cmd: 'pnpm -C apps/server test -t "TC-S4.T3.e" && pnpm -C apps/server test:both-runtimes -t "TC-S4.T3.e"' },
       { id: "G-S4.20", how: "test", desc: "TC-S4.T3.f 보안 헤더와 SPA CSP (Node·Workers)", cmd: 'pnpm -C apps/server test:both-runtimes -t "TC-S4.T3.f"' },
       { id: "G-S4.21", how: "test", desc: "TC-S4.T4.e 설치 전 가입 403·email_taken 409", cmd: 'pnpm -C apps/server test -t "TC-S4.T4.e"' },
+      { id: "G-S4.22", how: "test", desc: "TC-S4.T4.f 동시 설치 10건 → 관리자 하나 (SQLite·MySQL·PG)", cmd: 'pnpm -C apps/server test:db -t "TC-S4.T4.f" --db sqlite,mysql,pg' },
     ],
   },
   S5: {

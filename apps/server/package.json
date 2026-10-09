@@ -7,6 +7,7 @@
     "start": "node src/node.ts",
     "test": "vitest run",
     "test:both-runtimes": "vitest run --config vitest.both-runtimes.config.ts",
+    "test:db": "node scripts/test-db.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
