@@ -43,10 +43,12 @@
 
 ## 진행 현황
 
+이 표는 사람이 읽기 위한 사본이다. 판정은 항상 `node scripts/gate.mjs --status`가 한다.
+
 | 단계 | 제목 | 상태 | 게이트 명령 | 봉인 |
 |---|---|---|---|---|
-| S0 | 저장소와 게이트 장치 | 🔓 | `node scripts/gate.mjs S0` | — |
-| S1 | 확인 항목 7개 | 🔒 | `node scripts/gate.mjs S1` | — |
+| S0 | 저장소와 게이트 장치 | ✅ | `node scripts/gate.mjs S0` | b9f9473 |
+| S1 | 확인 항목 7개 | 🔓 | `node scripts/gate.mjs S1` | — |
 | S2 | DB 계층 (네 DB) | 🔒 | `node scripts/gate.mjs S2` | — |
 | S3 | 인증 코어와 메일 | 🔒 | `node scripts/gate.mjs S3` | — |
 | S4 | 서버·런타임·화면·최초 설치 | 🔒 | `node scripts/gate.mjs S4` | — |
@@ -65,11 +67,11 @@ S0 ─▶ S1 ─▶ S2 ─▶ S3 ─▶ S4 ─▶ S5 ─▶ S6 ─▶ S7
 
 ---
 
-# S0 — 저장소와 게이트 장치 🔓 (선행 없음)
+# S0 — 저장소와 게이트 장치 ✅ (선행 없음)
 
 **브랜치** `main`에서 시작한다 (초기 저장소). 이후 단계는 `s<n>/<짧은 이름>` 브랜치에서 작업하고 `main`에 합친다.
 
-### ☐ S0.T1 — 저장소 초기화와 모노레포 뼈대
+### ☑ S0.T1 — 저장소 초기화와 모노레포 뼈대
 선행 없음 · 산출 `package.json`, `pnpm-workspace.yaml`, `apps/server/`, `apps/web/`, `packages/db/`, `packages/auth/`, `packages/omniroute/`, `packages/runtime/`, `.gitignore`, `.nvmrc`, `LICENSE`, `scripts/check-workspace.mjs` · 되돌리기 커밋 1개
 
 【작업】
@@ -85,7 +87,7 @@ TC-S0.T1.a  워크스페이스가 패키지 여섯을 인식한다
 【통과】
 - [ ] G-S0.1 통과
 
-### ☐ S0.T2 — 게이트 장치
+### ☑ S0.T2 — 게이트 장치
 선행 S0.T1 · 산출 `scripts/gate.mjs`, `gates/gates.config.mjs`, `gates/seals/.gitkeep`, `scripts/gate.test.mjs` · 되돌리기 커밋 1개
 
 【작업】
@@ -139,7 +141,7 @@ TC-S0.T2.d 에는 다음 하위 단언도 들어간다: `test` 검사는 통과 
 【통과】
 - [ ] G-S0.2 ~ G-S0.7 통과
 
-### ☐ S0.T3 — 실제로 거부하는 장치 연결 (훅과 첫 CI)
+### ☑ S0.T3 — 실제로 거부하는 장치 연결 (훅과 첫 CI)
 선행 S0.T2 · 산출 `.githooks/pre-push`, `package.json`의 `prepare` 스크립트, `.github/workflows/gate.yml`, `scripts/hook.test.mjs` · 되돌리기 커밋 1개
 
 【작업】
@@ -186,7 +188,7 @@ TC-S0.T3.b  현재 브랜치가 아닌 브랜치를 push 해도 훅이 그 브�
 
 ---
 
-# S1 — 확인 항목 7개 🔒 (S0 필요)
+# S1 — 확인 항목 7개 🔓 (S0 필요)
 
 **브랜치** `s1/verify`. 작업 코드는 `spikes/` 아래에만 둔다. `spikes/`는 S7에서 지운다.
 **환경** 0단계와 같은 방식: `diegosouzapw/omniroute:3.8.51` 별도 인스턴스(호스트 포트 20140), 가짜 상위 서버(`docs/research/phase0-assets/mock-upstream.mjs`). 사용자가 쓰는 `localhost:20128` 인스턴스는 건드리지 않는다.
