@@ -8,7 +8,8 @@
     "migrate:gen": "drizzle-kit generate --config drizzle.sqlite.config.ts && drizzle-kit generate --config drizzle.mysql.config.ts && drizzle-kit generate --config drizzle.pg.config.ts",
     "check:drift": "node scripts/check-drift.mjs",
     "test": "vitest run",
-    "test:migrate": "node scripts/test-migrate.mjs"
+    "test:migrate": "node scripts/test-migrate.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@better-auth/sso": "1.7.7",
@@ -20,7 +21,9 @@
   },
   "devDependencies": {
     "@better-auth/drizzle-adapter": "1.7.7",
+    "@types/node": "24.13.6",
     "drizzle-kit": "0.31.11",
+    "typescript": "6.0.3",
     "vitest": "5.0.3",
     "wrangler": "4.115.0"
   }

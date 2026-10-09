@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/node.ts",
     "test": "vitest run",
-    "test:both-runtimes": "vitest run --config vitest.both-runtimes.config.ts"
+    "test:both-runtimes": "vitest run --config vitest.both-runtimes.config.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@hono/node-server": "2.1.1",
@@ -17,7 +18,9 @@
   },
   "devDependencies": {
     "@libsql/client": "0.18.0",
+    "@types/node": "24.13.6",
     "drizzle-orm": "0.45.4",
+    "typescript": "6.0.3",
     "vitest": "5.0.3",
     "wrangler": "4.115.0"
   }

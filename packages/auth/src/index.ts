@@ -107,6 +107,8 @@ export function authOptions(cfg: AuthConfig) {
     },
     // 로그인·가입·비밀번호 재설정 요청 수 제한. 저장소는 AUTH_SCHEMA_OPTIONS 의 DB(rate_limit)
     rateLimit: rateLimitOptions(AUTH_SCHEMA_OPTIONS.rateLimit),
+    // AUTH_SCHEMA_OPTIONS 는 as const 라 plugins 가 읽기 전용 튜플이다. BetterAuthOptions 는 바꿀 수 있는 배열을 받으므로 복사한다 (같은 플러그인 객체)
+    plugins: [...AUTH_SCHEMA_OPTIONS.plugins],
     disabledPaths: SSO_DISABLED_PATHS,
     hooks: { before: normalizeEmailBody },
     advanced: {

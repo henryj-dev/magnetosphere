@@ -25,7 +25,8 @@ export async function seedAppSettings(db: AnyDb, schema: Schema, now: Date = new
     // MySQL 은 RETURNING 이 없다. 한 행씩 INSERT IGNORE 하고 영향 행 수로 판정한다.
     const inserted: string[] = [];
     for (const row of rows) {
-      const [result] = await db.insert(t).ignore().values(row);
+      // is() 가 db 를 MySqlDatabase<unknown 결과> 로 좁혀 결과 타입이 사라진다. mysql2 결과는 [ResultSetHeader, ...] 다.
+      const [result] = (await db.insert(t).ignore().values(row)) as [{ affectedRows: number }];
       if (result.affectedRows === 1) inserted.push(row.key);
     }
     return inserted;

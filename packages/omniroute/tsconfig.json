@@ -1,0 +1,6 @@
+{
+  // src 가 생기면(S5) typecheck 스크립트가 tsc --noEmit 를 돈다
+  "extends": "../../tsconfig.json",
+  "compilerOptions": { "types": [] },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

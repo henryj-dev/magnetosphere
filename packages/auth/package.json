@@ -10,7 +10,8 @@
   },
   "scripts": {
     "test": "node scripts/test.mjs",
-    "test:smtp": "node scripts/test-smtp.mjs"
+    "test:smtp": "node scripts/test-smtp.mjs",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@better-auth/core": "1.7.7",
@@ -21,9 +22,11 @@
   },
   "devDependencies": {
     "@libsql/client": "0.18.0",
+    "@types/node": "24.13.6",
     "drizzle-orm": "0.45.4",
     "mysql2": "3.24.5",
     "postgres": "3.4.9",
+    "typescript": "6.0.3",
     "vitest": "5.0.3"
   }
 }

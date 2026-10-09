@@ -2,5 +2,11 @@
   "name": "@magnetosphere/omniroute",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "typecheck": "test ! -d src || tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3"
+  }
 }

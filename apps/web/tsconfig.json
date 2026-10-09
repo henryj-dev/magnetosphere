@@ -1,0 +1,11 @@
+{
+  // svelte-kit sync 가 만드는 .svelte-kit/tsconfig.json 을 이어받는다 (경로 별칭 $lib 등). 검사: pnpm typecheck (svelte-check)
+  "extends": "./.svelte-kit/tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+    "allowJs": true,
+    "checkJs": true,
+    "skipLibCheck": true,
+    "moduleResolution": "bundler"
+  }
+}

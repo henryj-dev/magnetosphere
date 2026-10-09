@@ -676,7 +676,7 @@ TC-S4.T2.c  키가 32바이트가 아니면 시작을 거부한다
 【작업】
 1. Hono 앱: `/api/auth/*`에 S3의 Better Auth 연결, `/api/*` 그 밖은 JSON 404, `/healthz`. Node 진입점과 Workers 진입점. 커밋.
 2. `apps/web`: SvelteKit, `adapter-static`, 루트 `+layout.ts`에 `ssr = false`, `fallback: 'index.html'`. 빌드 결과를 Node는 Hono 정적 제공, Workers는 정적 자산으로. 커밋.
-3. TypeScript 타입 검사 (S3 보안 리뷰에서 넘김). 루트 `tsconfig.json`과 패키지마다 `typecheck` 스크립트(`tsc --noEmit`), 루트에서 `pnpm -r typecheck`. 모든 패키지(packages/db·auth·runtime·omniroute, apps/server·web) 통과. S4 를 열 때 `gates.config.mjs` S4 `outputs`에 tsconfig 경로를 넣는다. 커밋.
+3. TypeScript 타입 검사 (S3 보안 리뷰에서 넘김). 루트 `tsconfig.json`과 패키지마다 `typecheck` 스크립트(`tsc --noEmit`. `apps/web`은 `.svelte` 파일을 보려고 `svelte-kit sync && svelte-check`, 아직 `src`가 없는 `packages/omniroute`는 `test ! -d src || tsc --noEmit`), 루트에서 `pnpm -r typecheck`. 루트 설정에 `erasableSyntaxOnly`를 켜 Node 타입 지우기가 못 돌리는 문법을 막는다. 모든 패키지(packages/db·auth·runtime·omniroute, apps/server·web) 통과. S4 를 열 때 `gates.config.mjs` S4 `outputs`에 tsconfig 경로를 넣는다. 커밋.
 
 【테스트】
 ```
