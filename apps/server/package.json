@@ -10,7 +10,7 @@
     "test:db": "node scripts/test-db.mjs",
     "typecheck": "tsc --noEmit",
     "test:contract": "vitest run --config vitest.contract.config.ts",
-    "dry-run:all": "pnpm -C ../web build && wrangler deploy --dry-run --env d1 --outdir .wrangler/dry-run/d1 && wrangler deploy --dry-run --env mysql --outdir .wrangler/dry-run/mysql && wrangler deploy --dry-run --env pg --outdir .wrangler/dry-run/pg",
+    "dry-run:all": "pnpm -C ../web build && wrangler deploy --dry-run --env d1 --outdir \"${TMPDIR:-/tmp}/mg-dry-run/d1\" && wrangler deploy --dry-run --env mysql --outdir \"${TMPDIR:-/tmp}/mg-dry-run/mysql\" && wrangler deploy --dry-run --env pg --outdir \"${TMPDIR:-/tmp}/mg-dry-run/pg\"",
     "test:workers": "vitest run --config vitest.workers.config.ts"
   },
   "dependencies": {
