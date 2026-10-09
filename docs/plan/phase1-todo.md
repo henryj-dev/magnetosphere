@@ -38,7 +38,7 @@
 - 기존 장치 없음 (빈 저장소). `S0`이 장치, git 훅, 첫 CI를 만든다. pre-push 훅과 CI가 `--assert-order`를 실행해 잠긴 단계의 산출 경로 변경을 실제로 거부한다.
 
 **확인 결과 파일 (`S1` 전용)**
-- `docs/verify/V<번호>.json`: `{ "item", "answer", "evidence", "blocking", "resolved_in" }`
+- `docs/verify/V<번호>.json`: `{ "item", "question", "answer", "evidence", "blocking", "was_blocking", "resolved_in" }`. `was_blocking`은 처음 확인했을 때 설계를 막았는지를 남긴다 (나중에 `blocking`을 내려도 기록이 남게).
 - `blocking: true`면 설계를 고쳐야 한다는 뜻이다. 계획서를 개정하고 `resolved_in`에 개정 버전을 적은 뒤 `blocking: false`로 바꾼다. `G-S1` 검사가 `blocking == false`를 요구하므로, 설계를 막는 결과가 남아 있으면 `S2` 이후가 열리지 않는다.
 
 ## 진행 현황
@@ -341,11 +341,28 @@ TC-S1.T7.a  Worker 에서 MySQL 쓰기·읽기·트랜잭션이 된다
 | G-S1.11 | TC-S1.T6.b | `pnpm -C spikes/v26 test -t "TC-S1.T6.b"` | 종료코드 0 |
 | G-S1.12 | TC-S1.T6.c | `pnpm -C spikes/v26 test -t "TC-S1.T6.c"` | 종료코드 0 |
 | G-S1.13 | TC-S1.T7.a | `node spikes/v27/probe.mjs` | 종료코드 0 |
-| G-S1.14 | 확인 파일 7개 존재 | json `docs/verify/V{10,11,16,17,21,26,27}.json` 각각 `item` | 7개 모두 존재 |
-| G-S1.15 | 설계를 막는 결과 없음 | json `docs/verify/*.json` `blocking` | 모두 `false` |
-| G-S1.16 | 막았던 결과는 개정 버전을 가리킴 | json `docs/verify/*.json` 중 처음에 `blocking:true` 였던 것의 `resolved_in` | 비어 있지 않음, 계획서 상태 줄의 버전과 같음 |
+| G-S1.14 | 확인 파일 7개 존재·모양 | `node scripts/check-verify.mjs present` | 종료코드 0 |
+| G-S1.15 | 설계를 막는 결과 없음 | `node scripts/check-verify.mjs unblocked` | 종료코드 0 (모든 `blocking` false) |
+| G-S1.16 | 막았던 결과는 개정 버전을 가리킴 | `node scripts/check-verify.mjs resolved` | 종료코드 0 (`was_blocking` true 인 항목의 `resolved_in` == 계획서 상태 줄 버전) |
+| G-S1.17 | 확인 결과 검사기의 음성 대조 | `node --test --test-reporter=tap scripts/check-verify.test.mjs` | 종료코드 0 |
 
 `node scripts/gate.mjs S1 --seal`
+
+확인 결과 검사기 음성 대조 (G-S1.17)
+```
+TC-S1.G.a  정상 파일 일곱 개는 세 모드 모두 통과한다
+  단언:  모양이 맞는 픽스처 7개 → present·unblocked·resolved 종료코드 0
+  검출:  검사기가 정상 입력도 거부해 S1 을 영영 봉인 못 하는 것
+TC-S1.G.b  present 는 빠진 항목과 모양 오류를 잡는다
+  단언:  파일 하나 없음·evidence 빔·item 불일치·blocking 인데 was_blocking false → 각각 실패
+  검출:  확인 하나를 빼먹고도 S1 이 봉인되는 것
+TC-S1.G.c  unblocked 는 설계를 막는 결과가 남아 있으면 실패한다
+  단언:  blocking true 하나 → 실패
+  검출:  설계를 깨는 결과를 둔 채 S2 가 열리는 것
+TC-S1.G.d  resolved 는 막았던 항목이 현재 계획서 버전을 가리켜야 통과한다
+  단언:  was_blocking true + resolved_in null 또는 옛 버전 → 실패, 현재 버전 → 통과
+  검출:  계획서를 고치지 않고 blocking 만 false 로 바꿔 넘어가는 것
+```
 
 가장 중요한 검사는 G-S1.15다. V10·V11·V26 중 하나라도 계획서 전제(최소 범위 토큰, 즉시 차단, 트랜잭션)를 깨면 S2 이후 구현이 잘못된 설계 위에 쌓인다. 이 검사가 설계 개정을 강제한다.
 
