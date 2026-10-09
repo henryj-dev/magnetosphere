@@ -376,7 +376,7 @@ TC-S1.G.d  resolved 는 막았던 항목이 현재 계획서 버전을 가리켜
 선행 없음 · 산출 `packages/db/src/schema/common.ts`, `packages/db/src/schema/{sqlite,mysql,pg}.ts`, `packages/db/scripts/gen-schema.mjs`, `scripts/schema-lint.mjs`, `test/fixtures/bad-schema.ts` · 되돌리기 커밋 2개
 
 【작업】
-1. 공통 정의(테이블·칼럼·의미) 하나에서 `sqlite`·`mysql`·`pg` Drizzle 스키마 세 벌을 생성하는 스크립트. D1은 `sqlite`를 공유. 테이블: Better Auth 다섯 + `app_settings`, `sso_provider_settings`, `invites`, `api_keys`, `omniroute_jobs`, `job_leases`, `audit_log`. 커밋.
+1. 공통 정의(테이블·칼럼·의미)와 Better Auth 스키마 옵션(`packages/db/src/auth-options.ts`) 하나에서 `sqlite`·`mysql`·`pg` Drizzle 스키마 세 벌을 생성하는 스크립트. D1은 `sqlite`를 공유. 테이블: Better Auth 여섯(`rateLimit` 포함, 계획서 v5.4 3.2) + `app_settings`, `sso_provider_settings`, `invites`, `api_keys`, `omniroute_jobs`, `job_leases`, `audit_log`. 커밋.
 2. `scripts/schema-lint.mjs`: 생성된 세 벌에서 규칙 위반을 센다 — 길이 없는 문자열 기본 키·고유 키, `VARCHAR(36)`이 아닌 id, `DECIMAL(12,6)`이 아닌 금액 칼럼(`*_usd`), DB 전용 JSON 칼럼 타입. 커밋.
 
 【테스트】
@@ -424,7 +424,7 @@ TC-S2.T2.b  시드는 두 번 돌려도 운영자 값을 덮지 않는다
 【테스트】
 ```
 TC-S2.T3.a  다섯 DB 에서 빈 상태 → 최신 마이그레이션이 성공한다
-  단언:  DB 다섯 × migrate 종료코드 0, 테이블 12개 존재
+  단언:  DB 다섯 × migrate 종료코드 0, 테이블 13개 존재
   검출:  한 DB 에서만 문법 오류로 설치가 실패하는 것 (MariaDB 의 JSON·DEFAULT 표현 차이 등)
 TC-S2.T3.b  마이그레이션과 스키마가 어긋나지 않는다
   단언:  커밋된 마이그레이션 사본 위에서 drizzle-kit generate → 세 벌 모두 "변경 없음", 새 파일 0 (0.31 에는 --dry 가 없다)

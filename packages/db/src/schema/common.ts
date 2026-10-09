@@ -8,11 +8,12 @@
 //   text      긴 문자열          text
 //   json      JSON 문자열        text. 앱에서 파싱한다. DB 전용 JSON 타입·연산은 쓰지 않는다
 //   integer   정수               sqlite integer · mysql int · pg integer
+//   bigint    큰 정수 (JS number) sqlite integer · mysql bigint · pg bigint
 //   boolean   참·거짓            sqlite integer(boolean) · mysql boolean(tinyint(1)) · pg boolean
 //   timestamp 시각 (UTC)         sqlite integer(timestamp_ms) · mysql timestamp(3) · pg timestamp  — Better Auth 생성기와 같은 규칙 (V26)
 //   usd       금액               sqlite real · mysql/pg decimal(12,6). 칼럼 이름은 *_usd
 
-export type ColumnKind = "id" | "string" | "text" | "json" | "integer" | "boolean" | "timestamp" | "usd";
+export type ColumnKind = "id" | "string" | "text" | "json" | "integer" | "bigint" | "boolean" | "timestamp" | "usd";
 
 export interface Column {
   /** DB 칼럼 이름 (snake_case). 객체 키는 Drizzle·Better Auth 가 쓰는 필드 이름이다. */
@@ -46,7 +47,7 @@ export interface Table {
 const now = { kind: "timestamp", notNull: true, defaultNow: true } as const;
 
 // Better Auth user 테이블에 더하는 칼럼 (계획서 4.6). 모두 input: false — 가입·회원정보 수정 요청으로 바꾸지 못한다.
-// S3 의 Better Auth 구성은 이 객체를 그대로 user.additionalFields 로 넘긴다.
+// Better Auth 구성은 src/auth-options.ts 의 AUTH_SCHEMA_OPTIONS 를 거쳐 이 객체를 user.additionalFields 로 쓴다.
 export const USER_ADDITIONAL_FIELDS = {
   role: { type: "string", required: false, defaultValue: "member", input: false },
   status: { type: "string", required: false, defaultValue: "active", input: false },
@@ -140,6 +141,18 @@ export const TABLES: Record<string, Table> = {
       providerId: { name: "provider_id", kind: "string", length: 255, notNull: true, unique: true },
       organizationId: { name: "organization_id", kind: "text" },
       domain: { name: "domain", kind: "text", notNull: true },
+    },
+  },
+
+  rateLimit: {
+    name: "rate_limit",
+    owner: "better-auth",
+    doc: "인증 경로 요청 수 제한 (Better Auth rateLimit storage: \"database\", 계획서 3.2)",
+    columns: {
+      id: { name: "id", kind: "id", primaryKey: true },
+      key: { name: "key", kind: "string", length: 255, notNull: true, unique: true, doc: "IP + 경로" },
+      count: { name: "count", kind: "integer", notNull: true },
+      lastRequest: { name: "last_request", kind: "bigint", notNull: true, doc: "epoch ms" },
     },
   },
 

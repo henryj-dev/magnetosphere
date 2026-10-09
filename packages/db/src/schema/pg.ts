@@ -1,6 +1,6 @@
 // 자동 생성 파일이다. 손으로 고치지 않는다.
 // 원본: packages/db/src/schema/common.ts · 생성: pnpm -C packages/db gen
-import { boolean, index, integer, numeric, pgTable, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import { bigint, boolean, index, integer, numeric, pgTable, text, timestamp, varchar } from "drizzle-orm/pg-core";
 
 // 회원. Better Auth 칼럼 + 권한 칼럼 다섯
 export const user = pgTable("user", {
@@ -73,6 +73,14 @@ export const ssoProvider = pgTable("sso_provider", {
   providerId: varchar("provider_id", { length: 255 }).notNull().unique(),
   organizationId: text("organization_id"),
   domain: text("domain").notNull(),
+});
+
+// 인증 경로 요청 수 제한 (Better Auth rateLimit storage: "database", 계획서 3.2)
+export const rateLimit = pgTable("rate_limit", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  key: varchar("key", { length: 255 }).notNull().unique(),
+  count: integer("count").notNull(),
+  lastRequest: bigint("last_request", { mode: "number" }).notNull(),
 });
 
 // 운영 설정. 키마다 한 행, 값은 JSON

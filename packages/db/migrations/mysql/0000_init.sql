@@ -80,6 +80,15 @@ CREATE TABLE `omniroute_jobs` (
 	CONSTRAINT `omniroute_jobs_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
+CREATE TABLE `rate_limit` (
+	`id` varchar(36) NOT NULL,
+	`key` varchar(255) NOT NULL,
+	`count` int NOT NULL,
+	`last_request` bigint NOT NULL,
+	CONSTRAINT `rate_limit_id` PRIMARY KEY(`id`),
+	CONSTRAINT `rate_limit_key_unique` UNIQUE(`key`)
+);
+--> statement-breakpoint
 CREATE TABLE `session` (
 	`id` varchar(36) NOT NULL,
 	`expires_at` timestamp(3) NOT NULL,

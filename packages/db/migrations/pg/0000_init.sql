@@ -73,6 +73,14 @@ CREATE TABLE "omniroute_jobs" (
 	"done_at" timestamp
 );
 --> statement-breakpoint
+CREATE TABLE "rate_limit" (
+	"id" varchar(36) PRIMARY KEY NOT NULL,
+	"key" varchar(255) NOT NULL,
+	"count" integer NOT NULL,
+	"last_request" bigint NOT NULL,
+	CONSTRAINT "rate_limit_key_unique" UNIQUE("key")
+);
+--> statement-breakpoint
 CREATE TABLE "session" (
 	"id" varchar(36) PRIMARY KEY NOT NULL,
 	"expires_at" timestamp NOT NULL,

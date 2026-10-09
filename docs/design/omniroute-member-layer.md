@@ -3,9 +3,10 @@
 작성일: 2026-10-09
 
 실행판(1단계)은 [`../plan/phase1-todo.md`](../plan/phase1-todo.md) 다.
-상태: 초안 v5.3 (설계 검토 1회 + S1 확인 반영)
+상태: 초안 v5.4 (설계 검토 1회 + S1 확인 + S2 리뷰 반영)
 
 변경 이력
+- v5.4: S2 리뷰 반영. Docker 조합의 요청 수 제한 저장소를 Better Auth `rateLimit` storage `"database"`(`rate_limit` 테이블)로 확정하고, 스키마를 바꾸는 Better Auth 옵션을 스키마 생성기와 공유한다. MySQL 계열 시각은 `DATETIME(3)`, 토큰·식별자 칼럼은 `utf8mb4_bin`.
 - v5.3: S1 Better Auth 확인 반영 (V17·V26). SQLite 드라이버를 libsql로 고정, Drizzle 어댑터 `transaction: true` 필수, 권한 칼럼 입력 차단의 실제 동작.
 - v5.2: S1 확인 결과 반영 (`../verify/`). 부트스트랩 API 확정(`POST /api/cli/connect`), 관리 토큰 `write` 범위와 그 권한 상승 한계, 키 끄기 즉시 반영, Caddy 허용 목록 9개, OmniRoute 필수 비밀 값은 `INITIAL_PASSWORD` 하나.
 - v5.1: 지원 DB를 SQLite, MySQL, Postgres, D1 네 가지로 확정. 런타임 조합과 스키마 작성 규칙 추가.
@@ -103,9 +104,9 @@ SAML·OIDC 프로토콜은 직접 구현하지 않는다.
 
 | 조합 | 회원 앱 | 회원 앱 DB | 작업 실행 | 요청 수 제한 저장소 |
 |---|---|---|---|---|
-| Docker + SQLite (기본) | Node 컨테이너 1개 | SQLite 파일 (libSQL `@libsql/client`) | 프로세스 안 스케줄러 | 메모리 |
-| Docker + MySQL | Node 컨테이너 (여러 개 가능) | MySQL 8.0+ / MariaDB 10.11+ (InnoDB) | 프로세스 안 스케줄러 + DB 임대 잠금 | DB 또는 Redis |
-| Docker + Postgres | Node 컨테이너 (여러 개 가능) | Postgres 14+ | 프로세스 안 스케줄러 + DB 임대 잠금 | DB 또는 Redis |
+| Docker + SQLite (기본) | Node 컨테이너 1개 | SQLite 파일 (libSQL `@libsql/client`) | 프로세스 안 스케줄러 | DB (`rate_limit`) |
+| Docker + MySQL | Node 컨테이너 (여러 개 가능) | MySQL 8.0+ / MariaDB 10.11+ (InnoDB) | 프로세스 안 스케줄러 + DB 임대 잠금 | DB (`rate_limit`) |
+| Docker + Postgres | Node 컨테이너 (여러 개 가능) | Postgres 14+ | 프로세스 안 스케줄러 + DB 임대 잠금 | DB (`rate_limit`) |
 | Workers + D1 | Workers | D1 | Cron Trigger | KV |
 | Workers + MySQL | Workers | MySQL (Hyperdrive) | Cron Trigger | KV |
 | Workers + Postgres | Workers | Postgres (Hyperdrive) | Cron Trigger | KV |
@@ -124,6 +125,9 @@ DB 지원 원칙
   - SQLite 드라이버는 libSQL만 쓴다. better-sqlite3는 트랜잭션이 동기 전용이라 Better Auth 트랜잭션 경로에서 500이 나고, 그러면서도 user 행이 남아 원자성이 깨진다 (V26).
   - Better Auth Drizzle 어댑터는 네 DB 모두 `drizzleAdapter(db, { transaction: true })`. 기본값 false면 SSO 로그인이 `SSO_USER_RESOLUTION_REQUIRES_NATIVE_TRANSACTIONS`로 거부된다 (V26).
   - Better Auth는 이메일을 소문자로 바꿔 저장한다. Better Auth를 거치지 않고 이메일을 쓰거나 찾는 우리 코드도 같은 규칙을 따른다. 직접 넣으면 SQLite·Postgres는 대소문자 중복을 받고 MySQL·MariaDB는 정렬 규칙 때문에 거부해 DB마다 결과가 달라진다 (V26).
+  - 요청 수 제한: Docker 조합은 Better Auth `rateLimit: { storage: "database" }`로 `rate_limit` 테이블에 센다. 여러 인스턴스가 한도를 함께 센다. 스키마를 바꾸는 Better Auth 옵션(추가 칼럼, 플러그인, `rateLimit` 저장소)은 `packages/db/src/auth-options.ts` 한 곳에 두고 스키마 생성기와 Better Auth 구성이 같이 쓴다.
+  - 시각 칼럼은 MySQL·MariaDB에서 `DATETIME(3)`로 둔다. `TIMESTAMP`는 2038-01-19 이후 값을 거부한다. 값은 UTC로 쓰고 읽는다.
+  - 정확히 같아야 하는 토큰·해시·식별자 칼럼(세션 토큰, 초대 토큰 해시, OmniRoute 키 id, SSO 제공자 id, 인증 식별자, 계정 id 등)은 MySQL·MariaDB에서 `utf8mb4_bin` 정렬로 만든다. 기본 정렬은 대소문자를 무시해 다른 DB와 결과가 달라진다. 인덱스가 걸린 `VARCHAR`는 utf8mb4 기준 3072바이트(768자) 안에 둔다.
   - 트랜잭션: SQLite(libSQL)·MySQL(InnoDB)·Postgres는 대화형 트랜잭션을 쓴다. D1만 배치(batch)로 대신하고, 트랜잭션이 꼭 필요한 기능은 D1에서 따로 처리한다 (아래 D1 제약).
 
 - OmniRoute는 어느 조합이든 상시 서버 1대(Docker)에서 돈다. Workers 조합은 회원 앱만 Workers로 옮긴 형태다.
@@ -385,7 +389,7 @@ OmniRoute 키 그룹·쿼터 풀에 공동 예산이 있으면(8장 확인 12번
 
 ### 5.9 데이터 모델
 
-Better Auth 테이블(`user`, `session`, `account`, `verification`, `ssoProvider`)은 그대로 쓰고, `user`에 칼럼을 더한다. 사용량 데이터는 OmniRoute에 있으므로 우리 DB에 두지 않는다.
+Better Auth 테이블(`user`, `session`, `account`, `verification`, `ssoProvider`, `rateLimit`)은 그대로 쓰고, `user`에 칼럼을 더한다. 사용량 데이터는 OmniRoute에 있으므로 우리 DB에 두지 않는다.
 
 아래는 의미를 보여주는 SQLite 표기다. 실제 스키마는 3.2의 작성 규칙에 따라 Drizzle로 DB별로 만든다 (id는 `VARCHAR(36)`, 금액은 `DECIMAL(12,6)` 등).
 

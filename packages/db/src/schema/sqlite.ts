@@ -76,6 +76,14 @@ export const ssoProvider = sqliteTable("sso_provider", {
   domain: text("domain").notNull(),
 });
 
+// 인증 경로 요청 수 제한 (Better Auth rateLimit storage: "database", 계획서 3.2)
+export const rateLimit = sqliteTable("rate_limit", {
+  id: text("id").primaryKey(),
+  key: text("key").notNull().unique(),
+  count: integer("count").notNull(),
+  lastRequest: integer("last_request").notNull(),
+});
+
 // 운영 설정. 키마다 한 행, 값은 JSON
 export const appSettings = sqliteTable("app_settings", {
   key: text("key").primaryKey(),

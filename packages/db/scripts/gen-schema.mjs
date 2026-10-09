@@ -1,24 +1,24 @@
 // 공통 스키마 정의(src/schema/common.ts) 하나에서 sqlite·mysql·pg Drizzle 스키마 세 벌을 만든다.
-// D1 은 sqlite 를 같이 쓴다. 생성 전에 Better Auth 테이블이 Better Auth 1.7.7 + sso 플러그인이
-// 기대하는 칼럼과 맞는지 검사하고, 어긋나면 아무것도 쓰지 않고 실패한다.
+// D1 은 sqlite 를 같이 쓴다. 생성 전에 Better Auth 테이블이 Better Auth 1.7.7 이 AUTH_SCHEMA_OPTIONS
+// (src/auth-options.ts, Better Auth 구성과 같은 객체)로 기대하는 칼럼과 맞는지 검사하고, 어긋나면 아무것도 쓰지 않고 실패한다.
 //
 //   node scripts/gen-schema.mjs          (packages/db 에서, pnpm -C packages/db gen)
 import { writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { getAuthTables } from "better-auth/db";
-import { sso } from "@better-auth/sso";
-import { TABLES, USER_ADDITIONAL_FIELDS } from "../src/schema/common.ts";
+import { TABLES } from "../src/schema/common.ts";
+import { AUTH_SCHEMA_OPTIONS } from "../src/auth-options.ts";
 
 const OUT = (dialect) => fileURLToPath(new URL(`../src/schema/${dialect}.ts`, import.meta.url));
 
 // ---------- Better Auth 와 대조 ----------
 
 // Better Auth 필드 타입마다 받아들이는 우리 칼럼 종류
-const BA_KINDS = { string: ["id", "string", "text", "json"], number: ["integer", "usd"], boolean: ["boolean"], date: ["timestamp"] };
+const BA_KINDS = { string: ["id", "string", "text", "json"], number: ["integer", "bigint", "usd"], boolean: ["boolean"], date: ["timestamp"] };
 
 function checkBetterAuth() {
   const problems = [];
-  const ba = getAuthTables({ emailAndPassword: { enabled: true }, plugins: [sso()], user: { additionalFields: USER_ADDITIONAL_FIELDS } });
+  const ba = getAuthTables(AUTH_SCHEMA_OPTIONS);
   const ours = Object.entries(TABLES).filter(([, t]) => t.owner === "better-auth");
   for (const [key, t] of Object.values(ba).map((t) => [t.modelName, t])) {
     const mine = TABLES[key];
@@ -67,7 +67,7 @@ const DIALECTS = {
     column(c) {
       switch (c.kind) {
         case "id": case "string": case "text": case "json": return ["text", `text(${lit(c.name)})`];
-        case "integer": return ["integer", `integer(${lit(c.name)})`];
+        case "integer": case "bigint": return ["integer", `integer(${lit(c.name)})`];
         case "boolean": return ["integer", `integer(${lit(c.name)}, { mode: "boolean" })`];
         case "timestamp": return ["integer", `integer(${lit(c.name)}, { mode: "timestamp_ms" })`];
         case "usd": return ["real", `real(${lit(c.name)})`];
@@ -85,6 +85,7 @@ const DIALECTS = {
         case "string": return ["varchar", `varchar(${lit(c.name)}, { length: ${c.length} })`];
         case "text": case "json": return ["text", `text(${lit(c.name)})`];
         case "integer": return ["int", `int(${lit(c.name)})`];
+        case "bigint": return ["bigint", `bigint(${lit(c.name)}, { mode: "number" })`];
         case "boolean": return ["boolean", `boolean(${lit(c.name)})`];
         case "timestamp": return ["timestamp", `timestamp(${lit(c.name)}, { fsp: 3 })`];
         case "usd": return ["decimal", `decimal(${lit(c.name)}, { precision: 12, scale: 6, mode: "number" })`];
@@ -101,6 +102,7 @@ const DIALECTS = {
         case "string": return ["varchar", `varchar(${lit(c.name)}, { length: ${c.length} })`];
         case "text": case "json": return ["text", `text(${lit(c.name)})`];
         case "integer": return ["integer", `integer(${lit(c.name)})`];
+        case "bigint": return ["bigint", `bigint(${lit(c.name)}, { mode: "number" })`];
         case "boolean": return ["boolean", `boolean(${lit(c.name)})`];
         case "timestamp": return ["timestamp", `timestamp(${lit(c.name)})`];
         case "usd": return ["numeric", `numeric(${lit(c.name)}, { precision: 12, scale: 6, mode: "number" })`];
@@ -159,7 +161,7 @@ function render(dialect) {
 
 const problems = checkBetterAuth();
 if (problems.length) {
-  console.error("[gen] 공통 정의가 Better Auth 1.7.7 + sso 플러그인과 맞지 않는다:");
+  console.error("[gen] 공통 정의가 Better Auth 1.7.7 + AUTH_SCHEMA_OPTIONS 와 맞지 않는다:");
   for (const p of problems) console.error(`  ${p}`);
   process.exit(1);
 }
