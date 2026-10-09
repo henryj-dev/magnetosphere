@@ -4,6 +4,7 @@ import { consoleMailer, MailError } from "@magnetosphere/auth/mail";
 import { createCipher } from "@magnetosphere/runtime/crypto";
 import type { Runtime } from "@magnetosphere/runtime/types";
 import type { Services } from "./app.ts";
+import { assertSetupTokenStrength } from "./setup/index.ts";
 import { settingsMailer } from "./setup/mail.ts";
 
 export function requireSecret(rt: Runtime, name: string): string {
@@ -52,5 +53,8 @@ export async function buildServices(rt: Runtime, opts: ServiceOptions): Promise<
   });
   // OmniRoute 연결은 선택이다. 없으면 설치 때 토큰 붙여 넣기로 간다 (setup/omniroute.ts)
   const omniroute = { baseUrl: rt.secret("OMNIROUTE_URL") || null, initialPassword: rt.secret("OMNIROUTE_INITIAL_PASSWORD") || null };
-  return { db, auth, cipher, omniroute, setupToken: rt.secret("SETUP_TOKEN") || null };
+  // 약한 SETUP_TOKEN 은 시작을 거부한다 (Node 는 시작 때, Workers 는 처음 요청 때 500 + 로그)
+  const setupToken = rt.secret("SETUP_TOKEN") || null;
+  assertSetupTokenStrength(setupToken);
+  return { db, auth, cipher, omniroute, setupToken, clientIp: rt.clientIp };
 }

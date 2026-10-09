@@ -30,6 +30,8 @@ export interface Services {
   omniroute: OmniRouteConfig;
   /** 운영자가 정한 설치 토큰 (SETUP_TOKEN 시크릿). 없으면 무작위로 만들어 로그에 한 번 낸다 (setup/index.ts) */
   setupToken?: string | null;
+  /** 요청의 클라이언트 IP (런타임 어댑터). 설치 시도 횟수 제한이 쓴다. 못 정하면 null */
+  clientIp?: (req: Request) => string | null | Promise<string | null>;
 }
 
 export interface AppDeps {

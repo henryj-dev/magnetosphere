@@ -6,7 +6,7 @@
 //   3. OmniRoute 부트스트랩(oma_live_ 토큰 발급·암호화 저장, setup/omniroute.ts)은 관리자를 만든 같은 요청에서 돈다.
 //      실패해도 설치는 끝나고 응답의 omniroute 가 "manual_required" 다. 관리자가 로그인해 토큰을 붙여 넣는다 (routes.ts).
 // 관리자가 생긴 뒤에는 /api/setup 이 항상 409 다. 토큰도 다시 만들지 않는다.
-import { and, eq } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { hashPassword } from "better-auth/crypto";
 import { findUserByEmail, normalizeEmail } from "@magnetosphere/db/src/users.ts";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
@@ -90,6 +90,40 @@ export interface IssueOptions {
    */
   fixedToken?: string | null;
   now?: () => Date;
+}
+
+/** 운영자가 정한 설치 토큰(SETUP_TOKEN)의 최소 길이. openssl rand -base64 32 는 44자다 (S6 보안 리뷰 M1) */
+export const SETUP_TOKEN_MIN_LENGTH = 32;
+
+/** SETUP_TOKEN 이 너무 짧으면 시작을 거부한다. 공개 주소에서 무차별 대입으로 첫 관리자를 가로챌 수 있다 */
+export function assertSetupTokenStrength(token: string | null | undefined): void {
+  if (token && token.trim().length < SETUP_TOKEN_MIN_LENGTH) {
+    throw new Error(`SETUP_TOKEN 은 ${SETUP_TOKEN_MIN_LENGTH}자 이상이어야 한다 (지금 ${token.trim().length}자). openssl rand -base64 32 로 만든다`);
+  }
+}
+
+/** POST /api/setup 시도 한도: 클라이언트 IP 마다 SETUP_ATTEMPT_WINDOW_MS 동안 SETUP_ATTEMPT_MAX 회 (S6 보안 리뷰 M1) */
+export const SETUP_ATTEMPT_MAX = 10;
+export const SETUP_ATTEMPT_WINDOW_MS = 10 * 60_000;
+
+/**
+ * 설치 시도 한 번을 센다. 한도 안이면 true. Better Auth 와 같은 rate_limit 테이블을 쓰되 키 앞머리("setup-attempt|")로 구분한다.
+ * 창은 첫 시도 때 시작한다(last_request = 창 시작). 지난 창은 지우고, 없을 때만 넣고, 한도 아래일 때만 1 늘린다 —
+ * 세 문장 모두 조건부라 여러 요청·인스턴스가 동시에 와도 한도를 넘겨 세지 않는다.
+ */
+export async function consumeSetupAttempt(h: DbHandle, ip: string | null, now = Date.now()): Promise<boolean> {
+  const t = h.schema.rateLimit;
+  const key = `setup-attempt|${ip ?? "unknown"}`;
+  await h.db.delete(t).where(and(eq(t.key, key), lt(t.lastRequest, now - SETUP_ATTEMPT_WINDOW_MS)));
+  const row = { id: crypto.randomUUID(), key, count: 1, lastRequest: now };
+  const inserted =
+    h.provider === "mysql"
+      ? (await h.db.insert(t).ignore().values(row))[0].affectedRows === 1
+      : (await h.db.insert(t).values(row).onConflictDoNothing().returning()).length === 1;
+  if (inserted) return true;
+  const bump = h.db.update(t).set({ count: sql`${t.count} + 1` }).where(and(eq(t.key, key), lt(t.count, SETUP_ATTEMPT_MAX)));
+  if (h.provider === "mysql") return (await bump)[0].affectedRows === 1;
+  return (await bump.returning()).length === 1;
 }
 
 /** 설치 토큰 행을 없을 때만 넣는다. 넣었으면 true (동시에 둘이 넣어도 하나만 true, 고유 키 충돌로 500 이 나지 않는다) */

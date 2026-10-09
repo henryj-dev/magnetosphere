@@ -100,6 +100,32 @@ describe("TC-S6.T3.b Workers 설치 토큰을 잃어도 되살릴 수 있다", (
   });
 });
 
+describe("TC-S6.T3.e 약한 SETUP_TOKEN 은 시작을 거부한다", () => {
+  it("Workers: 짧은 SETUP_TOKEN → 처음 요청이 500 이고 이유가 로그에 남는다, 토큰은 저장되지 않는다", async () => {
+    const persist = freshD1();
+    migrateLocal(persist);
+    const d = await dev(persist, { SETUP_TOKEN: "admin" });
+    const res = await fetch(`${d.baseUrl}/api/setup`);
+    expect(res.status).toBe(500);
+    expect(await d.waitOutput(/SETUP_TOKEN 은 32자 이상/)).toMatch(/SETUP_TOKEN 은 32자 이상/);
+    expect(await setup(d.baseUrl, "admin")).toBe(500);
+    await d.close();
+    expect(d1Query(persist, "SELECT count(*) AS n FROM app_settings WHERE key = 'setup_token_hash'")[0].n).toBe(0);
+    expect(d1Query(persist, "SELECT count(*) AS n FROM user")[0].n).toBe(0);
+  });
+});
+
+describe("TC-S6.T3.f 설치 시도 횟수 제한", () => {
+  it("Workers: 같은 클라이언트가 틀린 토큰으로 10회 → 401, 11번째는 맞는 토큰도 429", async () => {
+    const persist = freshD1();
+    migrateLocal(persist);
+    const secret = "operator-chosen-setup-token-0123456789";
+    const d = await dev(persist, { SETUP_TOKEN: secret });
+    for (let i = 0; i < 10; i++) expect(await setup(d.baseUrl, `wrong-token-${i}`)).toBe(401);
+    expect(await setup(d.baseUrl, secret)).toBe(429);
+  });
+});
+
 describe("TC-S6.T3.d Workers 배포 전에 마이그레이션이 적용된다", () => {
   it("배포 스크립트 --dry-run 은 마이그레이션 단계를 배포보다 먼저 낸다 (d1·mysql·pg)", () => {
     for (const env of ["d1", "mysql", "pg"]) {

@@ -218,6 +218,8 @@ export const GATES = {
       { id: "G-S6.25", how: "grep", desc: "Compose 신뢰 프록시 기본값", pattern: "TRUSTED_PROXIES", in: ["docker-compose.yml"], op: ">=", limit: 1 },
       { id: "G-S6.26", how: "test", desc: "TC-S6.T1.d OmniRoute 비밀번호는 .env.setup 에만", cmd: nodeTest("scripts/init.test.mjs", "TC-S6.T1.d") },
       { id: "G-S6.27", how: "test", requires: ["local-services"], desc: "TC-S6.T2.g 설치 뒤 남은 OmniRoute 비밀번호 경고", cmd: 'pnpm test:deploy -t "TC-S6.T2.g"' },
+      { id: "G-S6.28", how: "test", requires: ["local-services"], desc: "TC-S6.T3.e 약한 SETUP_TOKEN 거부 (Node·Workers)", cmd: 'pnpm -C apps/server test -t "TC-S6.T3.e" && pnpm -C apps/server test:workers -t "TC-S6.T3.e"' },
+      { id: "G-S6.29", how: "test", requires: ["local-services"], desc: "TC-S6.T3.f 설치 시도 횟수 제한 → 429 (Node·Workers)", cmd: 'pnpm -C apps/server test -t "TC-S6.T3.f" && pnpm -C apps/server test:workers -t "TC-S6.T3.f"' },
     ],
   },
   S7: {

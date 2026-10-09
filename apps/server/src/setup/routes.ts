@@ -2,6 +2,7 @@
 //   GET  /api/setup  → { needed } 관리자가 없으면 true. issueTokenOnStatus 면 토큰이 없거나 15분보다 오래됐을 때 만든다
 //                      (Workers 는 시작 시점이 없다. SETUP_TOKEN 시크릿이 있으면 그 값을 쓰고 출력하지 않는다)
 //   POST /api/setup  → 201 { ok, omniroute: "connected" | "manual_required" } | 400 입력 오류 | 401 토큰 틀림 | 409 이미 설치됨
+//                      | 429 시도 횟수 초과 (클라이언트 IP 마다 10분에 10회)
 //                      관리자를 만든 뒤 OmniRoute 토큰을 자동으로 만든다. 실패해도 201 이고 omniroute 가 manual_required 다
 // OmniRoute 토큰 (관리자 세션만, 계획서 4.7 3번 "토큰 붙여 넣기")
 //   GET  /api/setup/omniroute → { omniroute } 저장된 토큰이 있으면 connected
@@ -10,7 +11,7 @@
 import { eq } from "drizzle-orm";
 import { Hono, type Context } from "hono";
 import type { Services } from "../app.ts";
-import { adminExists, ensureSetupToken, runSetup } from "./index.ts";
+import { adminExists, consumeSetupAttempt, ensureSetupToken, runSetup } from "./index.ts";
 import { bootstrapOmniRoute, omniRouteStatus, saveManualToken } from "./omniroute.ts";
 
 /** 요청의 Better Auth 세션 사용자가 관리자면 그 id. 세션이 없으면 401, 관리자가 아니면 403 응답 */
@@ -36,6 +37,8 @@ export function setupRoutes(services: () => Promise<Services>, opts: { issueToke
   });
   r.post("/", async (c) => {
     const s = await services();
+    // 설치 토큰 무차별 대입을 막는다: IP 마다 10분에 10회 (S6 보안 리뷰 M1)
+    if (!(await consumeSetupAttempt(s.db, (await s.clientIp?.(c.req.raw)) ?? null))) return c.json({ error: "too_many_requests" }, 429);
     const body = await c.req.json().catch(() => ({}));
     const bootstrap = async (userId: string) => {
       const b = await bootstrapOmniRoute(s.db, s.cipher, s.omniroute, userId);

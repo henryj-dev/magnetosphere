@@ -1021,10 +1021,18 @@ TC-S6.T3.d  Workers 배포 전에 마이그레이션이 적용된다
   단언:  배포 스크립트 --dry-run 출력에 wrangler d1 migrations apply(D1)·Hyperdrive 대상 마이그레이션 단계가 배포보다 먼저 나옴.
          로컬 D1 빈 상태 → 스크립트 → GET /api/setup 200
   검출:  Workers 에 새 코드만 올라가고 스키마가 그대로라 첫 요청이 500 이 되는 것
+TC-S6.T3.e  약한 SETUP_TOKEN 은 시작을 거부한다 (S6 보안 리뷰 M1)
+  단언:  SETUP_TOKEN 이 32자 미만 → Node 는 startNodeServer 가 이유(SETUP_TOKEN·32자)와 함께 실패, Workers 는 처음 요청이 500 이고
+         이유가 로그에 남으며 토큰·관리자 행 0. 32자 이상이면 그 값으로 설치 201, 로그에 토큰 출력 없음
+  검출:  SETUP_TOKEN=admin 같은 값을 공개 주소에 걸어 관리자가 생기기 전에 무차별 대입으로 첫 관리자를 가로채는 것
+TC-S6.T3.f  설치 시도 횟수 제한 (S6 보안 리뷰 M1)
+  단언:  같은 클라이언트 IP 에서 POST /api/setup 10회(틀린 토큰 → 401) 뒤 11번째는 맞는 토큰도 429 {error:"too_many_requests"} (Node·Workers).
+         창(10분)이 지나면 다시 받는다 (Node)
+  검출:  설치 토큰을 무제한으로 맞혀 볼 수 있는 것
 ```
 
 【통과】
-- [ ] G-S6.8, G-S6.21 ~ G-S6.23 통과
+- [ ] G-S6.8, G-S6.21 ~ G-S6.23, G-S6.28, G-S6.29 통과
 
 ### ☐ S6.T4 — 여섯 조합 E2E
 선행 S6.T2, S6.T3 · 산출 `tests/e2e/`, `package.json`의 `e2e` 스크립트 · 되돌리기 커밋 1개
@@ -1063,6 +1071,8 @@ TC-S6.T4.a ~ f  조합마다 설치 → 관리자 → 부트스트랩 → 로그
 | G-S6.25 | Compose 신뢰 프록시 기본값 | grep `TRUSTED_PROXIES` in `docker-compose.yml` | ≥ 1 |
 | G-S6.26 | TC-S6.T1.d | `node --test --test-name-pattern="TC-S6.T1.d" scripts/init.test.mjs` | 종료코드 0 |
 | G-S6.27 | TC-S6.T2.g | `pnpm test:deploy -t "TC-S6.T2.g"` | 종료코드 0 |
+| G-S6.28 | TC-S6.T3.e | `pnpm -C apps/server test -t "TC-S6.T3.e" && pnpm -C apps/server test:workers -t "TC-S6.T3.e"` | 종료코드 0 |
+| G-S6.29 | TC-S6.T3.f | `pnpm -C apps/server test -t "TC-S6.T3.f" && pnpm -C apps/server test:workers -t "TC-S6.T3.f"` | 종료코드 0 |
 
 `node scripts/gate.mjs S6 --seal`
 

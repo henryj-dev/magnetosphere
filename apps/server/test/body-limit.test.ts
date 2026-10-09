@@ -45,7 +45,8 @@ describe("TC-S4.T3.e 64KB 를 넘는 /api 본문은 413 이고 핸들러가 실�
       const res = await send(r, "/api/auth/sign-in/email", padded({ email: ADMIN.email, password: ADMIN.password }, API_BODY_LIMIT + 1024));
       expect(res.status).toBe(413);
     }
-    expect(await sql(r.t, "SELECT key FROM rate_limit")).toHaveLength(0);
+    // 설치 시도 횟수 기록(setup-attempt|)은 위 POST /api/setup 의 것이다. 인증 경로 기록만 본다
+    expect(await sql(r.t, "SELECT key FROM rate_limit WHERE key NOT LIKE 'setup-attempt|%'")).toHaveLength(0);
     expect(await sql(r.t, "SELECT id FROM session")).toHaveLength(0);
     // 대조: chunked 본문을 다시 담은 요청에서도 clientIp 가 소켓 주소로 정해진다
     const login = await postChunked(r, "/api/auth/sign-in/email", { email: ADMIN.email, password: ADMIN.password });

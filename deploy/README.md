@@ -52,7 +52,9 @@ OmniRoute 는 어느 조합이든 상시 서버 한 대(위 Compose)에서 돈�
 
 1. `wrangler.toml` 의 D1 `database_id` 또는 Hyperdrive `id` 를 실제 값으로 바꾼다 (`wrangler d1 create`, `wrangler hyperdrive create`).
    `BETTER_AUTH_URL` 도 공개 주소로 바꾼다.
-2. 시크릿: `wrangler secret put <이름> --env <환경>` — `BETTER_AUTH_SECRET`, `APP_ENCRYPTION_KEY`, `SETUP_TOKEN`(권장).
+2. 시크릿: `wrangler secret put <이름> --env <환경>` — `BETTER_AUTH_SECRET`, `APP_ENCRYPTION_KEY`, `SETUP_TOKEN`.
+   `SETUP_TOKEN` 은 `openssl rand -base64 32` 로 만든다. 32자보다 짧으면 회원 앱이 시작을 거부한다 (Node 는 시작 때, Workers 는 첫 요청 때 500).
+   `POST /api/setup` 은 클라이언트 IP 마다 10분에 10회까지만 받는다 (429).
    `SETUP_TOKEN` 을 넣으면 그 값이 설치 토큰이다. 넣지 않으면 처음 `GET /api/setup` 때 만든 토큰이 `wrangler tail` 에 한 번 나오고,
    아무도 못 보고 15분이 지나면 다음 `GET /api/setup` 때 새로 만들어 다시 출력한다.
 3. 배포: `node deploy/workers-deploy.mjs --env d1|mysql|pg`. 마이그레이션을 먼저 적용하고 배포한다.
