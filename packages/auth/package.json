@@ -2,5 +2,24 @@
   "name": "@magnetosphere/auth",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "node scripts/test.mjs"
+  },
+  "dependencies": {
+    "@better-auth/core": "1.7.7",
+    "@better-auth/sso": "1.7.7",
+    "@magnetosphere/db": "workspace:*",
+    "better-auth": "1.7.7"
+  },
+  "devDependencies": {
+    "@libsql/client": "0.18.0",
+    "drizzle-orm": "0.45.4",
+    "mysql2": "3.24.5",
+    "postgres": "3.4.9",
+    "vitest": "5.0.3"
+  }
 }

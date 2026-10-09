@@ -475,29 +475,32 @@ TC-S2.T3.f  토큰·식별자는 대소문자를 구분한다
 
 # S3 — 인증 코어와 메일 🔒 (S2 필요)
 
-**브랜치** `s3/auth`. 계획서 4.2, 4.6, 4.8, 7장 "인증", "요청 수 제한". SSO는 이 단계에서 다루지 않는다 (계획서 9장 5·6단계).
+**브랜치** `s3/auth`. 계획서 4.2, 4.6, 4.8, 7장 "인증", "요청 수 제한". SSO 기능(설정 화면·관리자 API·로그인 흐름)은 이 단계에서 다루지 않는다 (계획서 9장 5·6단계). 플러그인은 `AUTH_SCHEMA_OPTIONS`로 들어오므로 공개 관리 경로만 막는다.
 
 ### ☐ S3.T1 — Better Auth 구성
-선행 없음 · 산출 `packages/auth/src/index.ts`, `packages/auth/test/` · 되돌리기 커밋 1개
+선행 없음 · 산출 `packages/auth/src/index.ts`, `packages/auth/test/`, `packages/auth/scripts/test.mjs`, `packages/auth/vitest.config.ts`, `scripts/check-sso-paths.mjs`, `test/fixtures/sso-unguarded/` · 되돌리기 커밋 1개
 
 【작업】
-1. `better-auth@1.7.7` 버전 고정. 이메일·비밀번호, `requireEmailVerification: true`, 추가 칼럼 다섯 `input: false`, 세션 쿠키 `HttpOnly`·`Secure`·`SameSite=Lax`, 가입 전 이메일 소문자화. 옵션은 `packages/db`의 `AUTH_SCHEMA_OPTIONS`를 펼쳐 쓰므로 `@better-auth/sso` 플러그인이 이 단계부터 들어간다. 그래서 같은 커밋에서 SSO 공개 관리 경로(등록·수정·삭제·도메인 검증)를 `disabledPaths`로 모두 막는다 (TC-S3.T1.d). SSO 설정 화면과 관리자 API는 계획서 9장 5단계에서 만든다. 커밋.
+1. `better-auth@1.7.7` 버전 고정. 이메일·비밀번호, `requireEmailVerification: true`, 추가 칼럼 다섯 `input: false`, 세션 쿠키 `HttpOnly`·`Secure`·`SameSite=Lax`, 가입 전 이메일 소문자화. 옵션은 `packages/db`의 `AUTH_SCHEMA_OPTIONS`를 펼쳐 쓰므로 `@better-auth/sso` 플러그인이 이 단계부터 들어간다. 그래서 같은 커밋에서 SSO 공개 관리 경로(등록·수정·삭제·도메인 검증)를 `disabledPaths`로 모두 막는다 (TC-S3.T1.d). @better-auth/sso 1.7.7 소스(`dist/index.mjs`의 `createAuthEndpoint` 경로)에서 찾은 목록: `/sso/register`, `/sso/update-provider`, `/sso/delete-provider`, `/sso/request-domain-verification`, `/sso/verify-domain`, 그리고 관리 화면용 조회 `/sso/providers`, `/sso/get-provider`. 로그인 흐름 경로(`/sign-in/sso`, `/sso/callback*`, `/sso/saml2/*`)는 연다. `disabledPaths`는 HTTP 라우터에서만 막으므로 관리자 API는 `auth.api.*`를 서버 안에서 부른다. SSO 설정 화면과 관리자 API는 계획서 9장 5단계에서 만든다. 커밋.
 
 【테스트】
 ```
-TC-S3.T1.a  가입·수정 요청의 권한 칼럼 값이 무시된다 (V17 를 실제 코드로)
-  단언:  /sign-up/email 본문에 role:"admin", status:"active", monthly_limit_usd:null, max_keys:999, is_bootstrap_admin:1
-         → 생성된 user 의 다섯 값이 모두 기본값. /update-user 동일
+TC-S3.T1.a  가입·수정 요청의 권한 칼럼 값이 무시된다 (V17 를 실제 코드로, 네 DB)
+  단언:  /sign-up/email 본문에 권한 값을 칼럼마다 따로, 그리고 한꺼번에 (필드 이름 role·status·monthlyLimitUsd·maxKeys·isBootstrapAdmin,
+         칼럼 이름 snake_case 도) → 기본값 있는 칼럼(role·status·isBootstrapAdmin)과 거짓 값은 200 + 다섯 값 모두 기본값,
+         기본값 없는 칼럼(monthlyLimitUsd·maxKeys)에 참 값이 들면 400 FIELD_NOT_ALLOWED + 계정 미생성.
+         /update-user 는 칼럼마다·한꺼번에 모두 400 FIELD_NOT_ALLOWED + DB 값 그대로 (V17, 계획서 4.6)
   검출:  계획서 4.6 위반 — 가입만으로 관리자
 TC-S3.T1.b  이메일 인증 전에는 로그인되지 않는다
-  단언:  가입 직후 /sign-in/email → 403 (EMAIL_NOT_VERIFIED)
+  단언:  가입 직후 /sign-in/email → 403 (EMAIL_NOT_VERIFIED), 세션 쿠키 없음. 인증 표시 후 같은 자격으로 200 (네 DB, S3.T1 에서 실측)
   검출:  인증 없이 로그인돼 4.2 "인증 후 키 발급" 전제가 깨지는 것
 TC-S3.T1.c  세션 쿠키 속성
   단언:  로그인 응답 set-cookie 에 HttpOnly, Secure, SameSite=Lax 셋 다
   검출:  XSS 로 세션 탈취 가능한 쿠키
 TC-S3.T1.d  SSO 플러그인이 설치되면 공개 관리 경로 차단 목록이 비어 있지 않아야 한다 (음성 대조 포함)
-  단언:  package.json 에 @better-auth/sso 가 없으면 통과. 있으면 disabledPaths 에 "/sso/register" 포함 필수.
-         픽스처(플러그인 있음, disabledPaths 없음) → 검사 실패
+  단언:  package.json 에 @better-auth/sso 가 없고 src/ 가 플러그인을 부르지 않으면 통과. 있으면 disabledPaths 에 위 관리 경로 일곱과
+         설치된 @better-auth/sso 가 여는 /sso/* 중 로그인 흐름이 아닌 경로 전부 포함 필수.
+         픽스처(플러그인 있음, disabledPaths 없음) → 검사 실패. vitest 같은 이름 TC: 로그인한 일반 회원의 관리 경로 요청 → 404
   검출:  이후 단계에서 플러그인만 먼저 설치돼 일반 사용자가 IdP 를 등록하는 창이 열리는 것 (0단계 실측 계정 탈취)
 TC-S3.T1.e  Better Auth 구성과 스키마 생성기가 같은 옵션 객체를 쓴다
   단언:  packages/auth 의 auth 옵션(플러그인 포함)으로 getAuthTables 를 돌린 결과의 테이블·칼럼·타입·필수·고유·참조가
@@ -573,7 +576,7 @@ TC-S3.T3.c  신뢰 프록시 뒤에서는 실제 클라이언트별로 센다
 | G-S3.10 | TC-S3.T3.b | `pnpm -C packages/auth test -t "TC-S3.T3.b"` | 종료코드 0 |
 | G-S3.11 | TC-S3.T3.c | `pnpm -C packages/auth test -t "TC-S3.T3.c"` | 종료코드 0 |
 | G-S3.12 | Better Auth 버전 고정 | json `packages/auth/package.json` `dependencies.better-auth` | `"1.7.7"` (범위 기호 없음) |
-| G-S3.13 | `input: false` 다섯 칼럼 | grep `input:\s*false` in `packages/auth/src/index.ts` | ≥ 5 |
+| G-S3.13 | `input: false` 다섯 칼럼 | grep `(role\|status\|monthlyLimitUsd\|maxKeys\|isBootstrapAdmin): \{ type: [^}]*input:\s*false` in `packages/db/src/schema/common.ts` (`USER_ADDITIONAL_FIELDS`, auth 구성이 `AUTH_SCHEMA_OPTIONS`로 그대로 씀) | == 5 |
 | G-S3.14 | TC-S3.T1.e | `pnpm -C packages/auth test -t "TC-S3.T1.e"` | 종료코드 0 |
 
 `node scripts/gate.mjs S3 --seal`
@@ -1012,7 +1015,7 @@ TC-S7.T3.a  건너뛴 테스트와 미구현 표식이 없다
 | TC-S1.T2.a | 키 끄기 즉시 반영 | S1.T2 |
 | TC-S1.T6.b | Drizzle 어댑터에서 `resolveUser` 트랜잭션 롤백 (MySQL·Postgres) | S1.T6 |
 | TC-S1.T7.a | Workers에서 MySQL 드라이버 동작 | S1.T7 |
-| TC-S3.T1.b | 미인증 로그인 거부 응답이 403 `EMAIL_NOT_VERIFIED` | S3.T1 |
+| TC-S3.T1.b | 미인증 로그인 거부 응답이 403 `EMAIL_NOT_VERIFIED` | S3.T1 (확인함: 네 DB 403 `EMAIL_NOT_VERIFIED`) |
 | TC-S4.T1.d | 연결 옵션(mysql2 `timezone`·세션 `time_zone`, postgres `TimeZone`)으로 세션 시간대를 UTC 로 강제할 수 있음 | S4.T1 |
 | TC-S5.T3.b | 접근 토큰 목록에서 범위를 읽을 수 있음 | S1.T1 |
 | TC-S6.T4.d·e·f | `wrangler dev` + Hyperdrive 로컬 연결로 E2E 가능 | S1.T7 |

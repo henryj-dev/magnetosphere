@@ -82,8 +82,21 @@ export const GATES = {
   S3: {
     needs: ["S2"],
     waivable: false,
-    outputs: ["packages/auth/src/**", "packages/auth/test/**", "scripts/check-sso-paths.mjs"],
-    checks: [],
+    outputs: [
+      "packages/auth/src/**", "packages/auth/test/**", "packages/auth/scripts/**", "packages/auth/*.config.ts",
+      "scripts/check-sso-paths.mjs", "test/fixtures/sso-unguarded/**",
+    ],
+    checks: [
+      { id: "G-S3.1", how: "test", desc: "TC-S3.T1.a 권한 칼럼 입력 무시 (네 DB)", cmd: 'pnpm -C packages/auth test -t "TC-S3.T1.a"' },
+      { id: "G-S3.2", how: "test", desc: "TC-S3.T1.b 이메일 인증 전 로그인 거부 (네 DB)", cmd: 'pnpm -C packages/auth test -t "TC-S3.T1.b"' },
+      { id: "G-S3.3", how: "test", desc: "TC-S3.T1.c 세션 쿠키 속성", cmd: 'pnpm -C packages/auth test -t "TC-S3.T1.c"' },
+      { id: "G-S3.4", how: "cmd", desc: "TC-S3.T1.d SSO 공개 관리 경로 차단 (음성 대조 포함)", cmd: "node scripts/check-sso-paths.mjs && node scripts/check-sso-paths.mjs --fixture test/fixtures/sso-unguarded --expect-fail" },
+      { id: "G-S3.12", how: "json", desc: "Better Auth 버전 고정", file: "packages/auth/package.json", path: "dependencies.better-auth", op: "==", value: "1.7.7" },
+      // 권한 칼럼 다섯은 packages/db 의 USER_ADDITIONAL_FIELDS 에 정의되고 auth 구성이 AUTH_SCHEMA_OPTIONS 로 그대로 쓴다.
+      // 칼럼 이름과 input: false 가 한 줄에 있는 정의만 센다 (주석·TABLES 의 칼럼 정의는 걸리지 않는다).
+      { id: "G-S3.13", how: "grep", desc: "권한 칼럼 다섯 input: false", pattern: "(role|status|monthlyLimitUsd|maxKeys|isBootstrapAdmin): \\{ type: [^}]*input:\\s*false", in: ["packages/db/src/schema/common.ts"], op: "==", limit: 5 },
+      { id: "G-S3.14", how: "test", desc: "TC-S3.T1.e 구성과 스키마가 같은 옵션", cmd: 'pnpm -C packages/auth test -t "TC-S3.T1.e"' },
+    ],
   },
   S4: {
     needs: ["S3"],

@@ -1,0 +1,35 @@
+// TC 공용: DB 하나에 Better Auth 를 올리고, user 행을 읽고 고치는 도구.
+import { eq } from "drizzle-orm";
+import { createAuth, type AuthConfig } from "../src/index.ts";
+import { BASE } from "./client.ts";
+import type { TestDb } from "./db.ts";
+
+export const SECRET = "mg-test-secret-mg-test-secret-mg-test-secret";
+
+export function makeAuth(h: TestDb, extra: Partial<AuthConfig> = {}) {
+  return createAuth({ database: h, baseURL: BASE, secret: SECRET, trustedOrigins: [BASE], ...extra });
+}
+
+const user = (h: TestDb) => (h.schema as any).user;
+
+export async function userRow(h: TestDb, email: string) {
+  const [row] = await h.db.select().from(user(h)).where(eq(user(h).email, email.toLowerCase()));
+  return row;
+}
+
+export async function markVerified(h: TestDb, email: string) {
+  await h.db.update(user(h)).set({ emailVerified: true }).where(eq(user(h).email, email.toLowerCase()));
+}
+
+export const PRIVILEGE_DEFAULTS = { role: "member", status: "active", monthlyLimitUsd: null, maxKeys: null, isBootstrapAdmin: false };
+
+/** user 행의 권한 칼럼 다섯. DB 마다 다른 표현(0/1, "12.000000")을 맞춘다 */
+export function privileges(row: any) {
+  return {
+    role: row.role,
+    status: row.status,
+    monthlyLimitUsd: row.monthlyLimitUsd === null ? null : Number(row.monthlyLimitUsd),
+    maxKeys: row.maxKeys,
+    isBootstrapAdmin: Boolean(row.isBootstrapAdmin),
+  };
+}
