@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import http from "node:http";
 import path from "node:path";
 import { after, describe, test } from "node:test";
 import { createAdmin, createStack, ROOT, signIn } from "./stack.mjs";
@@ -48,6 +49,21 @@ function containerIp(s, service, network) {
   return JSON.parse(r.stdout)[0].NetworkSettings.Networks[`${s.project}_${network}`].IPAddress;
 }
 
+/** 경로를 정리하지 않고 그대로 보낸다 (curl --path-as-is 처럼). fetch 는 ./.. 와 // 를 정리한다 */
+function rawRequest(baseUrl, rawPath, { method = "GET", headers = {}, body } = {}) {
+  const u = new URL(baseUrl);
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: u.hostname, port: u.port, method, path: rawPath, headers: { host: u.host, ...headers }, agent: false }, (res) => {
+      let text = "";
+      res.setEncoding("utf8");
+      res.on("data", (d) => (text += d));
+      res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: text }));
+    });
+    req.on("error", reject);
+    req.end(body);
+  });
+}
+
 after(() => shared?.down());
 
 test("TC-S6.T2.a Caddy 를 거친 키 없는 /v1 은 401", async () => {
@@ -60,6 +76,22 @@ test("TC-S6.T2.a Caddy 를 거친 키 없는 /v1 은 401", async () => {
 
 test("TC-S6.T2.b 허용 목록 밖 /v1 경로는 Caddy 에서 404", async () => {
   const s = stack();
+  // 허용 목록 우회 탐침 (S6 보안 리뷰 L1): 인코딩한 /·.., 겹 /, 대문자, 빈 구간, 경로 매개변수(;)
+  const probes = [
+    "/v1/models/a%2F..%2F..%2Fregistered-keys",
+    "//v1/registered-keys",
+    "/V1/registered-keys",
+    "/v1/responses/%2e%2e/registered-keys",
+    "/v1/models/",
+    "/v1/responses/x;/../../registered-keys",
+  ];
+  for (const p of probes) {
+    for (const method of ["GET", "POST"]) {
+      const res = await rawRequest(s.baseUrl, p, { method });
+      assert.equal(res.status, 404, `${method} ${p} (경로 그대로) → ${res.status}`);
+      assert.doesNotMatch(res.body, /AUTH_00\d/, `${method} ${p} 본문에 OmniRoute 오류 코드`);
+    }
+  }
   const paths = ["/v1/management/proxy-subscriptions", "/v1/session-leases", ...V16.deny, "/v1/models/mko/mock-gpt", "/v1/responses/x/y", "/v1/zzz"];
   for (const p of new Set(paths)) {
     for (const method of ["GET", "POST"]) {
