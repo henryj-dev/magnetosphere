@@ -8,7 +8,33 @@ importers:
 
   .: {}
 
-  apps/server: {}
+  apps/server:
+    dependencies:
+      '@hono/node-server':
+        specifier: 2.1.1
+        version: 2.1.1(hono@4.13.8)
+      '@magnetosphere/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
+      '@magnetosphere/db':
+        specifier: workspace:*
+        version: link:../../packages/db
+      '@magnetosphere/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+      hono:
+        specifier: 4.13.8
+        version: 4.13.8
+    devDependencies:
+      '@libsql/client':
+        specifier: 0.18.0
+        version: 0.18.0
+      drizzle-orm:
+        specifier: 0.45.4
+        version: 0.45.4(@libsql/client@0.18.0)(kysely@0.29.6)(mysql2@3.24.5(@types/node@26.6.4))(postgres@3.4.9)
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(@types/node@26.6.4)(vite@8.3.3(@types/node@26.6.4)(esbuild@0.28.2)(tsx@4.23.15))
 
   apps/web: {}
 
@@ -1561,6 +1587,10 @@ packages:
     resolution: {integrity: sha512-CQ46U0ZkAGmbT/4UxdzzGJpacP2IeKgY4a5/tOI9AABbpOMfK739wfDXmv1usCk+3RkKj1hQy4/fjhiwa2xlrA==}
     engines: {node: '>=16.9.0'}
 
+  hono@4.13.8:
+    resolution: {integrity: sha512-/Gng7NfoykZl2pjukW5Z6+8Yxm3BPRf86GTbQnt0SbySkvax4fyL4H3HhY1cCpBGmiW9XDRFzRV+CXK2W8QudQ==}
+    engines: {node: '>=16.9.0'}
+
   iconv-lite@0.7.3:
     resolution: {integrity: sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ==}
     engines: {node: '>=0.10.0'}
@@ -2418,6 +2448,10 @@ snapshots:
     dependencies:
       hono: 4.13.13
 
+  '@hono/node-server@2.1.1(hono@4.13.8)':
+    dependencies:
+      hono: 4.13.8
+
   '@img/colour@1.1.0': {}
 
   '@img/sharp-darwin-arm64@0.35.2':
@@ -2935,6 +2969,8 @@ snapshots:
       resolve-pkg-maps: 1.0.0
 
   hono@4.13.13: {}
+
+  hono@4.13.8: {}
 
   iconv-lite@0.7.3:
     dependencies:

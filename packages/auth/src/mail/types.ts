@@ -12,12 +12,13 @@ export interface Mailer {
 
 /** 공급자 오류 응답. 상태 코드와 본문 일부를 담는다 */
 export class MailError extends Error {
-  constructor(
-    readonly provider: string,
-    readonly status: number | null,
-    detail: string,
-  ) {
+  // 매개변수 속성(readonly provider 등)은 Node 타입 지우기가 못 돌려 필드로 쓴다 (tsconfig erasableSyntaxOnly)
+  readonly provider: string;
+  readonly status: number | null;
+  constructor(provider: string, status: number | null, detail: string) {
     super(`[mail:${provider}] 보내지 못했다${status === null ? "" : ` (HTTP ${status})`}: ${detail.slice(0, 500)}`);
+    this.provider = provider;
+    this.status = status;
     this.name = "MailError";
   }
 }

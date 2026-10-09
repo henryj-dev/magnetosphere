@@ -2,5 +2,21 @@
   "name": "@magnetosphere/server",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "start": "node src/node.ts",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.1",
+    "@magnetosphere/auth": "workspace:*",
+    "@magnetosphere/db": "workspace:*",
+    "@magnetosphere/runtime": "workspace:*",
+    "hono": "4.13.8"
+  },
+  "devDependencies": {
+    "@libsql/client": "0.18.0",
+    "drizzle-orm": "0.45.4",
+    "vitest": "5.0.3"
+  }
 }
