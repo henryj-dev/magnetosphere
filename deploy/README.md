@@ -26,6 +26,14 @@ Docker Compose 설치(회원 앱 + OmniRoute + Caddy)와 Workers 배포를 적�
 최초 설치(관리자 생성)는 app 을 한 인스턴스로 띄워 끝내고, 그다음에 늘린다 (`docker compose up -d --scale app=N`, MySQL·Postgres 프로필).
 SQLite 는 인스턴스 하나만 쓴다.
 
+### OmniRoute 를 공개하지 않는다
+
+- OmniRoute 20128 포트와 /api/* 는 공개로 열지 않는다. 방화벽·보안 그룹·포트 포워딩으로 20128 을 열거나, Caddy 에 OmniRoute `/api/*` 를 넘기는 규칙을 더하지 않는다.
+  공개 주소로 닿는 OmniRoute 경로는 Caddy 허용 목록 9개 `/v1` 경로뿐이다. 대시보드는 SSH 터널로만 쓴다.
+- 2단계 전까지 Workers 조합은 Cloudflare Tunnel·Access 로만 연결한다. Workers 가 OmniRoute 관리 API 를 부를 길을 공개 인터넷에 열지 않는다
+  (Cloudflare Tunnel 로 서버 포트를 열지 않고, Cloudflare Access 서비스 토큰으로 막는다). 회원 앱 쪽 구현은 2단계(V24)다.
+  그 전까지 Workers 조합은 설치 화면에서 OmniRoute 접근 토큰을 붙여 넣는다.
+
 ### 구성
 
 | 서비스 | 하는 일 | 호스트 포트 |

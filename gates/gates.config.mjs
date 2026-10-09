@@ -220,6 +220,7 @@ export const GATES = {
       { id: "G-S6.27", how: "test", requires: ["local-services"], desc: "TC-S6.T2.g 설치 뒤 남은 OmniRoute 비밀번호 경고", cmd: 'pnpm test:deploy -t "TC-S6.T2.g"' },
       { id: "G-S6.28", how: "test", requires: ["local-services"], desc: "TC-S6.T3.e 약한 SETUP_TOKEN 거부 (Node·Workers)", cmd: 'pnpm -C apps/server test -t "TC-S6.T3.e" && pnpm -C apps/server test:workers -t "TC-S6.T3.e"' },
       { id: "G-S6.29", how: "test", requires: ["local-services"], desc: "TC-S6.T3.f 설치 시도 횟수 제한 → 429 (Node·Workers)", cmd: 'pnpm -C apps/server test -t "TC-S6.T3.f" && pnpm -C apps/server test:workers -t "TC-S6.T3.f"' },
+      { id: "G-S6.30", how: "grep", desc: "OmniRoute 비공개 안내 (20128·/api 비공개, Workers 는 Tunnel·Access 로만)", pattern: "OmniRoute 20128 포트와 /api/\\* 는 공개로 열지 않는다|Workers 조합은 Cloudflare Tunnel·Access 로만 연결한다", in: ["deploy/README.md"], op: "==", limit: 2 },
     ],
   },
   S7: {

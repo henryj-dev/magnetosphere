@@ -1075,6 +1075,7 @@ TC-S6.T4.a ~ f  조합마다 설치 → 관리자 → 부트스트랩 → 로그
 | G-S6.27 | TC-S6.T2.g | `pnpm test:deploy -t "TC-S6.T2.g"` | 종료코드 0 |
 | G-S6.28 | TC-S6.T3.e | `pnpm -C apps/server test -t "TC-S6.T3.e" && pnpm -C apps/server test:workers -t "TC-S6.T3.e"` | 종료코드 0 |
 | G-S6.29 | TC-S6.T3.f | `pnpm -C apps/server test -t "TC-S6.T3.f" && pnpm -C apps/server test:workers -t "TC-S6.T3.f"` | 종료코드 0 |
+| G-S6.30 | OmniRoute 비공개 안내 (S6 보안 리뷰 M3) | grep `OmniRoute 20128 포트와 /api/\* 는 공개로 열지 않는다\|Workers 조합은 Cloudflare Tunnel·Access 로만 연결한다` in `deploy/README.md` | 2 |
 
 `node scripts/gate.mjs S6 --seal`
 
