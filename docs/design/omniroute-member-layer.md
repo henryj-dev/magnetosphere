@@ -3,9 +3,10 @@
 작성일: 2026-10-09
 
 실행판(1단계)은 [`../plan/phase1-todo.md`](../plan/phase1-todo.md) 다.
-상태: 초안 v5.1 (설계 검토 1회 반영)
+상태: 초안 v5.2 (설계 검토 1회 + S1 확인 반영)
 
 변경 이력
+- v5.2: S1 확인 결과 반영 (`../verify/`). 부트스트랩 API 확정(`POST /api/cli/connect`), 관리 토큰 `write` 범위와 그 권한 상승 한계, 키 끄기 즉시 반영, Caddy 허용 목록 9개, OmniRoute 필수 비밀 값은 `INITIAL_PASSWORD` 하나.
 - v5.1: 지원 DB를 SQLite, MySQL, Postgres, D1 네 가지로 확정. 런타임 조합과 스키마 작성 규칙 추가.
 - v5: 설계 검토(critic) 반영 + 범위 결정. 회원별 키 여러 개(관리자가 최대 개수 지정)와 "남은 한도 분배" 방식, Caddy 허용 목록, OmniRoute 부트스트랩, 권한 칼럼 입력 차단, 메일 없을 때 정책 제한, 키 목표 상태 계산, 세션 무효화 추가. 런타임은 Node(SQLite·Postgres)와 Workers(D1·Postgres)를 처음부터 지원. 부가기능은 2차로, SSO는 OIDC 먼저 SAML 다음.
 - v4: 0단계 Better Auth 실측 반영. SSO 등록 권한·도메인 검사·비밀 값 암호화·SAML 검증 강화.
@@ -47,9 +48,10 @@ OmniRoute를 LLM 게이트웨이로 그대로 쓰고, 그 위에 회원 기능�
 | 키별 예산 | `/api/usage/budget`. 넘으면 `429 BUDGET_EXCEEDED`. 지출은 60초마다 기록 | 차단은 OmniRoute에 맡기고, 회원 앱은 키별 예산 값을 조정한다 (5.3) |
 | 비용 | 토큰 × OmniRoute 가격표 추정치. 가격을 고치면 과거도 재계산 | 화면에 "추정 비용"으로 표시 |
 | 키 관리 | `POST /api/keys`가 원문 키를 한 번 돌려줌. 이후 원문 노출 꺼짐 | 원문은 저장하지 않는다 |
-| 관리 인증 | `oma_live_…` 접근 토큰(범위 `read`/`write`/`admin`). 쿠키 방식은 `Origin` 필요 | 서버 간 호출은 접근 토큰 |
+| 관리 인증 | `oma_live_…` 접근 토큰(범위 `read`/`write`/`admin`). 비밀번호로 `POST /api/cli/connect`에서 발급. 키 생성·수정·삭제·예산·분석·로그는 `write`면 된다 (V10) | 서버 간 호출은 `write` 접근 토큰 |
+| 키 끄기 | `PATCH isActive=false` 직후 요청부터 `403 permission_denied` (V11) | 발급·정지 순서에 지연을 둘 필요 없음 |
 | 키 없는 `/v1` | Docker 이미지 3.8.51은 `REQUIRE_API_KEY=true`가 기본이라 `401`. 문서상 기본값은 `false` | Compose에 명시하고 계약 테스트로 검사 |
-| `/v1` 아래 관리 경로 | `/v1/management/…`가 `/api/v1/management/…`의 별칭. 회원 키는 `403`(manage 권한 없음) | Caddy는 접두사가 아니라 허용 목록으로 연다 |
+| `/v1` 아래 관리 경로 | 루트 `/v1/*`는 `/api/v1/*` 전체의 별칭. `/v1/management/*`·`/v1/agents/*`는 회원 키로 `403`이지만 `/v1/registered-keys`, `/v1/combos`, 한도 조회, `/v1/explain/routing`, `/v1/vscode/*` 등은 **회원 키로 200** (V16) | Caddy는 허용 목록 9개만 연다 (7장) |
 | Claude Code | 루트 `/v1/messages` | 허용 목록에 포함 |
 | 저장소 | SQLite(WAL). 단일 인스턴스 | OmniRoute는 항상 상시 서버 1대 |
 
@@ -240,13 +242,13 @@ DB 지원 원칙
 ### 4.7 최초 설치
 
 Compose 설치용 스크립트(`./setup.sh` 또는 `npx <이름> init`)가 `.env`를 만든다.
-- OmniRoute `INITIAL_PASSWORD`, OmniRoute 운영 필수 비밀 값(`OMNIROUTE_WS_BRIDGE_SECRET` 등, 목록은 8장 확인 21번), `APP_ENCRYPTION_KEY`, Better Auth 비밀 값을 무작위로 생성한다.
+- OmniRoute `INITIAL_PASSWORD`(유일한 필수 값)와, OmniRoute가 비어 있으면 자동 생성해 데이터 볼륨에 저장하는 `JWT_SECRET`(32자 이상)·`API_KEY_SECRET`(16자 이상)·`STORAGE_ENCRYPTION_KEY`·`OMNIROUTE_WS_BRIDGE_SECRET`를 모두 무작위로 만들어 `.env`에 고정한다 (V21). 자동 생성에 맡기면 볼륨을 잃거나 나중에 다른 `STORAGE_ENCRYPTION_KEY`를 넣었을 때 OmniRoute가 시작을 거부한다. 이 밖에 `APP_ENCRYPTION_KEY`, Better Auth 비밀 값.
 - `REQUIRE_API_KEY=true`를 명시한다.
 
 설치 흐름
 1. 회원 앱이 처음 뜨면 콘솔에 일회용 설치 토큰을 출력한다.
 2. `/setup`에서 토큰을 넣고 최초 관리자 계정을 만든다.
-3. **OmniRoute 부트스트랩**: 회원 앱이 `INITIAL_PASSWORD`로 OmniRoute에 로그인해 최소 범위의 `oma_live_` 접근 토큰을 만들고 암호화해 저장한다. 사람이 OmniRoute 대시보드에 들어가지 않아도 된다. Workers 조합처럼 자동으로 못 하는 경우에는 토큰을 직접 붙여 넣는다.
+3. **OmniRoute 부트스트랩**: 회원 앱이 `POST /api/cli/connect {password: INITIAL_PASSWORD, name, scope: "write", expiresInDays}`로 `oma_live_` 접근 토큰을 만들고 암호화해 저장한다 (V10). 범위 확인은 `GET /api/cli/whoami`. 사람이 OmniRoute 대시보드에 들어가지 않아도 된다. Workers 조합처럼 자동으로 못 하는 경우에는 토큰을 직접 붙여 넣는다.
 4. 회원이 도구에 넣을 공개 주소를 입력한다.
 5. 메일 발송 설정 (선택). 설정하지 않으면 가입 정책 선택지가 줄어든다 (4.2).
 6. 제공자(상위 LLM API 키) 등록 안내: OmniRoute 대시보드는 외부에 열리지 않으므로, Compose가 대시보드를 `127.0.0.1:20128`에만 묶어 두고 SSH 터널로 접속하는 방법을 화면과 문서로 안내한다.
@@ -369,7 +371,12 @@ OmniRoute 키 그룹·쿼터 풀에 공동 예산이 있으면(8장 확인 12번
 
 ### 5.8 관리 토큰 범위
 
-- 회원 앱이 쓰는 `oma_live_` 토큰은 필요한 최소 범위로 만든다 (8장 확인 10번). 회원 앱이 뚫렸을 때 제공자 API 키까지 넘어가는 범위를 줄인다.
+- 회원 앱이 쓰는 `oma_live_` 토큰은 `write` 범위로 만든다 (V10). `write`로는 제공자 연결 수정이 403이고 제공자 키는 가려져 나온다.
+- **한계 (V10 실측)**: OmniRoute 3.8.51에서 `write` 토큰은 회원 키에 `scopes: ["manage"]`를 붙일 수 있고, 그 키로 `admin` 토큰을 만들 수 있다. 회원 앱이 뚫리면 결국 제공자 연결까지 넘어갈 수 있다는 뜻이라, `write` 범위는 실수 방지일 뿐 침해 시 피해를 줄여 주지 못한다. 문서(SECURITY.md)에 이 한계를 그대로 적는다.
+- 대응
+  - 회원 앱은 OmniRoute 키의 `scopes`를 절대 쓰지 않는다. 어댑터의 키 수정 함수는 `isActive`·이름만 보낸다 (5.6).
+  - 정합성 점검(5.7)이 `m_` 키 중 `scopes`에 `manage`·`admin`이 있는 것을 찾으면 그 키를 끄고 관리자에게 알린다.
+  - OmniRoute 쪽에 "`write` 토큰이 키 범위를 올리지 못하게" 해 달라는 보고를 올린다 (공개 준비 단계).
 
 ### 5.9 데이터 모델
 
@@ -477,7 +484,7 @@ CREATE TABLE audit_log (
 
 OmniRoute 노출
 - Compose에 `REQUIRE_API_KEY=true`를 명시한다.
-- Caddy는 허용 목록 경로만 OmniRoute로 넘긴다. 목록은 8장 확인 16번으로 확정한다. `/v1/management/…` 같은 관리 별칭 경로는 막는다.
+- Caddy는 허용 목록 9개만 OmniRoute로 넘긴다 (V16): `/v1/messages`, `/v1/messages/count_tokens`, `/v1/chat/completions`, `/v1/completions`, `/v1/responses`, `/v1/responses/*`, `/v1/embeddings`, `/v1/models`, `/v1/models/*`. 그 밖의 `/v1/*`는 404다. 일반 회원 키로도 `/v1/registered-keys`(다른 키 목록), `/v1/combos`, `/v1/explain/routing` 등이 200이라 접두사 개방은 정보 노출이다. images·audio·batches·files 같은 경로는 1차에서 열지 않는다.
 - OmniRoute 대시보드는 `127.0.0.1`에만 묶는다. 내부 WebSocket 포트도 외부에 열지 않는다.
 - OmniRoute `INITIAL_PASSWORD`와 운영 필수 비밀 값은 설치 스크립트가 무작위로 만든다.
 
