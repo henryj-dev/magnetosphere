@@ -1,0 +1,18 @@
+# TC-S7.T1.c 음성 대조: E2E 잡 continue-on-error
+# expect: continue-on-error
+name: ci
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      matrix:
+        combo: [docker-sqlite, docker-mysql, docker-pg, workers-d1, workers-mysql, workers-pg]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: pnpm e2e --combo ${{ matrix.combo }}

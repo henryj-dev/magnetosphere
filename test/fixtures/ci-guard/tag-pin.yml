@@ -1,0 +1,15 @@
+# TC-S7.T1.c 음성 대조: 액션을 태그로
+# expect: pin
+name: ci
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: S2 게이트
+        run: node scripts/gate.mjs S2

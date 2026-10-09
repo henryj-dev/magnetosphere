@@ -1,5 +1,6 @@
 # TC-S7.T1.b 음성 대조 픽스처: E2E 매트릭스에서 workers-pg 하나가 빠진 워크플로.
 # node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-5combos.yml --expect 6 --expect-fail 이 매트릭스 문제를 잡아야 한다.
+# expect: combo-count
 name: ci
 on: push
 jobs:

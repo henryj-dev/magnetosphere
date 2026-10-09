@@ -230,11 +230,11 @@ export const GATES = {
     needs: ["S6"],
     waivable: false,
     outputs: [
-      ".github/workflows/ci.yml", "scripts/check-ci-matrix.mjs", "test/fixtures/ci-5combos.yml",
+      ".github/workflows/ci.yml", "scripts/check-ci-matrix.mjs", "test/fixtures/ci-5combos.yml", "test/fixtures/ci-guard/**",
       "docker-compose.yml", ".env.example", "deploy/README.md", "tests/deploy/deploy.test.mjs", "apps/server/test/workers.test.ts",
     ],
     checks: [
-      { id: "G-S7.1", how: "cmd", desc: "TC-S7.T1.a·b CI 매트릭스 여섯 조합 (음성 대조 포함)", cmd: "node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-5combos.yml --expect 6 --expect-fail" },
+      { id: "G-S7.1", how: "cmd", desc: "TC-S7.T1.a·b·c CI 매트릭스 여섯 조합·명령이 조용히 빠지지 않음 (음성 대조 포함)", cmd: "node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-5combos.yml --expect 6 --expect-fail && node scripts/check-ci-matrix.mjs --fixture-dir test/fixtures/ci-guard --expect 6 --expect-fail" },
       // grep 종료코드 1(일치 없음)만 통과다. 경로가 없어 grep 이 2 로 끝나면 실패한다
       { id: "G-S7.2", how: "cmd", desc: "TC-S7.T2.a 확인용 코드가 남지 않음", cmd: 'test ! -e spikes && { grep -rn --exclude-dir=node_modules --exclude-dir=build --exclude-dir=.svelte-kit --exclude-dir=.wrangler "spikes/" apps packages scripts tests; test $? -eq 1; }' },
       // 꺼진 테스트(.only·.skip·.skipIf·.todo·x접두)와 미구현 표식. 빌드 산출(build·.svelte-kit·.wrangler·dist)은 보지 않는다 (node_modules 는 원래 안 본다)
