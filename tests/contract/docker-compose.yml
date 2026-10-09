@@ -1,0 +1,45 @@
+# OmniRoute 계약 테스트 환경 (S5.T1, 계획서 5.6). pnpm test:contract 가 띄운다 (tests/contract/run.mjs).
+# 버전은 태그와 digest 로 고정한다 (G-S5.13). 올릴 때는 계약 테스트가 통과해야 한다.
+# 비밀 값은 V21 대로 전부 고정한다. 시험 전용 값이라 저장소에 둔다 (127.0.0.1 에만 연다).
+# 데이터 볼륨을 두지 않는다. 컨테이너를 다시 만들면 빈 상태에서 시작하고, setup.mjs 가 제공자·가격을 다시 넣는다.
+# 가짜 상위 서버는 같은 이미지의 node 로 돌려 이미지를 더 받지 않는다. OmniRoute 는 내부망 http://mock:18080 으로 붙는다.
+name: magnetosphere-contract
+
+x-image: &image diegosouzapw/omniroute:3.8.51@sha256:8bd462c9f60d8eda79329cfbb6ea7ea723505fe7721beb944f3d43835409e218
+
+services:
+  omniroute:
+    image: *image
+    environment:
+      INITIAL_PASSWORD: contract-initial-password-5c1e9a
+      JWT_SECRET: contract-jwt-secret-0123456789abcdef0123456789abcdef
+      API_KEY_SECRET: contract-api-key-secret-0123456789abcdef
+      STORAGE_ENCRYPTION_KEY: 3f6c2a91d4e8b7056a1f9c3e2d7b4a8065e1c9f2a3b7d4e8c1f6a9b2e5d8c7a4
+      STORAGE_ENCRYPTION_KEY_VERSION: v1
+      OMNIROUTE_WS_BRIDGE_SECRET: contract-ws-bridge-secret-0123456789
+      # 이미지 기본값도 true 지만 .env.example 은 false 다. 명시한다 (V21, TC-S5.T2.a)
+      REQUIRE_API_KEY: "true"
+      # 외부 가격 동기화를 꺼 가격표를 setup.mjs 가 넣은 값으로만 둔다 (계획서 「막혔을 때」)
+      PRICING_SYNC_ENABLED: "false"
+    ports: ["127.0.0.1:20170:20128"]
+    depends_on:
+      mock:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:20128/livez').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 2s
+      timeout: 5s
+      retries: 60
+
+  mock:
+    image: *image
+    entrypoint: ["node", "/mock/mock-upstream.mjs"]
+    environment:
+      PORT: "18080"
+    volumes:
+      - ./mock-upstream.mjs:/mock/mock-upstream.mjs:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:18080/v1/models').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 2s
+      timeout: 5s
+      retries: 30

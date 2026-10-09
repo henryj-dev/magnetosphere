@@ -13,6 +13,7 @@
     "prepare": "git config core.hooksPath .githooks",
     "gate": "node scripts/gate.mjs",
     "test:scripts": "node --test --test-reporter=tap \"scripts/*.test.mjs\"",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "test:contract": "node tests/contract/run.mjs"
   }
 }

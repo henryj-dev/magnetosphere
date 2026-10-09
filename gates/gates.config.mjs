@@ -150,8 +150,16 @@ export const GATES = {
   S5: {
     needs: ["S4"],
     waivable: false,
-    outputs: ["packages/omniroute/src/**", "packages/omniroute/test/**", "tests/contract/**", "apps/server/src/setup/omniroute.ts"],
-    checks: [],
+    outputs: [
+      "packages/omniroute/src/**", "packages/omniroute/test/**", "packages/omniroute/*.config.ts",
+      "tests/contract/**", "apps/server/src/setup/omniroute.ts",
+      "apps/server/test/contract/**", "apps/server/vitest.contract.config.ts",
+    ],
+    // 계약 테스트는 tests/contract 의 OmniRoute 컨테이너(127.0.0.1:20170)를 띄우고 돈다 (tests/contract/run.mjs).
+    checks: [
+      { id: "G-S5.1", how: "test", requires: ["local-services"], desc: "TC-S5.T1.a 계약 환경이 0단계 실측값 재현", cmd: 'pnpm test:contract -t "TC-S5.T1.a"' },
+      { id: "G-S5.13", how: "grep", desc: "OmniRoute 버전 고정 (태그 + digest)", pattern: "diegosouzapw/omniroute:3\\.8\\.51@sha256:", in: ["tests/contract/docker-compose.yml"], op: "==", limit: 1 },
+    ],
   },
   S6: {
     needs: ["S5"],
