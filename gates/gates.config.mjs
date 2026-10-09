@@ -183,8 +183,17 @@ export const GATES = {
   S6: {
     needs: ["S5"],
     waivable: false,
-    outputs: ["scripts/init.mjs", ".env.example", "docker-compose.yml", "deploy/**", "apps/server/Dockerfile", "apps/server/wrangler.toml", "tests/e2e/**"],
-    checks: [],
+    outputs: [
+      "scripts/init.mjs", "scripts/init.test.mjs", ".env.example", "docker-compose.yml", "deploy/**", ".dockerignore",
+      "apps/server/Dockerfile", "apps/server/wrangler.toml", "tests/e2e/**", "tests/deploy/**",
+    ],
+    checks: [
+      { id: "G-S6.1", how: "test", desc: "TC-S6.T1.a 필수 값이 모두 들어간다", cmd: nodeTest("scripts/init.test.mjs", "TC-S6.T1.a") },
+      { id: "G-S6.2", how: "test", desc: "TC-S6.T1.b 두 번 생성한 비밀 값이 서로 다르다", cmd: nodeTest("scripts/init.test.mjs", "TC-S6.T1.b") },
+      { id: "G-S6.3", how: "test", desc: "TC-S6.T1.c 기존 .env 를 덮지 않는다", cmd: nodeTest("scripts/init.test.mjs", "TC-S6.T1.c") },
+      { id: "G-S6.16", how: "grep", desc: "REQUIRE_API_KEY=true 명시", pattern: "REQUIRE_API_KEY=true", in: [".env.example"], op: "==", limit: 1 },
+      { id: "G-S6.26", how: "test", desc: "TC-S6.T1.d OmniRoute 비밀번호는 .env.setup 에만", cmd: nodeTest("scripts/init.test.mjs", "TC-S6.T1.d") },
+    ],
   },
   S7: {
     needs: ["S6"],
