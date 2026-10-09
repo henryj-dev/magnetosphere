@@ -5,11 +5,13 @@
 //   node scripts/schema-lint.mjs --fixture <file> --expect <n>     파일 하나의 위반 수가 정확히 n 이어야 통과 (음성 대조)
 //
 // 규칙 (칼럼마다 규칙 하나당 위반 1)
-//   R1 길이 없는 문자열 기본 키·고유 키·인덱스 (mysql·pg): text 칼럼에 primaryKey·unique·index
+//   R1 길이 없는 문자열 기본 키·고유 키·인덱스·외래 키 (mysql·pg): text 계열 칼럼에 primaryKey·unique·index·references
 //      — MySQL 은 길이 없는 TEXT 에 기본 키·인덱스를 못 건다. SQLite 는 길이가 없어 제외
 //   R2 id 칼럼이 VARCHAR(36) 이 아님 (mysql)
 //   R3 금액 칼럼(*_usd)이 DECIMAL(12,6) 이 아님 (mysql·pg), 실수가 아님 (sqlite)
 //   R4 DB 전용 JSON 칼럼 타입: json()·jsonb(), text/blob 의 mode: "json"
+//   R5 MySQL 인덱스 바이트 한도 초과: 키 칼럼 varchar 길이 × 4(utf8mb4) > 3072
+// 방언은 테이블 함수(sqliteTable·mysqlTable·pgTable)로 테이블마다 정한다.
 // 생성기는 칼럼 하나를 한 줄에 쓴다. 이 검사기도 그 모양을 읽는다.
 import fs from "node:fs";
 import path from "node:path";
@@ -18,23 +20,21 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const GENERATED = ["sqlite", "mysql", "pg"].map((d) => path.join(ROOT, "packages/db/src/schema", `${d}.ts`));
 
-const DIALECT_BY_MODULE = { "drizzle-orm/sqlite-core": "sqlite", "drizzle-orm/mysql-core": "mysql", "drizzle-orm/pg-core": "pg" };
-const TABLE_FN = /export const (\w+) = (?:sqliteTable|mysqlTable|pgTable)\("([^"]+)"/;
-const COLUMN = /^\s*(\w+):\s*(\w+)\("([^"]+)"(?:,\s*(\{[^}]*\}))?\)(.*?),?\s*$/;
+const DIALECT_BY_TABLE_FN = { sqliteTable: "sqlite", mysqlTable: "mysql", pgTable: "pg" };
+// 이름공간 import(pg.text(...))도 읽는다.
+const TABLE_FN = /export const (\w+) = (?:\w+\.)?(sqliteTable|mysqlTable|pgTable)\("([^"]+)"/;
+const MYSQL_INDEX_BYTES = 3072;
+const COLUMN = /^\s*(\w+):\s*(?:\w+\.)?(\w+)\("([^"]+)"(?:,\s*(\{[^}]*\}))?\)(.*?),?\s*$/;
 const INDEX = /\b(?:unique)?[iI]ndex\("[^"]*"\)\.on\(([^)]*)\)/;
 
 function lint(file) {
   const src = fs.readFileSync(file, "utf8");
-  const mod = /from "(drizzle-orm\/(?:sqlite|mysql|pg)-core)"/.exec(src)?.[1];
-  const dialect = DIALECT_BY_MODULE[mod];
-  if (!dialect) throw new Error(`${file}: drizzle 방언 import 를 찾지 못함`);
-
   const tables = [];
   let cur = null;
   for (const line of src.split("\n")) {
     const t = TABLE_FN.exec(line);
     if (t) {
-      cur = { name: t[2], columns: new Map(), indexed: new Set() };
+      cur = { name: t[3], dialect: DIALECT_BY_TABLE_FN[t[2]], columns: new Map(), indexed: new Set() };
       tables.push(cur);
       continue;
     }
@@ -52,9 +52,12 @@ function lint(file) {
   const violations = [];
   const add = (t, c, rule, msg) => violations.push(`${path.relative(ROOT, file)}: ${t.name}.${c.name} ${rule} ${msg}`);
   for (const t of tables) {
+    const dialect = t.dialect;
     for (const c of t.columns.values()) {
-      const keyed = /\.primaryKey\(\)/.test(c.chain) || /\.unique\(\)/.test(c.chain) || t.indexed.has(c.key);
-      if (dialect !== "sqlite" && c.fn === "text" && keyed) add(t, c, "R1", "길이 없는 문자열에 기본 키·고유 키·인덱스");
+      const keyed = /\.(primaryKey|unique|references)\(/.test(c.chain) || t.indexed.has(c.key);
+      if (dialect !== "sqlite" && /^text/.test(c.fn) && keyed) add(t, c, "R1", "길이 없는 문자열에 기본 키·고유 키·인덱스·외래 키");
+      const len = Number(/length:\s*(\d+)/.exec(c.opts)?.[1]);
+      if (dialect === "mysql" && /^varchar/.test(c.fn) && keyed && len * 4 > MYSQL_INDEX_BYTES) add(t, c, "R5", `키 칼럼 varchar(${len}) 가 인덱스 한도 ${MYSQL_INDEX_BYTES}바이트를 넘음`);
       if (dialect === "mysql" && c.name === "id" && !(c.fn === "varchar" && /length:\s*36\b/.test(c.opts))) add(t, c, "R2", "id 가 VARCHAR(36) 이 아님");
       if (c.name.endsWith("_usd")) {
         const ok = dialect === "sqlite"

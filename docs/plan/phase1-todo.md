@@ -377,7 +377,7 @@ TC-S1.G.d  resolved 는 막았던 항목이 현재 계획서 버전을 가리켜
 
 【작업】
 1. 공통 정의(테이블·칼럼·의미)와 Better Auth 스키마 옵션(`packages/db/src/auth-options.ts`) 하나에서 `sqlite`·`mysql`·`pg` Drizzle 스키마 세 벌을 생성하는 스크립트. D1은 `sqlite`를 공유. 테이블: Better Auth 여섯(`rateLimit` 포함, 계획서 v5.4 3.2) + `app_settings`, `sso_provider_settings`, `invites`, `api_keys`, `omniroute_jobs`, `job_leases`, `audit_log`. 커밋.
-2. `scripts/schema-lint.mjs`: 생성된 세 벌에서 규칙 위반을 센다 — 길이 없는 문자열 기본 키·고유 키, `VARCHAR(36)`이 아닌 id, `DECIMAL(12,6)`이 아닌 금액 칼럼(`*_usd`), DB 전용 JSON 칼럼 타입. 커밋.
+2. `scripts/schema-lint.mjs`: 생성된 세 벌에서 규칙 위반을 센다 — 길이 없는 문자열 기본 키·고유 키·인덱스·외래 키, `VARCHAR(36)`이 아닌 id, `DECIMAL(12,6)`이 아닌 금액 칼럼(`*_usd`), DB 전용 JSON 칼럼 타입, MySQL 인덱스 3072바이트 한도를 넘는 키 칼럼. 커밋.
 
 【테스트】
 ```
@@ -388,7 +388,7 @@ TC-S2.T1.b  스키마 규칙 위반 0
   단언:  node scripts/schema-lint.mjs → 위반 0
   검출:  MySQL 에서 TEXT 기본 키로 마이그레이션 실패, 금액 REAL 로 반올림 오차
 TC-S2.T1.c  린트에 이빨이 있다 (음성 대조)
-  단언:  픽스처 스키마(TEXT 기본 키, REAL 금액, JSON 칼럼 각 1개) → 위반 3
+  단언:  픽스처 스키마(MySQL TEXT 기본 키·TEXT 외래 키·TEXT 인덱스, REAL 금액, JSON 칼럼, VARCHAR(64) id, varchar(1024) 고유 키, Postgres TEXT 고유 키 각 1개) → 위반 8
   검출:  린트가 아무것도 안 잡는데 b 가 늘 초록인 것
 ```
 
@@ -450,7 +450,7 @@ TC-S2.T3.f  토큰·식별자는 대소문자를 구분한다
 |---|---|---|---|
 | G-S2.1 | TC-S2.T1.a | `pnpm -C packages/db gen && git diff --exit-code packages/db/src/schema/` | 종료코드 0 |
 | G-S2.2 | TC-S2.T1.b | `node scripts/schema-lint.mjs` | 위반 0 |
-| G-S2.3 | TC-S2.T1.c | `node scripts/schema-lint.mjs --fixture test/fixtures/bad-schema.ts --expect 3` | 종료코드 0 |
+| G-S2.3 | TC-S2.T1.c | `node scripts/schema-lint.mjs --fixture test/fixtures/bad-schema.ts --expect 8` | 종료코드 0 |
 | G-S2.4 | TC-S2.T2.a | `pnpm -C packages/db test -t "TC-S2.T2.a"` | 종료코드 0 |
 | G-S2.5 | TC-S2.T2.b | `pnpm -C packages/db test -t "TC-S2.T2.b"` | 종료코드 0 |
 | G-S2.6 | TC-S2.T3.a | `pnpm -C packages/db test:migrate --db sqlite,mysql,mariadb,pg,d1` | 종료코드 0 |
