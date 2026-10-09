@@ -89,21 +89,20 @@ describe("TC-S5.T2.c 끈 키는 거부된다", () => {
   });
 });
 
-describe("TC-S5.T2.d 예산을 넘으면 429 BUDGET_EXCEEDED", () => {
-  it("월 예산 0.01, 요청 3건(0.014633) 후 → 429, code BUDGET_EXCEEDED", async () => {
-    const start = new Date(Date.now() - 60_000);
+describe("TC-S5.T2.d 예산을 넘으면 429 로 막는다", () => {
+  it("월 예산 0.01, 요청 3건(0.014633) 후 → 429, 예산 초과 (arm64 BUDGET_EXCEEDED · amd64 rate_limit_exceeded + 예산 메시지)", async () => {
     const k = await newKey("t2d");
     await client.setBudget(k.id, { monthlyUsd: 0.01 });
     await threeRequests(k.key);
-    // OmniRoute 는 비용을 응답 뒤에 기록한다. 기록 전에 다음 요청이 오면 요청 앞 예산 검사를 지나 뒤 단계에서 막히는데,
-    // 그때는 같은 429 라도 code 가 rate_limit_exceeded 다 (S7 CI 실측). 기록이 끝난 뒤의 차단 코드를 본다
-    await eventually(
-      () => client.getAnalytics({ apiKeyIds: [k.id], startDate: start, endDate: new Date(Date.now() + 60_000) }),
-      (x) => x.totalRequests === 3,
-    );
     const r = await infer(k.key, "openai");
-    expect(r.status, JSON.stringify(r.json)).toBe(429);
-    expect(r.json?.error?.code ?? r.json?.code, JSON.stringify(r.json)).toBe("BUDGET_EXCEEDED");
+    const body = JSON.stringify(r.json);
+    expect(r.status, body).toBe(429);
+    // 같은 3.8.51 digest 라도 아키텍처마다 다른 빌드다 (S7 CI 실측: BUILD_ID 가 다르고 amd64 빌드에는 BUDGET_EXCEEDED 문자열이 없다).
+    // arm64 는 code "BUDGET_EXCEEDED", amd64 는 code "rate_limit_exceeded" 에 "Monthly budget exceeded: $0.0146 / $0.01".
+    // 회원 앱은 code 에 기대지 않으므로 둘 다 예산 차단으로 받되, 예산 때문인 것은 확인한다 (그냥 요청 수 제한과 구별)
+    const code = r.json?.error?.code ?? r.json?.code;
+    const message = String(r.json?.error?.message ?? r.json?.message ?? "");
+    expect(code === "BUDGET_EXCEEDED" || (code === "rate_limit_exceeded" && /^Monthly budget exceeded: \$0\.0146 \/ \$0\.01/.test(message)), body).toBe(true);
   });
 });
 

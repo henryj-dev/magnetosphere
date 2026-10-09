@@ -163,7 +163,7 @@ export const GATES = {
       { id: "G-S5.2", how: "test", requires: ["local-services"], desc: "TC-S5.T2.a 키 없는 /v1 → 401", cmd: 'pnpm test:contract -t "TC-S5.T2.a"' },
       { id: "G-S5.3", how: "test", requires: ["local-services"], desc: "TC-S5.T2.b 생성 → 끄기 → 예산 → 켜기 → 요청", cmd: 'pnpm test:contract -t "TC-S5.T2.b"' },
       { id: "G-S5.4", how: "test", requires: ["local-services"], desc: "TC-S5.T2.c 끈 키 즉시 거부", cmd: 'pnpm test:contract -t "TC-S5.T2.c"' },
-      { id: "G-S5.5", how: "test", requires: ["local-services"], desc: "TC-S5.T2.d 예산 초과 429 BUDGET_EXCEEDED", cmd: 'pnpm test:contract -t "TC-S5.T2.d"' },
+      { id: "G-S5.5", how: "test", requires: ["local-services"], desc: "TC-S5.T2.d 예산 초과 429 (arm64 BUDGET_EXCEEDED, amd64 예산 메시지)", cmd: 'pnpm test:contract -t "TC-S5.T2.d"' },
       { id: "G-S5.6", how: "test", requires: ["local-services"], desc: "TC-S5.T2.e 키별 분석 비용 (스트리밍 포함)", cmd: 'pnpm test:contract -t "TC-S5.T2.e"' },
       { id: "G-S5.7", how: "test", requires: ["local-services"], desc: "TC-S5.T2.f 응답 형식 변화 → 오류", cmd: 'pnpm test:contract -t "TC-S5.T2.f"' },
       { id: "G-S5.8", how: "test", requires: ["local-services"], desc: "TC-S5.T2.g 쿠키 변경 요청에 Origin", cmd: 'pnpm test:contract -t "TC-S5.T2.g"' },
