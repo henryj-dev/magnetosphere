@@ -84,4 +84,35 @@ describe("TC-S4.T3.b Node 와 Workers 가 같은 빌드 결과를 제공한다",
     })) as unknown as Response;
     expect(small.status).toBe(401);
   });
+
+  it("TC-S4.T3.f SPA·정적 파일·API 응답 모두 보안 헤더가 있고, 빌드한 SPA 는 그 CSP 아래에서 돈다", async () => {
+    const { readFileSync } = await import("node:fs");
+    const html = readFileSync(path.join(DEFAULT_WEB_DIR, "index.html"), "utf8");
+    const asset = html.match(/href="(\/_app\/immutable\/[^"]+\.js)"/)?.[1];
+    expect(asset).toBeTruthy();
+    for (const [name, fetchFrom] of [["node", fromNode], ["workers", fromWorker]] as const) {
+      for (const p of ["/", "/keys", asset!, "/api/nope", "/healthz"]) {
+        const h = (await fetchFrom(p)).headers;
+        const where = `${name} ${p}`;
+        expect(h.get("x-frame-options"), where).toBe("DENY");
+        expect(h.get("x-content-type-options"), where).toBe("nosniff");
+        expect(h.get("referrer-policy"), where).toBe("strict-origin-when-cross-origin");
+        const csp = h.get("content-security-policy") ?? "";
+        expect(csp, where).toContain("frame-ancestors 'none'");
+        expect(csp, where).toContain("object-src 'none'");
+        // 헤더 CSP 가 스크립트·스타일을 막지 않는다 (그것은 <meta> CSP 가 해시로 허용한다)
+        expect(csp, where).not.toMatch(/(default|script|style)-src/);
+      }
+    }
+    // <meta> CSP 의 script-src 가 빌드에 든 인라인 스크립트 해시를 모두 담고, 인라인 style·이벤트 속성은 없다
+    const meta = html.match(/<meta http-equiv="content-security-policy" content="([^"]+)"/)?.[1] ?? "";
+    const scriptSrc = meta.split(";").map((d) => d.trim()).find((d) => d.startsWith("script-src")) ?? "";
+    expect(scriptSrc).toContain("'self'");
+    expect(scriptSrc).not.toContain("unsafe-inline");
+    const inline = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+    expect(inline.length).toBeGreaterThan(0);
+    for (const code of inline) expect(scriptSrc).toContain(`'sha256-${createHash("sha256").update(code).digest("base64")}'`);
+    expect(html).not.toMatch(/\sstyle="/);
+    expect(html).not.toMatch(/\son[a-z]+="/);
+  });
 });

@@ -4,9 +4,13 @@
 //   /api/setup     최초 설치 (setup/)
 //   /api/*         그 밖은 JSON 404. 모르는 API 경로가 index.html 200 이 되면 클라이언트가 오류를 성공으로 오인한다
 //   나머지         SPA 정적 파일 (apps/web 빌드). 없는 경로는 index.html (TC-S4.T3.a)
+// 모든 응답(SPA·API)에 보안 헤더를 단다 (TC-S4.T3.f). 스크립트·스타일 출처는 SPA 빌드가 <meta> CSP 로 건다
+//   (apps/web svelte.config.js, 인라인 부트스트랩 스크립트 해시). 헤더 CSP 는 <meta> 로 못 거는 지시어만 둬서 두 정책이 겹쳐도
+//   SPA 가 막히지 않게 한다. Workers 는 정적 자산도 이 Worker 를 거치게 한다 (assets.run_worker_first).
 // /api/* 요청 본문은 API_BODY_LIMIT 까지만 받는다. 인증 없이 큰 본문을 보내 메모리를 채우는 것을 막는다 (TC-S4.T3.e).
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { secureHeaders } from "hono/secure-headers";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import { setupRoutes } from "./setup/routes.ts";
@@ -36,8 +40,24 @@ export interface AppDeps {
   carryRequest?: (from: Request, to: Request) => void;
 }
 
+/** 응답 헤더 CSP. script-src·style-src 는 SPA 의 <meta> CSP 가 맡는다 */
+export const HEADER_CSP = {
+  frameAncestors: ["'none'"],
+  baseUri: ["'self'"],
+  objectSrc: ["'none'"],
+  formAction: ["'self'"],
+};
+
 export function createApp(deps: AppDeps) {
   const app = new Hono();
+  app.use(
+    "*",
+    secureHeaders({
+      contentSecurityPolicy: HEADER_CSP,
+      xFrameOptions: "DENY",
+      referrerPolicy: "strict-origin-when-cross-origin",
+    }),
+  );
   app.get("/healthz", (c) => c.json({ ok: true }));
   const limit = bodyLimit({ maxSize: API_BODY_LIMIT, onError: (c) => c.json({ error: "payload_too_large" }, 413) });
   app.use("/api/*", async (c, next) => {

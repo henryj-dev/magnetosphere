@@ -1,6 +1,6 @@
 // Workers 진입점 (Workers + D1·Hyperdrive 조합). 배포 설정(wrangler.toml)은 S6 에서 만든다.
-// 정적 파일은 Workers 정적 자산(ASSETS)이 먼저 내주고, /api/* 와 /healthz 만 이 Worker 로 온다
-// (assets.run_worker_first). 요청마다 런타임·DB 연결·인증을 새로 만든다 (V27 요청 단위 연결).
+// 모든 요청이 이 Worker 를 먼저 거친다 (assets.run_worker_first: true). 정적 파일도 보안 헤더를 달아야 해서다 (TC-S4.T3.f).
+// 정적 파일은 정적 자산 바인딩(ASSETS)에서 가져온다. 없는 경로는 바인딩의 SPA 처리(not_found_handling)가 index.html 을 준다. 요청마다 런타임·DB 연결·인증을 새로 만든다 (V27 요청 단위 연결).
 import { createWorkersRuntime, type WorkersEnv } from "@magnetosphere/runtime/workers";
 import { createApp, type Services } from "./app.ts";
 import { buildServices } from "./config.ts";
@@ -21,7 +21,11 @@ export default {
     let services: Promise<Services> | undefined;
     const app = createApp({
       services: () => (services ??= buildServices(runtime, { waitUntil })),
-      assets: (c) => env.ASSETS.fetch(c.req.raw),
+      // 바인딩 응답의 헤더는 바꿀 수 없어 복사한다 (보안 헤더를 덧붙인다)
+      assets: async (c) => {
+        const res = await env.ASSETS.fetch(c.req.raw);
+        return new Response(res.body, res);
+      },
       // Workers 에는 시작 시점이 없어 설치 화면이 처음 상태를 물을 때 토큰을 만든다 (wrangler tail 로그에 한 번 나온다)
       issueSetupTokenOnStatus: true,
       log: (line) => console.log(line),

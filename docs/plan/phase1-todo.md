@@ -676,13 +676,14 @@ TC-S4.T2.d  다른 AAD(저장 자리 이름)로는 복호화하지 못한다 (S4
 - [ ] G-S4.4 ~ G-S4.6, G-S4.18 통과
 
 ### ☐ S4.T3 — Hono 서버와 SvelteKit SPA
-선행 S4.T1 · 산출 `apps/server/src/`, `apps/web/`, `tsconfig.json`, `apps/*/tsconfig.json`, `packages/*/tsconfig.json` · 되돌리기 커밋 4개
+선행 S4.T1 · 산출 `apps/server/src/`, `apps/web/`, `tsconfig.json`, `apps/*/tsconfig.json`, `packages/*/tsconfig.json` · 되돌리기 커밋 5개
 
 【작업】
 1. Hono 앱: `/api/auth/*`에 S3의 Better Auth 연결, `/api/*` 그 밖은 JSON 404, `/healthz`. Node 진입점과 Workers 진입점. 커밋.
 2. `apps/web`: SvelteKit, `adapter-static`, 루트 `+layout.ts`에 `ssr = false`, `fallback: 'index.html'`. 빌드 결과를 Node는 Hono 정적 제공, Workers는 정적 자산으로. 커밋.
 3. TypeScript 타입 검사 (S3 보안 리뷰에서 넘김). 루트 `tsconfig.json`과 패키지마다 `typecheck` 스크립트(`tsc --noEmit`. `apps/web`은 `.svelte` 파일을 보려고 `svelte-kit sync && svelte-check`, 아직 `src`가 없는 `packages/omniroute`는 `test ! -d src || tsc --noEmit`), 루트에서 `pnpm -r typecheck`. 루트 설정에 `erasableSyntaxOnly`를 켜 Node 타입 지우기가 못 돌리는 문법을 막는다. 모든 패키지(packages/db·auth·runtime·omniroute, apps/server·web) 통과. S4 를 열 때 `gates.config.mjs` S4 `outputs`에 tsconfig 경로를 넣는다. 커밋.
 4. `/api/*` 본문 상한 64KB (`hono/body-limit`, Node·Workers 같은 앱). 상한 검사가 chunked 본문을 새 Request 로 다시 담으면 Node 런타임의 소켓 주소를 옮긴다 (S4 보안 리뷰 M1). 커밋.
+5. 보안 헤더 (`hono/secure-headers`, 모든 응답). 스크립트·스타일 출처는 SvelteKit `kit.csp`(hash)가 `<meta>` CSP 로, 헤더 CSP 는 `<meta>` 로 못 거는 `frame-ancestors 'none'` 등만. Workers 는 정적 파일에도 헤더를 달려고 `assets.run_worker_first: true` (S4 보안 리뷰 L1). 커밋.
 
 【테스트】
 ```
@@ -704,10 +705,15 @@ TC-S4.T3.e  /api 본문이 64KB 를 넘으면 413 이고 핸들러가 돌지 않
          소켓 주소(IPv6 루프백). Workers 도 큰 본문 413, 작은 본문은 처리(401)
   검출:  인증 없이 수백 MB JSON 을 보내 c.req.json()·Better Auth 가 본문 전체를 메모리에 올려 프로세스가 죽는 것.
          chunked 본문을 다시 담은 Request 에서 소켓 주소를 잃어 clientIp 가 null 이 되는 것
+TC-S4.T3.f  SPA·정적 파일·API 응답 모두 보안 헤더가 있고 SPA 는 그 CSP 아래에서 돈다 (S4 보안 리뷰 L1)
+  단언:  두 런타임에서 /, /keys, 빌드 JS 하나, /api/nope, /healthz → X-Frame-Options DENY, X-Content-Type-Options nosniff,
+         Referrer-Policy strict-origin-when-cross-origin, 헤더 CSP 에 frame-ancestors 'none'·object-src 'none' 이 있고 script·style·default-src 는 없음.
+         빌드한 index.html 의 <meta> CSP script-src 에 'unsafe-inline' 이 없고 인라인 스크립트마다 sha256 해시가 있음. 인라인 style·on* 속성 없음
+  검출:  클릭재킹·MIME 추측·리퍼러 유출 방어가 없는 것. CSP 를 붙였더니 SvelteKit 인라인 부트스트랩 스크립트가 막혀 빈 화면이 되는 것
 ```
 
 【통과】
-- [ ] G-S4.7 ~ G-S4.9, G-S4.17, G-S4.19 통과
+- [ ] G-S4.7 ~ G-S4.9, G-S4.17, G-S4.19, G-S4.20 통과
 
 ### ☐ S4.T4 — 최초 설치 흐름
 선행 S4.T2, S4.T3 · 산출 `apps/server/src/setup/`, `apps/web/src/routes/setup/` · 되돌리기 커밋 1개
@@ -757,6 +763,7 @@ TC-S4.T4.d  관리자가 있으면 설치 토큰을 만들지 않는다
 | G-S4.17 | TC-S4.T3.d | `pnpm -r typecheck` | 종료코드 0 |
 | G-S4.18 | TC-S4.T2.d | `pnpm -C packages/runtime test -t "TC-S4.T2.d"` | 종료코드 0 |
 | G-S4.19 | TC-S4.T3.e | `pnpm -C apps/server test -t "TC-S4.T3.e" && pnpm -C apps/server test:both-runtimes -t "TC-S4.T3.e"` | 종료코드 0 |
+| G-S4.20 | TC-S4.T3.f | `pnpm -C apps/server test:both-runtimes -t "TC-S4.T3.f"` | 종료코드 0 |
 
 `node scripts/gate.mjs S4 --seal`
 

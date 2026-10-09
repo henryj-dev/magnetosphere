@@ -139,6 +139,7 @@ export const GATES = {
       { id: "G-S4.17", how: "cmd", desc: "TC-S4.T3.d 모든 패키지 타입 검사", cmd: "pnpm -r typecheck" },
       { id: "G-S4.18", how: "test", desc: "TC-S4.T2.d 다른 AAD 로 복호화 거부", cmd: 'pnpm -C packages/runtime test -t "TC-S4.T2.d"' },
       { id: "G-S4.19", how: "test", desc: "TC-S4.T3.e /api 본문 64KB 상한 (Node·Workers)", cmd: 'pnpm -C apps/server test -t "TC-S4.T3.e" && pnpm -C apps/server test:both-runtimes -t "TC-S4.T3.e"' },
+      { id: "G-S4.20", how: "test", desc: "TC-S4.T3.f 보안 헤더와 SPA CSP (Node·Workers)", cmd: 'pnpm -C apps/server test:both-runtimes -t "TC-S4.T3.f"' },
     ],
   },
   S5: {

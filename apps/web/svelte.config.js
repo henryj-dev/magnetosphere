@@ -6,5 +6,21 @@ import adapter from "@sveltejs/adapter-static";
 export default {
   kit: {
     adapter: adapter({ pages: "build", assets: "build", fallback: "index.html", strict: true }),
+    // 빌드가 넣는 인라인 부트스트랩 스크립트의 해시를 <meta> CSP 에 적는다. 스크립트·스타일은 자기 출처와 그 해시만 돈다.
+    // frame-ancestors 처럼 <meta> 로 못 거는 지시어는 서버(apps/server, hono/secure-headers)가 응답 헤더로 건다 (TC-S4.T3.f).
+    csp: {
+      mode: "hash",
+      directives: {
+        "default-src": ["self"],
+        "script-src": ["self"],
+        // SvelteKit 라우트 안내 요소(svelte-announcer)가 실행 중에 style 속성을 단다. 스타일만 인라인을 허용한다
+        "style-src": ["self", "unsafe-inline"],
+        "img-src": ["self", "data:"],
+        "connect-src": ["self"],
+        "object-src": ["none"],
+        "base-uri": ["self"],
+        "form-action": ["self"],
+      },
+    },
   },
 };
