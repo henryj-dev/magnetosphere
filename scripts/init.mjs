@@ -94,11 +94,20 @@ export const NEXT_STEPS = [
   "[init]    .env.setup 의 OmniRoute 비밀번호로는 관리 토큰도 만들 수 있어 회원 앱 환경에 남겨 두지 않는다.",
 ].join("\n");
 
+export const USAGE = "사용법: node scripts/init.mjs [--dir <폴더>] [--db sqlite|mysql|postgres] [--url <공개 주소>]";
+
+/** 루프백이 아닌 http:// 공개 주소. 세션 쿠키·비밀번호가 평문으로 오간다 */
+export function insecureUrl(url) {
+  const u = new URL(url);
+  return u.protocol === "http:" && !["localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
+}
+
 function parseArgs(argv) {
   const out = { dir: process.cwd(), db: "sqlite", url: "http://localhost" };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     const v = argv[i + 1];
+    if (["--dir", "--db", "--url"].includes(k) && (v === undefined || v.startsWith("--"))) throw new Error(`${k} 뒤에 값이 없다`);
     if (k === "--dir") out.dir = v;
     else if (k === "--db") out.db = v;
     else if (k === "--url") out.url = v;
@@ -115,7 +124,7 @@ export function main(argv) {
     args = parseArgs(argv);
     files = render(args);
   } catch (e) {
-    console.error(`init: ${e.message}`);
+    console.error(`init: ${e.message}\n${USAGE}`);
     return 2;
   }
   const envPath = path.join(args.dir, ".env");
@@ -129,6 +138,9 @@ export function main(argv) {
   fs.writeFileSync(envPath, files.env, { mode: 0o600, flag: "wx" });
   fs.writeFileSync(setupPath, files.setup, { mode: 0o600, flag: "wx" });
   console.log(NEXT_STEPS);
+  if (insecureUrl(args.url)) {
+    console.error(`[init] 경고: 공개 주소 ${new URL(args.url).origin} 가 http:// 다. 세션 쿠키·비밀번호가 평문으로 오간다. 도메인을 정해 https:// 로 쓴다 (--url https://<도메인>).`);
+  }
   return 0;
 }
 

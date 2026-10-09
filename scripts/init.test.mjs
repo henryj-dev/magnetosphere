@@ -55,6 +55,26 @@ test("TC-S6.T1.a 필수 값이 모두 들어간다", () => {
   }
 });
 
+test("TC-S6.T1.a 인자 검사: http 공개 주소 경고, 값 없는 인자는 사용법과 종료코드 2", () => {
+  // 루프백이 아닌 http:// 는 만들되 경고한다. https·localhost 는 경고하지 않는다
+  const warned = runInit(tmp(), "--url", "http://llm.example.com");
+  assert.equal(warned.status, 0);
+  assert.match(warned.stderr, /경고: 공개 주소 http:\/\/llm\.example\.com 가 http:\/\//);
+  for (const url of ["https://llm.example.com", "http://localhost:8080", "http://127.0.0.1"]) {
+    const r = runInit(tmp(), "--url", url);
+    assert.equal(r.status, 0, url);
+    assert.doesNotMatch(r.stderr, /경고/, url);
+  }
+  // --dir 뒤에 값이 없으면 스택 트레이스 대신 사용법, 종료코드 2
+  for (const args of [["--dir"], ["--dir", "--db", "mysql"], ["--url"]]) {
+    const r = spawnSync(process.execPath, [INIT, ...args], { encoding: "utf8", cwd: tmp() });
+    assert.equal(r.status, 2, args.join(" "));
+    assert.match(r.stderr, /뒤에 값이 없다/);
+    assert.match(r.stderr, /사용법: node scripts\/init\.mjs/);
+    assert.doesNotMatch(r.stderr, /\n\s+at /, "스택 트레이스");
+  }
+});
+
 test("TC-S6.T1.b 두 번 생성한 비밀 값이 서로 다르다", () => {
   const [a, b] = [tmp(), tmp()];
   assert.equal(runInit(a).status, 0);
