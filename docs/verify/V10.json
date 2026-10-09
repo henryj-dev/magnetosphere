@@ -1,0 +1,56 @@
+{
+  "item": "V10",
+  "question": "회원 앱이 비밀번호만으로 oma_live_ 관리 토큰을 자동 발급할 수 있는가, 그리고 1·2단계 관리 호출 7개에 필요한 최소 범위는 무엇인가",
+  "answer": {
+    "minScope": "write",
+    "mintApi": {
+      "exists": true,
+      "route": "POST /api/cli/connect",
+      "body": "{ password, name, scope: read|write|admin, expiresInDays: 1~3650 }",
+      "auth": "공개 경로. 관리 비밀번호로만 보호하고 실패가 쌓이면 잠근다(429). 쿠키·Origin 헤더 필요 없음",
+      "response": "{ success, token: \"oma_live_…\"(한 번만 표시), id: \"tok_…\", name, scope, expiresAt }",
+      "alternative": "대시보드 쿠키 + Origin 또는 admin 토큰으로 POST /api/cli/tokens { name, scope, expiresInDays } (admin 범위 필요)",
+      "revoke": "DELETE /api/cli/tokens/{id} (admin 범위 또는 대시보드 쿠키). 지워도 목록에 revokedAt 이 찍힌 채 남는다"
+    },
+    "matrix": {
+      "columns": ["createKey POST /api/keys", "listKeys GET /api/keys", "patchKey PATCH /api/keys/{id} isActive", "deleteKey DELETE /api/keys/{id}", "setBudget POST /api/usage/budget", "analytics GET /api/usage/analytics", "callLogs GET /api/usage/call-logs"],
+      "read": [403, 200, 403, 403, 403, 200, 200],
+      "write": [201, 200, 200, 200, 200, 200, 200],
+      "admin": [201, 200, 200, 200, 200, 200, 200],
+      "sk-no-manage": [403, 403, 403, 403, 403, 403, 403]
+    },
+    "lowerScope": "read (키 생성·PATCH·삭제·예산 설정이 403 \"Access token scope 'read' is insufficient; 'write' required.\")",
+    "tokenScopeVisibility": {
+      "tokenListExposesScope": true,
+      "detail": "GET /api/cli/tokens 가 토큰마다 { id, name, scope, tokenPrefix, createdAt, lastUsedAt, expiresAt, revokedAt } 를 준다. 단 이 목록은 admin 범위가 필요해 write 토큰으로는 403 이다",
+      "forTcS5T3b": "회원 앱이 자기 write 토큰의 범위를 확인하려면 GET /api/cli/whoami 를 쓴다. 어떤 범위든 200 { viaAccessToken, id, name, scope, expiresAt } 를 준다. 목록으로 확인하려면 대시보드 쿠키나 admin 토큰이 필요하다"
+    },
+    "providerCredentials": {
+      "directExposureAtMinScope": false,
+      "detail": "write 토큰의 GET /api/providers 는 apiKey 를 가려서 준다(\"mock-ups****-key\"). 제공자 PATCH 는 write 로 403(admin 필요). /api/db-backups/export, /api/settings/export-json 은 write·admin 토큰 모두 401. 키 원문 보기 /api/keys/{id}/reveal 은 403 (\"API key reveal is disabled\")"
+    },
+    "privilegeEscalation": {
+      "found": true,
+      "detail": "write 토큰으로 만든 sk- 키에 PATCH /api/keys/{id} {\"scopes\":[\"manage\"]} 가 200 으로 통한다. manage 범위 sk- 키는 POST /api/cli/tokens 로 admin 토큰을 만들 수 있다(200). 즉 write 토큰을 가진 쪽은 두 번의 호출로 admin 이 된다. admin 은 제공자 연결 PATCH(baseUrl 변경 등)가 가능하므로, 회원 앱이 뚫리면 제공자 키가 새는 범위를 write 로 줄인다는 5.8의 효과는 OmniRoute 3.8.51 에서 실질적으로 없다",
+      "mitigationIdeas": [
+        "5.7 정합성 점검에서 OmniRoute 키 목록의 scopes 에 manage·admin 이 있는 키를 찾으면 관리자에게 알린다(회원 앱은 scopes 를 절대 쓰지 않는다)",
+        "회원 앱의 PATCH /api/keys/{id} 본문을 isActive 등 허용 필드로 제한한다(앱 자체가 뚫린 경우에는 막지 못함)",
+        "OmniRoute 업스트림에 write 토큰이 키 scopes 를 올리지 못하게 해 달라고 보고하는 것을 검토"
+      ]
+    },
+    "designFit": "4.7 3단계 부트스트랩(INITIAL_PASSWORD → 최소 범위 토큰 자동 발급)은 POST /api/cli/connect 하나로 그대로 된다. 대시보드 로그인도 필요 없다. 토큰 붙여 넣기 경로는 자동 발급이 안 되는 배포(Workers 등)용으로만 남는다"
+  },
+  "evidence": [
+    "node spikes/v10/run.mjs → read/write/admin/sk-no-manage 4행 표 (2026-10-09, omni-phase0 3.8.51, 127.0.0.1:20140)",
+    "node spikes/v10/run.mjs --assert min → 종료코드 0 (write 7개 모두 2xx)",
+    "node spikes/v10/run.mjs --assert lower-fails → 종료코드 0 (read 가 4개 403)",
+    "/tmp/omni-docs/openapi.yaml 4180–4266: /api/cli/connect, /api/cli/whoami, /api/cli/tokens, /api/cli/tokens/{id}",
+    "/tmp/omni-docs/MANAGEMENT-AUTH.md: 범위 표, 'password bootstrap defaults here (admin)', 오류 메시지 형식",
+    "curl: write 토큰 GET /api/cli/tokens → 403 AUTH_SCOPE 'admin' required; GET /api/cli/whoami → 200 scope=write",
+    "curl: write 토큰 PATCH /api/providers/{id} → 403 'admin' required; GET /api/providers → apiKey 가려짐",
+    "curl: write 토큰으로 만든 키에 PATCH {scopes:[manage]} → 200, 그 sk- 키로 POST /api/cli/tokens scope=admin → 200 (토큰은 곧바로 회수)"
+  ],
+  "blocking": false,
+  "was_blocking": false,
+  "resolved_in": null
+}

@@ -1,0 +1,74 @@
+{
+  "item": "V16",
+  "question": "Caddy 가 OmniRoute 로 넘길 /v1 경로 허용 목록은 무엇이고, /v1 아래 관리 별칭 중 막아야 할 경로는 무엇인가? (Claude Code·Codex·Cursor 실제 요청 기준)",
+  "answer": {
+    "allow": [
+      "/v1/messages",
+      "/v1/messages/count_tokens",
+      "/v1/chat/completions",
+      "/v1/completions",
+      "/v1/responses",
+      "/v1/responses/*",
+      "/v1/embeddings",
+      "/v1/models",
+      "/v1/models/*"
+    ],
+    "deny": [
+      "/v1",
+      "/v1/management/proxies",
+      "/v1/management/proxies/assignments",
+      "/v1/management/proxies/bulk-assign",
+      "/v1/management/proxies/health",
+      "/v1/management/proxy-subscriptions",
+      "/v1/management/proxy-subscriptions/x/refresh",
+      "/v1/session-leases",
+      "/v1/ws",
+      "/v1/registered-keys",
+      "/v1/registered-keys/x",
+      "/v1/registered-keys/x/revoke",
+      "/v1/combos",
+      "/v1/accounts/x/limits",
+      "/v1/providers/x/limits",
+      "/v1/agents/credentials",
+      "/v1/agents/health",
+      "/v1/agents/tasks",
+      "/v1/agents/tasks/x",
+      "/v1/quotas/check",
+      "/v1/issues/report",
+      "/v1/provider-plugin-manifest",
+      "/v1/explain/routing",
+      "/v1/search/analytics",
+      "/v1/auto-combo/x/candidates",
+      "/v1/vscode/x",
+      "/v1/vscode/x/models",
+      "/v1/vscode/raw/x/chat/completions"
+    ],
+    "observed": {
+      "claude": [
+        "HEAD /api/hello",
+        "POST /v1/messages",
+        "GET /v1/models"
+      ],
+      "codex": [
+        "POST /v1/responses"
+      ]
+    },
+    "notes": "OmniRoute 3.8.51 의 루트 /v1/* 는 OpenAPI 의 /api/v1/* 를 그대로 비춘 별칭이다 (OpenAPI 에는 /api/v1/* 만 적혀 있다). 그래서 /v1 접두사를 통째로 열면 관리·조회 경로까지 열린다. 회원 키로 직접 찍어 보니 /v1/registered-keys, /v1/combos, /v1/accounts/x/limits, /v1/providers/x/limits, /v1/explain/routing, /v1/search/analytics, /v1/quotas/check, /v1/provider-plugin-manifest, /v1/vscode/x/models, /v1/batches, /v1/files 가 200 을 돌려줬다. /v1/management/* 와 /v1/agents/* 만 403 이다. 허용 목록은 회원 도구 추론에 필요한 경로만 담는다. 실측 경로(messages·models·responses) + count_tokens(Claude Code 가 토큰 계산에 쓰는 보조 경로) + Cursor·OpenAI 호환 도구가 쓰는 chat/completions·completions·embeddings + 응답 조회용 responses/<id>, 모델 단건 조회 models/<id>. 글롭은 * 한 구간만 쓰고 ** 는 쓰지 않는다. 모델 이름에 / 가 들어가는 경우(mko/mock-gpt) /v1/models/<provider>/<model> 은 허용하지 않는다. OmniRoute 도 이 경로에 404 를 주므로 잃는 기능이 없다. deny 에는 관리·조회 별칭(management·session-leases·ws·registered-keys·combos·limits·agents·quotas·explain·analytics·plugin-manifest·auto-combo)과 경로에 토큰을 싣는 우회 인증 경로(vscode/<token>)를 넣었다. images·audio·rerank·moderations·search·web/fetch·relay·providers/<p>/*·batches·files·me/status 같은 나머지 경로는 관리 별칭은 아니지만 허용 목록에 없으므로 Caddy 에서 404 로 닫힌다. 필요해지면 하나씩 추가한다 (batches·files 는 키 간 데이터 노출 여부를 따로 확인해야 한다). Claude Code 의 HEAD /api/hello 는 시작 시 연결 예열용이고 실패를 무시한다 (바이너리에서 확인: fetch(...).catch(()=>{})). /v1 밖이라 Caddy 가 회원 앱으로 보내며, 허용 목록 대상이 아니다. check.mjs covers 는 /v1 경로만 판정하고 /v1 밖 경로는 skip 으로 표시만 한다. Claude Code 의 GET /v1/models 는 CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1 일 때 응답 뒤에 비동기로 나간다. Cursor 는 자동화할 수 없어 실행하지 않았다. Cursor 는 OpenAI 호환 base URL 로 /v1/chat/completions·/v1/models 를 쓰는 것으로 알려져 있고 둘 다 허용 목록에 있다. 사람이 한 번 실행해 로그에 남기면 covers 로 다시 확인할 수 있다."
+  },
+  "evidence": [
+    "환경: 시험용 OmniRoute 3.8.51 (127.0.0.1:20140, 컨테이너 omni-phase0). mock 상류를 mko/mock-gpt(OpenAI 호환)·mka/claude-mock(Anthropic 호환)로 등록. 회원 키는 POST /api/keys 로 새로 만든 v16-paths (검증 뒤 삭제).",
+    "로깅 프록시 spikes/v16/log-proxy.mjs: 127.0.0.1:18090 → :20140, 본문을 그대로 흘려보냄 (SSE 스트림이 프록시 경유·직접 호출에서 같은 청크로 오는 것 확인). 요청마다 {method, path(쿼리 제외), status, client} 만 spikes/v16/paths.log 에 기록. 헤더·본문은 기록하지 않음.",
+    "Claude Code: 빈 임시 디렉터리에서 --setting-sources project + --settings env 와 프로세스 env 모두 ANTHROPIC_BASE_URL=http://127.0.0.1:18090, ANTHROPIC_AUTH_TOKEN=<키>, 모델 mka/claude-mock, CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1. `claude -p \"say hi\" --max-turns 1` 종료코드 0, 응답 'hello from mock'. 프록시 로그: HEAD /api/hello 401, POST /v1/messages 200, GET /v1/models 200. 요청이 프록시에 도착했으므로 localhost:20128 로는 가지 않음.",
+    "Codex CLI 0.159.2: 임시 CODEX_HOME 의 config.toml 에 model_provider(base_url http://127.0.0.1:18090/v1, env_key, wire_api=responses), model mko/mock-gpt. `codex exec --skip-git-repo-check \"say hi\" < /dev/null` 종료코드 0, 응답 'hello from mock'. 프록시 로그: POST /v1/responses 200 하나뿐 (/v1/models 호출 없음). stdin 을 닫지 않으면 입력을 기다리며 멈춤.",
+    "curl 직접 호출(프록시 경유): GET /v1/models 200, POST /v1/messages/count_tokens 200, POST /v1/chat/completions 200 (비스트림·SSE 각 1회), POST /v1/responses 200.",
+    "의도적 음성 탐침은 spikes/v16/probes.log 로 분리: GET /v1/models/mko/mock-gpt 404 (모델 이름의 / 때문에 단건 조회 불가), GET /v1/management/proxies 403.",
+    "회원 키로 :20140 에 직접 GET (관리 별칭 노출 확인): /v1/management/proxies 403, /v1/management/proxy-subscriptions 403, /v1/agents/credentials 403, /v1/agents/tasks 403, /v1/session-leases 405, /v1/ws 426, /v1/registered-keys 200, /v1/combos 200, /v1/accounts/x/limits 200, /v1/providers/x/limits 200, /v1/quotas/check 200, /v1/me/status 200, /v1/provider-plugin-manifest 200, /v1/explain/routing 200, /v1/search/analytics 200, /v1/vscode/x/models 200, /v1/batches 200, /v1/files 200, /v1 200, /v1/zzz-nope 404. → /v1 접두사를 통째로 열면 회원 키 하나로 다른 키 목록·한도·라우팅 정보를 읽을 수 있음.",
+    "OpenAPI(/tmp/omni-docs/openapi.yaml)에는 /api/v1/* 경로만 있고 루트 /v1/* 는 그 별칭. deny 는 그중 관리·조회·우회 인증 경로를 구체 경로로 적음 ({param} 자리는 x).",
+    "Cursor: 자동화할 수 없어 실행하지 않음 (not run).",
+    "`node spikes/v16/check.mjs covers` 종료코드 0 (/v1 경로 5개 모두 허용, /api/hello 는 skip). `node spikes/v16/check.mjs deny` 종료코드 0 (관리 경로 28개 모두 허용 목록 밖).",
+    "음성 대조: paths.log 복사본에 GET /v1/registered-keys 한 줄 추가 후 `covers --log <복사본>` 종료코드 1 (MISS /v1/registered-keys). `deny --allow-extra \"/v1/**\"` 종료코드 1 (27개 LEAK, /v1 자체만 안 걸림). `deny --allow-extra \"/v1/*\"` 종료코드 1 (5개 LEAK)."
+  ],
+  "blocking": false,
+  "was_blocking": false,
+  "resolved_in": null
+}

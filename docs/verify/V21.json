@@ -1,0 +1,63 @@
+{
+  "item": "V21",
+  "question": "OmniRoute 3.8.51을 운영 모드(NODE_ENV=production)로 띄울 때 꼭 넣어야 하는 비밀 값은 무엇이고, 설치 스크립트는 각각을 어떻게 만들어야 하나?",
+  "answer": {
+    "secrets": [
+      {
+        "name": "INITIAL_PASSWORD",
+        "purpose": "최초 관리(대시보드) 비밀번호. 첫 부팅 때 bcrypt 해시로 DB에 저장되고, 회원 앱이 이 값으로 /api/auth/login 에 로그인해 관리 토큰을 만든다 (4.7 부트스트랩).",
+        "required": true,
+        "generate": "openssl rand -hex 24 (CHANGEME 금지: 루프백이 아닌 곳에서 로그인하면 403)",
+        "evidence": "빼면 서버는 뜨지만 '[bootstrap] ⚠️  INITIAL_PASSWORD is not set' 경고가 찍히고 /api/auth/login 이 403 {\"needsSetup\":true} 를 돌려준다 → 사람 없이 부트스트랩 불가. scripts/build/bootstrap-env.mjs:328-329, src/app/api/auth/login/route.ts:143-157, src/lib/auth/managementPassword.ts:40,82 (실측: spikes/v21/run.mjs each)"
+      },
+      {
+        "name": "JWT_SECRET",
+        "purpose": "대시보드 세션 쿠키(JWT) 서명 키",
+        "required": false,
+        "generate": "openssl rand -base64 48 (32자 이상. 32자 미만이면 시작 실패)",
+        "evidence": "비어 있으면 자동 생성해 DATA_DIR/server.env 와 DB에 저장한다 ('✨ JWT_SECRET auto-generated'). scripts/build/bootstrap-env.mjs:263-267, src/instrumentation-node.ts:125-135, src/shared/utils/secretsValidator.ts:32-38 (required:false, minLength 32)"
+      },
+      {
+        "name": "API_KEY_SECRET",
+        "purpose": "API 키 CRC용 HMAC 비밀 값 (저장된 API 키 검증에 쓰임)",
+        "required": false,
+        "generate": "openssl rand -hex 32 (16자 이상. 16자 미만이면 '❌ STARTUP: Invalid web runtime environment' 로 종료코드 1)",
+        "evidence": "secretsValidator 는 required:true 로 적어 두었지만 검증(instrumentation-node.ts:371) 전에 ensureSecrets(instrumentation-node.ts:369, 138-150)와 bootstrap-env.mjs:291-295 가 자동 생성하므로 빠져도 뜬다. src/shared/utils/secretsValidator.ts:39-45, src/lib/env/runtimeEnv.ts:140-170"
+      },
+      {
+        "name": "STORAGE_ENCRYPTION_KEY",
+        "purpose": "DB에 저장하는 제공자 자격 증명 암호화 키 (AES, scrypt 파생)",
+        "required": false,
+        "generate": "openssl rand -hex 32",
+        "evidence": "비어 있으면 첫 부팅 때 자동 생성해 DATA_DIR/server.env 에 저장한다. 단, 암호화된 자격 증명이 이미 있는데 키가 없으면 자동 생성을 거부하고, 키가 다르면 '⛔ STORAGE_ENCRYPTION_KEY does not match' 로 막는다. scripts/build/bootstrap-env.mjs:270-283, 332-400, .env.example:90-93"
+      },
+      {
+        "name": "OMNIROUTE_WS_BRIDGE_SECRET",
+        "purpose": "내부 Codex Responses WebSocket 브리지(/api/internal/codex-responses-ws) 인증 값",
+        "required": false,
+        "generate": "openssl rand -base64 32",
+        "evidence": "문서(DOCKER_GUIDE.md:352, .env.example:412-417)는 '운영 필수'라고 하지만, 이미지의 진입점 scripts/dev/standalone-server-ws.mjs:52 가 비어 있으면 프로세스마다 randomUUID() 로 채운다. 단일 프로세스 컨테이너에서는 빠져도 뜨고 경고도 없다. 검사 위치: src/app/api/internal/codex-responses-ws/route.ts:271-283, 773-777"
+      }
+    ],
+    "other_env": {
+      "NODE_ENV": "production. 이미지 기본값이 이미 production (Dockerfile:224)",
+      "REQUIRE_API_KEY": "true 로 명시. 이미지 기본값은 true(Dockerfile:250)지만 .env.example:404 는 false 라서 .env 를 복사해 쓰면 false 가 된다",
+      "AUTH_COOKIE_SECURE": "HTTPS 뒤에서 대시보드를 쓰면 true. 대시보드를 127.0.0.1 + SSH 터널로만 열면 false 유지 (.env.example:394-397)",
+      "STORAGE_ENCRYPTION_KEY_VERSION": "v1 (기본값). 키를 바꿀 때만 올린다 (.env.example:95-98)",
+      "DATA_DIR": "/app/data (이미지 기본값). 자동 생성된 비밀 값이 DATA_DIR/server.env 에 저장되므로 볼륨으로 유지해야 한다",
+      "OMNIROUTE_PEER_STAMP_TOKEN": "설정하지 않는다. 부팅마다 자동 생성 (.env.example:419-425)",
+      "PORT": "20128 (이미지 기본값)"
+    }
+  },
+  "evidence": [
+    "소스: diegosouzapw/OmniRoute 태그 v3.8.51 (gh api contents?ref=v3.8.51) — .env.example, Dockerfile, scripts/build/bootstrap-env.mjs, src/instrumentation-node.ts, src/lib/env/runtimeEnv.ts, src/shared/utils/secretsValidator.ts, src/lib/auth/managementPassword.ts, src/app/api/auth/login/route.ts, src/app/api/internal/codex-responses-ws/route.ts, scripts/dev/standalone-server-ws.mjs. 문서: DOCKER_GUIDE.md",
+    "실측(이미지 diegosouzapw/omniroute:3.8.51, 볼륨 없음): 비밀 값을 하나도 안 넣어도 /livez 200 이 2초 안에 나온다. JWT_SECRET·STORAGE_ENCRYPTION_KEY·API_KEY_SECRET 은 '[bootstrap] ✨ ... auto-generated (first run)' 로 자동 생성되고 /app/data/server.env 에 저장된다",
+    "실측: INITIAL_PASSWORD 없이 띄우면 '[bootstrap] ⚠️  INITIAL_PASSWORD is not set — using default 'CHANGEME'' 경고 후 POST /api/auth/login {\"password\":\"CHANGEME\"} → 403 {\"error\":\"No password configured. Complete onboarding first.\",\"needsSetup\":true}",
+    "실측: INITIAL_PASSWORD=<무작위> 로 띄우면 '[AUTH] Migrated INITIAL_PASSWORD to bcrypt hash during startup' 후 로그인 200 {\"success\":true}",
+    "실측: API_KEY_SECRET=short(5자) → '❌ STARTUP: Invalid web runtime environment', '\"API_KEY_SECRET\" is too short (5 chars, minimum 16)' 로 종료코드 1. 넣는다면 길이 규칙을 지켜야 한다",
+    "재현: node spikes/v21/run.mjs all (TC-S1.T5.a), node spikes/v21/run.mjs each (TC-S1.T5.b)"
+  ],
+  "blocking": false,
+  "was_blocking": false,
+  "resolved_in": null
+}

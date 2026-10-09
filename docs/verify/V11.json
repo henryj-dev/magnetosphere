@@ -1,0 +1,27 @@
+{
+  "item": "V11",
+  "question": "PATCH isActive=false 로 키를 끄면 같은 키의 다음 요청이 곧바로 거부되는가",
+  "answer": {
+    "immediate": true,
+    "delayMs": 0,
+    "rejection": "403 { error: { code: \"permission_denied\", message: \"This API key is disabled\" } }",
+    "observations": [
+      { "when": "끄기 전", "status": 200 },
+      { "when": "PATCH 응답 직후 (0ms)", "status": 403 },
+      { "when": "1s 후", "status": 403 },
+      { "when": "5s 후", "status": 403 }
+    ],
+    "patchLatencyMs": "6~8",
+    "reenable": "PATCH isActive=true 직후 첫 요청도 200. 5.2 발급 순서(끄기 → 예산 → 켜기)에 지연을 둘 필요가 없다",
+    "designFit": "5.7 '정지는 반영 후 완료' 전제가 성립한다. PATCH 가 2xx 를 돌려준 시점을 반영 완료로 보면 된다",
+    "scope": "OmniRoute 인스턴스 1개 기준. 여러 인스턴스로 띄우는 경우는 확인하지 않았다"
+  },
+  "evidence": [
+    "node spikes/v11/run.mjs --assert → 종료코드 0 (2026-10-09, omni-phase0 3.8.51, 모델 mko/mock-gpt, /v1/chat/completions 비스트리밍)",
+    "같은 스크립트를 두 번 돌려 두 번 모두 0ms·1s·5s 전부 403 permission_denied",
+    "PATCH 는 write 범위 oma_live_ 토큰으로 호출 (V10 의 minScope 와 같은 조건)"
+  ],
+  "blocking": false,
+  "was_blocking": false,
+  "resolved_in": null
+}
