@@ -1,0 +1,100 @@
+{
+  "phase": "S0",
+  "sealed": true,
+  "head": "b9f9473664ef21010fcf641d41554e1ec8cf9d0c",
+  "at": "2026-10-09T08:40:08.804Z",
+  "waived": false,
+  "reason": null,
+  "checks": [
+    {
+      "id": "G-S0.1",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-S0.2",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S0.3",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S0.4",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S0.5",
+      "ok": true,
+      "measured": "통과 12",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S0.6",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S0.7",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S0.8",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S0.9",
+      "ok": true,
+      "measured": 1,
+      "limit": "종료코드 1"
+    },
+    {
+      "id": "G-S0.10",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S0.11",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S0.12",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S0.13",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S0.14",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S0.15",
+      "ok": true,
+      "measured": "통과 23",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    }
+  ]
+}
