@@ -1,51 +1,9 @@
 // 최초 설치 TC (pnpm test). Node 진입점을 실제로 띄우고 콘솔 출력(log)에서 설치 토큰을 읽는다.
 import { readFileSync } from "node:fs";
-import { createClient } from "@libsql/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { startNodeServer } from "../src/node.ts";
-import { fakeWebDir, makeTestEnv, type TestEnv } from "./helpers.ts";
+import { ADMIN, boot, closeAll, opened, post, sql, tokenIn } from "./helpers.ts";
 
-const ORIGIN = "http://localhost:3000";
-const ADMIN = { email: "Admin@Example.com", password: "correct horse battery", name: "관리자", publicBaseUrl: "https://llm.example.com" };
-
-interface Running {
-  t: TestEnv;
-  logs: string[];
-  base: string;
-  close(): Promise<void>;
-}
-
-const opened: Running[] = [];
-
-async function boot(t?: TestEnv): Promise<Running> {
-  const env = t ?? (await makeTestEnv());
-  const logs: string[] = [];
-  const s = await startNodeServer({ env: env.env, port: 0, hostname: "127.0.0.1", webDir: fakeWebDir(env.dir), log: (l) => logs.push(l) });
-  const r = { t: env, logs, base: `http://127.0.0.1:${s.port}`, close: () => s.close() };
-  opened.push(r);
-  return r;
-}
-
-const tokenIn = (logs: string[]) => logs.join("\n").match(/최초 설치 토큰: (\S+)/)?.[1];
-
-const post = (r: Running, path: string, body: unknown) =>
-  fetch(`${r.base}${path}`, { method: "POST", headers: { "content-type": "application/json", origin: ORIGIN }, body: JSON.stringify(body) });
-
-async function sql(t: TestEnv, q: string) {
-  const c = createClient({ url: `file:${t.dbFile}` });
-  try {
-    return (await c.execute(q)).rows;
-  } finally {
-    c.close();
-  }
-}
-
-afterEach(async () => {
-  for (const r of opened.splice(0)) {
-    await r.close();
-    r.t.cleanup();
-  }
-});
+afterEach(closeAll);
 
 describe("TC-S4.T4.a 설치 토큰은 한 번만 쓰인다", () => {
   it("관리자 생성 성공 → 같은 토큰으로 다시 /setup → 409", async () => {

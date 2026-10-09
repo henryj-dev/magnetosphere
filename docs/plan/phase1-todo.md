@@ -676,12 +676,13 @@ TC-S4.T2.d  다른 AAD(저장 자리 이름)로는 복호화하지 못한다 (S4
 - [ ] G-S4.4 ~ G-S4.6, G-S4.18 통과
 
 ### ☐ S4.T3 — Hono 서버와 SvelteKit SPA
-선행 S4.T1 · 산출 `apps/server/src/`, `apps/web/`, `tsconfig.json`, `apps/*/tsconfig.json`, `packages/*/tsconfig.json` · 되돌리기 커밋 3개
+선행 S4.T1 · 산출 `apps/server/src/`, `apps/web/`, `tsconfig.json`, `apps/*/tsconfig.json`, `packages/*/tsconfig.json` · 되돌리기 커밋 4개
 
 【작업】
 1. Hono 앱: `/api/auth/*`에 S3의 Better Auth 연결, `/api/*` 그 밖은 JSON 404, `/healthz`. Node 진입점과 Workers 진입점. 커밋.
 2. `apps/web`: SvelteKit, `adapter-static`, 루트 `+layout.ts`에 `ssr = false`, `fallback: 'index.html'`. 빌드 결과를 Node는 Hono 정적 제공, Workers는 정적 자산으로. 커밋.
 3. TypeScript 타입 검사 (S3 보안 리뷰에서 넘김). 루트 `tsconfig.json`과 패키지마다 `typecheck` 스크립트(`tsc --noEmit`. `apps/web`은 `.svelte` 파일을 보려고 `svelte-kit sync && svelte-check`, 아직 `src`가 없는 `packages/omniroute`는 `test ! -d src || tsc --noEmit`), 루트에서 `pnpm -r typecheck`. 루트 설정에 `erasableSyntaxOnly`를 켜 Node 타입 지우기가 못 돌리는 문법을 막는다. 모든 패키지(packages/db·auth·runtime·omniroute, apps/server·web) 통과. S4 를 열 때 `gates.config.mjs` S4 `outputs`에 tsconfig 경로를 넣는다. 커밋.
+4. `/api/*` 본문 상한 64KB (`hono/body-limit`, Node·Workers 같은 앱). 상한 검사가 chunked 본문을 새 Request 로 다시 담으면 Node 런타임의 소켓 주소를 옮긴다 (S4 보안 리뷰 M1). 커밋.
 
 【테스트】
 ```
@@ -697,10 +698,16 @@ TC-S4.T3.c  SPA 빌드에 서버 렌더링 산출이 없다
 TC-S4.T3.d  모든 패키지가 타입 검사를 통과한다
   단언:  pnpm -r typecheck → 종료코드 0. 패키지마다 typecheck 스크립트가 있음
   검출:  vitest·Node 타입 지우기는 타입 오류를 보지 않아, 잘못된 옵션 이름·반환 모양이 런타임에서야 드러나는 것 (S3 까지 타입 검사 없음)
+TC-S4.T3.e  /api 본문이 64KB 를 넘으면 413 이고 핸들러가 돌지 않는다 (S4 보안 리뷰 M1)
+  단언:  Node 에서 /api/setup·/api/auth/sign-in/email 에 64KB+1KB 본문(Content-Length, chunked 각각) → 413 {error:"payload_too_large"},
+         설치 토큰 미소비·user 0·rate_limit 0·session 0. 대조: 64KB-1KB 설치 본문은 201, chunked 작은 로그인 본문은 200 이고 세션 IP 가
+         소켓 주소(IPv6 루프백). Workers 도 큰 본문 413, 작은 본문은 처리(401)
+  검출:  인증 없이 수백 MB JSON 을 보내 c.req.json()·Better Auth 가 본문 전체를 메모리에 올려 프로세스가 죽는 것.
+         chunked 본문을 다시 담은 Request 에서 소켓 주소를 잃어 clientIp 가 null 이 되는 것
 ```
 
 【통과】
-- [ ] G-S4.7 ~ G-S4.9, G-S4.17 통과
+- [ ] G-S4.7 ~ G-S4.9, G-S4.17, G-S4.19 통과
 
 ### ☐ S4.T4 — 최초 설치 흐름
 선행 S4.T2, S4.T3 · 산출 `apps/server/src/setup/`, `apps/web/src/routes/setup/` · 되돌리기 커밋 1개
@@ -749,6 +756,7 @@ TC-S4.T4.d  관리자가 있으면 설치 토큰을 만들지 않는다
 | G-S4.16 | TC-S4.T1.e | `pnpm -C packages/runtime test -t "TC-S4.T1.e"` | 종료코드 0 |
 | G-S4.17 | TC-S4.T3.d | `pnpm -r typecheck` | 종료코드 0 |
 | G-S4.18 | TC-S4.T2.d | `pnpm -C packages/runtime test -t "TC-S4.T2.d"` | 종료코드 0 |
+| G-S4.19 | TC-S4.T3.e | `pnpm -C apps/server test -t "TC-S4.T3.e" && pnpm -C apps/server test:both-runtimes -t "TC-S4.T3.e"` | 종료코드 0 |
 
 `node scripts/gate.mjs S4 --seal`
 

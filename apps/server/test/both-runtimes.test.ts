@@ -7,6 +7,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { unstable_startWorker } from "wrangler";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { API_BODY_LIMIT } from "../src/app.ts";
 import { DEFAULT_WEB_DIR, startNodeServer } from "../src/node.ts";
 import { makeTestEnv, type TestEnv } from "./helpers.ts";
 
@@ -67,5 +68,20 @@ describe("TC-S4.T3.b Node 와 Workers 가 같은 빌드 결과를 제공한다",
       // Better Auth(+sso 플러그인)가 그 런타임에서 실제로 올라온다
       expect(await (await fetchFrom("/api/auth/ok")).json()).toEqual({ ok: true });
     }
+  });
+
+  it("TC-S4.T3.e Workers 도 /api 본문 64KB 초과는 413, 대조로 작은 본문은 처리한다", async () => {
+    const big = JSON.stringify({ email: "a@example.com", password: "x".repeat(API_BODY_LIMIT + 1024) });
+    for (const p of ["/api/setup", "/api/auth/sign-in/email"]) {
+      const res = (await worker.fetch(`http://localhost${p}`, { method: "POST", headers: { "content-type": "application/json", origin: "http://localhost:3000" }, body: big })) as unknown as Response;
+      expect(res.status, p).toBe(413);
+      expect(await res.json()).toEqual({ error: "payload_too_large" });
+    }
+    const small = (await worker.fetch("http://localhost/api/auth/sign-in/email", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://localhost:3000" },
+      body: JSON.stringify({ email: "nobody@example.com", password: "wrong-password" }),
+    })) as unknown as Response;
+    expect(small.status).toBe(401);
   });
 });

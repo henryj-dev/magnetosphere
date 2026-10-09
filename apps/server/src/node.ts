@@ -45,6 +45,7 @@ export async function startNodeServer(opts: NodeServerOptions = {}) {
       assets: staticAssets(opts.webDir ?? env.WEB_DIR ?? DEFAULT_WEB_DIR),
       issueSetupTokenOnStatus: false,
       log,
+      carryRequest: (from, to) => runtime.carryPeer(from, to),
     });
     const port = opts.port ?? Number(env.PORT ?? 3000);
     await ensureSetupToken(services.db, { rotate: true, log });

@@ -27,6 +27,8 @@ export interface NodeRuntimeOptions {
 export interface NodeRuntime extends Runtime {
   /** 요청과 소켓 상대 주소를 묶는다. listen() 이 부른다 */
   bindPeer(req: Request, peer: string | undefined): void;
+  /** 같은 요청을 새 Request 로 다시 만들었을 때(본문 상한 검사 등) 묶인 상대 주소를 옮긴다 */
+  carryPeer(from: Request, to: Request): void;
 }
 
 /** DATABASE_URL 로 DB 에 붙는다. 세션 시간대는 UTC */
@@ -114,6 +116,10 @@ export function createNodeRuntime(opts: NodeRuntimeOptions = {}): NodeRuntime {
     },
     bindPeer(req, peer) {
       if (peer) peers.set(req, peer);
+    },
+    carryPeer(from, to) {
+      const peer = peers.get(from);
+      if (peer) peers.set(to, peer);
     },
     async close() {
       for (const t of timers) clearTimeout(t);
