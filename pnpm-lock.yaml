@@ -19,6 +19,9 @@ importers:
       '@magnetosphere/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@magnetosphere/omniroute':
+        specifier: workspace:*
+        version: link:../../packages/omniroute
       '@magnetosphere/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime

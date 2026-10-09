@@ -8,12 +8,14 @@
     "test": "vitest run",
     "test:both-runtimes": "vitest run --config vitest.both-runtimes.config.ts",
     "test:db": "node scripts/test-db.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:contract": "vitest run --config vitest.contract.config.ts"
   },
   "dependencies": {
     "@hono/node-server": "2.1.1",
     "@magnetosphere/auth": "workspace:*",
     "@magnetosphere/db": "workspace:*",
+    "@magnetosphere/omniroute": "workspace:*",
     "@magnetosphere/runtime": "workspace:*",
     "better-auth": "1.7.7",
     "drizzle-orm": "0.45.4",

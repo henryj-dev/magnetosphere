@@ -50,5 +50,7 @@ export async function buildServices(rt: Runtime, opts: ServiceOptions): Promise<
     waitUntil: opts.waitUntil,
     onMailError: (e, info) => console.error(`[mail] ${info.to} 에게 "${info.subject}" 를 보내지 못했다`, e),
   });
-  return { db, auth, cipher };
+  // OmniRoute 연결은 선택이다. 없으면 설치 때 토큰 붙여 넣기로 간다 (setup/omniroute.ts)
+  const omniroute = { baseUrl: rt.secret("OMNIROUTE_URL") || null, initialPassword: rt.secret("OMNIROUTE_INITIAL_PASSWORD") || null };
+  return { db, auth, cipher, omniroute };
 }

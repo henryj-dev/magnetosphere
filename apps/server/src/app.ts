@@ -2,7 +2,7 @@
 //   /healthz       상태 확인
 //   /api/auth/*    packages/auth 의 감싼 handler (clientIp 를 런타임 어댑터에서 받는다, S3 보안 리뷰 M2)
 //                  관리자가 없는 동안(설치 전)은 가입을 403 으로 막는다 (TC-S4.T4.e). 기본 가입 정책이 invite_only 다 (계획서 4.2)
-//   /api/setup     최초 설치 (setup/)
+//   /api/setup     최초 설치 (setup/). /api/setup/omniroute 는 OmniRoute 토큰 상태·붙여 넣기 (관리자 세션)
 //   /api/*         그 밖은 JSON 404. 모르는 API 경로가 index.html 200 이 되면 클라이언트가 오류를 성공으로 오인한다
 //   나머지         SPA 정적 파일 (apps/web 빌드). 없는 경로는 index.html (TC-S4.T3.a)
 // 모든 응답(SPA·API)에 보안 헤더를 단다 (TC-S4.T3.f). 스크립트·스타일 출처는 SPA 빌드가 <meta> CSP 로 건다
@@ -15,6 +15,7 @@ import { secureHeaders } from "hono/secure-headers";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import { adminExists } from "./setup/index.ts";
+import type { OmniRouteConfig } from "./setup/omniroute.ts";
 import { setupRoutes } from "./setup/routes.ts";
 
 /** /api/* 요청 본문 상한. 인증·설치 요청은 1KB 안팎이다 */
@@ -25,6 +26,8 @@ export interface Services {
   auth: { handler(req: Request): Promise<Response> };
   /** APP_ENCRYPTION_KEY 로 만든 암호화 유틸 */
   cipher: Cipher;
+  /** OmniRoute 주소와 부트스트랩 비밀번호 (OMNIROUTE_URL, OMNIROUTE_INITIAL_PASSWORD). 없으면 null */
+  omniroute: OmniRouteConfig;
 }
 
 export interface AppDeps {

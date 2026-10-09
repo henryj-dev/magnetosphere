@@ -3,8 +3,8 @@
 //   2. POST /api/setup 에서 토큰 + 이메일·비밀번호로 최초 관리자를 만든다 (role=admin, is_bootstrap_admin, 이메일 인증 완료).
 //   4. 회원이 도구에 넣을 공개 주소(public_base_url)를 저장한다.
 //   5. 메일 발송 설정(선택). 지금은 Resend 하나만 받고, API 키는 APP_ENCRYPTION_KEY 로 암호화해 둔다 (mail.ts).
-//   3. OmniRoute 부트스트랩(oma_live_ 토큰 발급·암호화 저장)은 S5 가 setup/omniroute.ts 로 만들어
-//      아래 "OmniRoute 부트스트랩 자리"에 붙인다. 관리자 생성과 같은 요청에서 돌지, 다음 화면에서 돌지는 S5 에서 정한다.
+//   3. OmniRoute 부트스트랩(oma_live_ 토큰 발급·암호화 저장, setup/omniroute.ts)은 관리자를 만든 같은 요청에서 돈다.
+//      실패해도 설치는 끝나고 응답의 omniroute 가 "manual_required" 다. 관리자가 로그인해 토큰을 붙여 넣는다 (routes.ts).
 // 관리자가 생긴 뒤에는 /api/setup 이 항상 409 다. 토큰도 다시 만들지 않는다.
 import { and, eq } from "drizzle-orm";
 import { hashPassword } from "better-auth/crypto";
@@ -12,6 +12,7 @@ import { findUserByEmail, normalizeEmail } from "@magnetosphere/db/src/users.ts"
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import { MAIL_API_KEY_AAD, MAIL_SETTINGS_KEY } from "./mail.ts";
+import type { OmniRouteStatus } from "./omniroute.ts";
 
 export const SETUP_TOKEN_KEY = "setup_token_hash";
 export const PUBLIC_BASE_URL_KEY = "public_base_url";
@@ -102,7 +103,7 @@ export interface SetupInput {
 }
 
 export type SetupResult =
-  | { ok: true; userId: string }
+  | { ok: true; userId: string; omniroute: OmniRouteStatus }
   | { ok: false; status: 400 | 401 | 409; error: string };
 
 const EMAIL_TAKEN = { ok: false, status: 409, error: "email_taken" } as const;
@@ -121,7 +122,16 @@ function invalid(input: Partial<SetupInput>): string | null {
   return null;
 }
 
-export async function runSetup(h: DbHandle, input: Partial<SetupInput>, cipher: () => Promise<Cipher>): Promise<SetupResult> {
+/**
+ * bootstrapOmniRoute: 관리자를 만든 뒤 부를 OmniRoute 부트스트랩 (setup/omniroute.ts). 예외를 던지지 않고 상태를 돌려준다.
+ * 없으면 "manual_required".
+ */
+export async function runSetup(
+  h: DbHandle,
+  input: Partial<SetupInput>,
+  cipher: () => Promise<Cipher>,
+  bootstrapOmniRoute?: (userId: string) => Promise<OmniRouteStatus>,
+): Promise<SetupResult> {
   if (await adminExists(h)) return { ok: false, status: 409, error: "already_set_up" };
   const stored = await readSetting(h, SETUP_TOKEN_KEY);
   const given = typeof input.token === "string" ? await sha256Hex(input.token.trim()) : "";
@@ -177,6 +187,7 @@ export async function runSetup(h: DbHandle, input: Partial<SetupInput>, cipher: 
     const c = await cipher();
     await writeSetting(h, MAIL_SETTINGS_KEY, { provider: "resend", from: v.mail.from.trim(), apiKey: await c.encrypt(v.mail.apiKey.trim(), MAIL_API_KEY_AAD) }, userId);
   }
-  // OmniRoute 부트스트랩 자리 (계획서 4.7 3번, S5 의 setup/omniroute.ts)
-  return { ok: true, userId };
+  // OmniRoute 부트스트랩 (계획서 4.7 3번). 관리자를 만든 뒤라 실패해도 관리자는 남는다 (TC-S5.T3.c)
+  const omniroute = bootstrapOmniRoute ? await bootstrapOmniRoute(userId) : "manual_required";
+  return { ok: true, userId, omniroute };
 }

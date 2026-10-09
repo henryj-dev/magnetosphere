@@ -850,7 +850,7 @@ TC-S5.T2.i  어댑터는 키 범위(scopes)를 보내지 않는다
 선행 S5.T2 · 산출 `apps/server/src/setup/omniroute.ts` · 되돌리기 커밋 1개
 
 【작업】
-1. 최초 설치 3단계: `INITIAL_PASSWORD`로 로그인해 V10의 최소 범위 토큰을 만들고 `crypto.ts`로 암호화해 `app_settings`에 저장. 자동 발급이 안 되는 환경은 토큰 붙여 넣기 입력. 저장 뒤 키 목록 호출로 연결 확인. 커밋.
+1. 최초 설치 3단계: 관리자를 만든 같은 `/setup` 요청에서 `INITIAL_PASSWORD`(회원 앱 환경 변수 `OMNIROUTE_INITIAL_PASSWORD`)로 `POST /api/cli/connect`를 불러 V10의 최소 범위 토큰을 만들고, `whoami`로 범위를 확인한 뒤 `crypto.ts`로 암호화(AAD `app_settings.omniroute_token`)해 `app_settings`에 저장. 자동 발급이 안 되면 설치는 끝내고 `omniroute: "manual_required"`를 돌려준다. 관리자 세션으로 `PUT /api/setup/omniroute {token}`에 붙여 넣는다 (`whoami` 범위가 `write`일 때만 저장). 커밋.
 
 【테스트】
 ```
@@ -858,15 +858,20 @@ TC-S5.T3.a  설치가 끝나면 최소 범위 토큰이 암호화되어 저장�
   단언:  /setup 완료 → app_settings 의 토큰 값이 "v1:" 로 시작, DB 덤프에 "oma_live_" 0건, 복호화 값으로 listKeys 200
   검출:  관리 토큰이 평문 저장돼 DB 유출이 곧 제공자 키 유출이 되는 것
 TC-S5.T3.b  저장된 토큰의 범위가 V10 최소 범위와 같다
-  단언:  OmniRoute 접근 토큰 목록에서 그 토큰의 scope == docs/verify/V10.json answer.minScope
+  단언:  저장된 토큰으로 GET /api/cli/whoami → scope == docs/verify/V10.json answer.minScope
+         (토큰 목록은 admin 범위가 필요해 write 토큰으로 못 본다. V10 tokenScopeVisibility)
   검출:  편의상 admin 범위로 발급돼 회원 앱 탈취 시 피해가 커지는 것
 TC-S5.T3.c  INITIAL_PASSWORD 가 틀리면 설치가 그 단계에서 멈추고 붙여 넣기 입력을 연다
   단언:  틀린 비밀번호 → 설치 응답에 omniroute: "manual_required", 관리자 계정은 생성됨
   검출:  OmniRoute 연결 실패가 설치 전체를 깨뜨려 관리자도 못 만드는 것
+TC-S5.T3.d  붙여 넣기 입력은 관리자 세션만, write 범위 토큰만 받는다
+  단언:  manual_required 설치 뒤 PUT /api/setup/omniroute → 세션 없음 401, 회원 403, JSON 아님 415, 가짜 토큰 400 invalid_token,
+         read 토큰 400 scope_not_write, write 토큰 200 connected 이고 저장값은 "v1:" 암호문
+  검출:  manual_required 를 되돌릴 길이 없거나, 아무나·아무 범위 토큰으로 회원 앱의 OmniRoute 연결을 바꾸는 것
 ```
 
 【통과】
-- [ ] G-S5.10 ~ G-S5.12 통과
+- [ ] G-S5.10 ~ G-S5.12, G-S5.15 통과
 
 ## 🚪 GATE S5
 
@@ -878,6 +883,7 @@ TC-S5.T3.c  INITIAL_PASSWORD 가 틀리면 설치가 그 단계에서 멈추고 
 | G-S5.10 ~ G-S5.12 | TC-S5.T3.a ~ c | `pnpm test:contract -t "TC-S5.T3.<x>"` (3개 각각) | 종료코드 0 |
 | G-S5.13 | OmniRoute 버전 고정 | grep `diegosouzapw/omniroute:3\.8\.51@sha256:` in `tests/contract/docker-compose.yml` | 1 |
 | G-S5.14 | TC-S5.T2.i | `pnpm test:contract -t "TC-S5.T2.i"` | 종료코드 0 |
+| G-S5.15 | TC-S5.T3.d | `pnpm test:contract -t "TC-S5.T3.d"` | 종료코드 0 |
 
 `node scripts/gate.mjs S5 --seal`
 
@@ -1132,5 +1138,5 @@ TC-S7.T3.a  건너뛴 테스트와 미구현 표식이 없다
 | TC-S1.T7.a | Workers에서 MySQL 드라이버 동작 | S1.T7 |
 | TC-S3.T1.b | 미인증 로그인 거부 응답이 403 `EMAIL_NOT_VERIFIED` | S3.T1 (확인함: 네 DB 403 `EMAIL_NOT_VERIFIED`) |
 | TC-S4.T1.d | 연결 옵션(mysql2 `timezone`·세션 `time_zone`, postgres `TimeZone`)으로 세션 시간대를 UTC 로 강제할 수 있음 | S4.T1 (확인함: 로컬 MySQL·MariaDB·Postgres. 실제 Hyperdrive 는 확인 못 함 → TC-S6.T3.c) |
-| TC-S5.T3.b | 접근 토큰 목록에서 범위를 읽을 수 있음 | S1.T1 |
+| TC-S5.T3.b | 접근 토큰의 범위를 읽을 수 있음 | S1.T1 (확인함: 목록은 admin 필요, `whoami` 는 어떤 범위든 200 → TC 를 whoami 로 바꿈) |
 | TC-S6.T4.d·e·f | `wrangler dev` + Hyperdrive 로컬 연결로 E2E 가능 | S1.T7 |

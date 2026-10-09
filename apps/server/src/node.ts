@@ -1,6 +1,7 @@
 // Node 진입점 (Docker 조합). `node src/node.ts` 로 바로 띄운다 (Node 24 타입 지우기).
 //   환경 변수: DATABASE_URL, BETTER_AUTH_URL, BETTER_AUTH_SECRET, PORT(기본 3000), HOST(기본 0.0.0.0),
-//             APP_ENCRYPTION_KEY(32바이트 base64), TRUSTED_PROXIES(쉼표로 구분한 IP·CIDR, 예: Caddy), WEB_DIR(기본 apps/web/build)
+//             APP_ENCRYPTION_KEY(32바이트 base64), TRUSTED_PROXIES(쉼표로 구분한 IP·CIDR, 예: Caddy), WEB_DIR(기본 apps/web/build),
+//             OMNIROUTE_URL, OMNIROUTE_INITIAL_PASSWORD (선택, setup/omniroute.ts)
 // 관리자가 없으면 시작할 때마다 새 설치 토큰을 만들어 한 번 출력한다 (setup/).
 // 시작할 때 clientIp 가 실제 요청에서 IP 를 정하는지 확인하고, 못 정하면 시작하지 않는다 (TC-S4.T1.e).
 import { readFileSync } from "node:fs";

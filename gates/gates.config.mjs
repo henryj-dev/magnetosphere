@@ -167,8 +167,12 @@ export const GATES = {
       { id: "G-S5.8", how: "test", requires: ["local-services"], desc: "TC-S5.T2.g 쿠키 변경 요청에 Origin", cmd: 'pnpm test:contract -t "TC-S5.T2.g"' },
       // apps/server/test/app.test.ts 의 "/api/keys/1" 은 우리 서버의 모르는 /api 경로가 JSON 404 인지 보는 요청이다 (OmniRoute 호출 아님)
       { id: "G-S5.9", how: "grep", desc: "TC-S5.T2.h 어댑터 밖 OmniRoute 관리 호출 0", pattern: "/api/(keys|usage)", in: ["apps", "packages"], exclude: ["packages/omniroute/**", "apps/server/test/app.test.ts"], op: "==", limit: 0 },
+      { id: "G-S5.10", how: "test", requires: ["local-services"], desc: "TC-S5.T3.a 설치 뒤 토큰 암호화 저장", cmd: 'pnpm test:contract -t "TC-S5.T3.a"' },
+      { id: "G-S5.11", how: "test", requires: ["local-services"], desc: "TC-S5.T3.b 저장 토큰 범위 = V10 minScope", cmd: 'pnpm test:contract -t "TC-S5.T3.b"' },
+      { id: "G-S5.12", how: "test", requires: ["local-services"], desc: "TC-S5.T3.c 틀린 비밀번호 → manual_required, 관리자는 생성", cmd: 'pnpm test:contract -t "TC-S5.T3.c"' },
       { id: "G-S5.13", how: "grep", desc: "OmniRoute 버전 고정 (태그 + digest)", pattern: "diegosouzapw/omniroute:3\\.8\\.51@sha256:", in: ["tests/contract/docker-compose.yml"], op: "==", limit: 1 },
       { id: "G-S5.14", how: "test", requires: ["local-services"], desc: "TC-S5.T2.i 어댑터는 키 scopes 를 보내지 않음", cmd: 'pnpm test:contract -t "TC-S5.T2.i"' },
+      { id: "G-S5.15", how: "test", requires: ["local-services"], desc: "TC-S5.T3.d 토큰 붙여 넣기는 관리자·write 만", cmd: 'pnpm test:contract -t "TC-S5.T3.d"' },
     ],
   },
   S6: {
