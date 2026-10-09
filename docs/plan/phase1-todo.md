@@ -1109,13 +1109,16 @@ TC-S6.T4.a ~ f  조합마다 설치 → 관리자 → 부트스트랩 → 로그
 | S6 보안 리뷰: 덧씌우지 않은 `.env.setup` 기본 경로를 app 이 읽는지 | 함 (S7.T5) | |
 | S4 보안 리뷰 L4: `job_leases` 임대 연장(하트비트)·펜싱 토큰 | 옮김 → 2차 | 주기 작업이 생기는 단계(사용량 동기화)에서 작업 길이를 보고 정한다. 지금 주기 작업은 짧다 |
 | (S7 에서 찾음) 가입 응답 시간이 새 가입의 DB 쓰기만큼 계정 존재를 드러낸다 | 옮김 → 2차 | CI 러너 디스크에서 있는 계정·없는 계정 차이 108ms (로컬 SSD 는 1ms 남짓). 메일 전송과는 무관하다 (TC-S3.T2.e). 응답 시간을 맞추려면 가입 응답을 일정 시간으로 채워야 한다 |
+| S7 리뷰 L1: TC-S3.T2.e 상한 250ms 를 150ms 로 낮출 수 있는지 | 옮김 → 2차 | 메일 지연 1000ms 대비 여유다. CI 러너에서 몇 번 돌려 두 측정 차이의 흩어짐을 본 뒤 정한다 |
+| S7 리뷰 L5: `ci.yml` 의 concurrency cancel-in-progress 가 main 에서 앞 커밋 실행을 취소한다 | 옮김 → 2차 (필수 검사 지정과 함께) | main 에서는 커밋마다 결과가 남아야 한다. `cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}` 처럼 main 에서만 끄는 방안 |
+| (S7 리뷰 M4 에서 고침) 봉인 재검이 pnpm install 실패를 넘김 | 함 (TC-S0.T2.n, G-S7.9) | 설치 실패를 넘기고 검사를 돌려 S4 10개가 한 번 엉뚱하게 실패한 일의 가장 유력한 원인 |
 | (S7 에서 찾음) OmniRoute `3.8.51@sha256:8bd462c9…` 의 amd64·arm64 가 다른 빌드다 | 옮김 → 2차 (운영 단계 전에 결정) | BUILD_ID 가 다르고(amd64 `z4X1_o4X…`, arm64 `d29tRSJd…`) amd64 빌드에는 `BUDGET_EXCEEDED` 코드가 없다. 예산 차단은 둘 다 429 지만 amd64 는 code `rate_limit_exceeded`. 0단계 실측(`../research/phase0-omniroute.md`)과 계획서 표는 arm64 값이다. 운영 서버는 대개 amd64 라 CI(amd64)와 로컬(arm64) 계약 테스트가 둘 다 돌아야 한다 (지금 그렇다). 아키텍처별 manifest digest 로 고정할지, 다음 OmniRoute 버전에서 같은 빌드인지 확인할지 정한다. 회원 앱은 이 code 에 기대지 않는다 |
 
 ### ☑ S7.T1 — CI 매트릭스
-선행 없음 · 산출 `.github/workflows/ci.yml`, `scripts/check-ci-matrix.mjs`, `test/fixtures/ci-5combos.yml` · 되돌리기 커밋 1개
+선행 없음 · 산출 `.github/workflows/ci.yml`, `.github/workflows/gate.yml`(SHA 고정·permissions), `scripts/check-ci-matrix.mjs`, `test/fixtures/ci-5combos.yml`, `test/fixtures/ci-guard/` · 되돌리기 커밋 1개
 
 【작업】
-1. 잡: 단위(`node --test scripts/`, S0 게이트, 서비스 없이 도는 패키지 테스트, `pnpm -r typecheck`), 순서(`--assert-order` 처음 커밋부터, `--status`), 단계마다 그 단계 게이트(`node scripts/gate.mjs S2`~`S7`: 스키마·인증·서버·계약·배포·재발 방지), E2E 매트릭스 여섯 조합, S1 봉인 커밋 재검. 원격이 정해지면 필수 검사로 지정한다 (원격 미정, 계획서 8장). 커밋.
+1. 잡: 단위(`node --test scripts/`, S0 게이트, 서비스 없이 도는 패키지 테스트, `pnpm -r typecheck`), 순서(`--assert-order` 처음 커밋부터, `--status`), 단계마다 그 단계 게이트(`node scripts/gate.mjs S2`~`S7`: 스키마·인증·서버·계약·배포·재발 방지), E2E 매트릭스 여섯 조합, S1 봉인 커밋 재검. 원격은 `henryj-dev/magnetosphere` 다. main 필수 검사 지정은 저장소 설정이라 사용자 결정 대기다. 커밋.
    (실제: 단계 잡은 게이트 명령을 그대로 돌아 CI 와 로컬 게이트가 어긋나지 않는다. 테스트 DB·mailpit·계약 환경·배포 묶음은 각 검사의 실행기가 띄운다. 게이트에서 빼는 검사는 E2E 여섯(`--skip-ids G-S6.9~14`)뿐이고, 그 여섯은 `e2e` 매트릭스가 같은 명령으로 돈다. 액션은 커밋 SHA 로 고정하고 pnpm 저장소를 캐시한다. YAML 은 `yaml` 2.9.0(의존성 없음, 버전 고정)으로 읽는다.)
 2. S1: 확인용 코드를 S7.T2 에서 지우므로 S1 검사는 봉인 커밋에서만 돈다. `s1-seal` 잡이 봉인 커밋을 작업 트리로 꺼내 `node scripts/gate.mjs --root <작업 트리> S1` 을 돈다. 0단계의 손으로 준비한 OmniRoute(20140)는 같은 버전·같은 가짜 상위 서버를 붙인 계약 환경(20170, `OMNI_URL`·`OMNI_PASSWORD`)으로 대신하고, Keycloak·DB 는 그 커밋의 `up.sh` 가 띄운다. G-S1.4 의 수집 로그(`spikes/v16/paths.log`)는 봉인 뒤 커밋에 들어갔으므로 그 커밋에서 꺼내 둔다. (S1 을 "로컬 증거로 봉인 시점에 고정" 하는 대신 CI 재검을 고른 것은 17개 검사가 러너 하나에서 3분 남짓에 돌기 때문이다.)
 
@@ -1128,8 +1131,14 @@ TC-S7.T1.a  CI 매트릭스가 여섯 조합을 모두 돈다
          모든 uses 가 40자리 SHA
   검출:  조합 하나가 CI 에서 빠져 그 조합이 깨져도 아무도 모르는 것. 단계 잡이 서비스 검사를 건너뛰어 CI 와 로컬 게이트가 어긋나는 것
 TC-S7.T1.b  매트릭스 검사에 이빨이 있다 (음성 대조)
-  단언:  조합 다섯만 있는 픽스처 YAML → 매트릭스 문제로 검사 실패 (파일을 못 읽은 실패는 검출로 치지 않는다)
+  단언:  조합 다섯만 있는 픽스처 YAML → 매트릭스 문제(combo-count)로 검사 실패 (파일을 못 읽은 실패는 검출로 치지 않는다)
   검출:  검사가 YAML 을 못 읽고 늘 통과하는 것
+TC-S7.T1.c  게이트·E2E 가 조용히 빠지거나 실패가 삼켜지면 잡는다 (S7 리뷰 M1·M2)
+  단언:  test/fixtures/ci-guard/ 픽스처 19개가 각자 머리 주석 "# expect: <코드>" 의 문제로 잡힌다 — 잡·스텝 if, 잡·스텝
+         continue-on-error(단계·E2E), "|| true"·"; true"·"| tee"·set +e·shell 바꾸기, echo 로 감싼 명령(명령은 run 줄의 시작),
+         on 의 branches·paths 거르개, permissions 없음, 액션 태그. 기본 실행은 .github/workflows 의 모든 파일(gate.yml 포함)에
+         SHA 고정·permissions: contents: read·push·pull_request 트리거를 요구한다
+  검출:  CI 파일 한 줄(if: false, || true 등)로 단계 게이트가 꺼져도 매트릭스 검사는 초록인 것
 ```
 
 【통과】
@@ -1157,18 +1166,25 @@ TC-S7.T2.a  확인용 코드가 남지 않는다
 
 【작업】
 1. 제품 코드에 남은 `.only(`, `.skip(`, `TODO`, `FIXME`, `not implemented`를 없앤다. 필요한 것은 계획서 2차 항목으로 옮기고 지운다. 커밋.
-   (실제: 처음부터 0 이었다. 검사에 `.skipIf(`·`.todo(`·`xit(` 류를 더했다. `.svelte-kit` 빌드 출력에는 라이브러리의 TODO 가 있어 빌드 산출은 보지 않는다.)
+   (실제: 처음부터 0 이었다. 검사에 `.skipIf(`·`.todo(`·`xit(` 류, S7 리뷰 M3 에서 node:test 의 `{ skip: true }`·`{ todo: true }`, `.skip.each`·`.only.each`, `runIf(` 와 `scripts/` 범위를 더했다. `.svelte-kit` 빌드 출력에는 라이브러리의 TODO 가 있어 빌드 산출은 보지 않는다.)
+   백로그: gate 의 test 판정은 "통과 ≥ 1" 이라, `-t` 패턴이 여러 TC 에 걸릴 때 그중 하나가 꺼지거나 이름이 바뀌어 빠져도 초록이다. 검사마다 기대 통과 수(`expectPassed`)를 두고 `==` 로 비교하는 방안을 2차에서 정한다 (지금 고치지 않는다).
 
 【테스트】
 ```
 TC-S7.T3.a  건너뛴 테스트와 미구현 표식이 없다
-  단언:  grep -E "\.(only|skip|skipIf|todo)\(|\b(xit|xdescribe|xtest)\(|TODO|FIXME|not implemented" in apps/ packages/ tests/
-         (빌드 산출 build·.svelte-kit·.wrangler·dist 제외) → 0
+  단언:  grep -E "\.(only|skip|skipIf|todo)\(|\.(skip|only)\.|runIf\(|\b(skip|todo)\s*:\s*true|\b(xit|xdescribe|xtest)\(|TODO|FIXME|not implemented"
+         in apps/ packages/ tests/ scripts/ (빌드 산출 build·.svelte-kit·.wrangler·dist 제외, scripts/gate.test.mjs 제외 — test 판정
+         음성 대조가 { skip: true }·{ todo: true } 테스트를 문자열로 만든다) → 0
   검출:  .skip 으로 꺼진 계약 테스트 때문에 G-S5 가 초록으로 보이는 것
+TC-S0.T2.n  봉인 재검은 봉인 커밋의 설치 실패를 그대로 보고한다 (S7 리뷰 M4, scripts/gate.test.mjs)
+  단언:  깨진 pnpm-lock.yaml 이 든 봉인 커밋 → gate --verify-seals --rerun 종료코드 ≠ 0, 출력에 "S0: 봉인 커밋 <sha> 설치 실패",
+         검사는 돌지 않음
+  검출:  설치 실패를 넘기고 검사를 돌려, 원인과 무관한 검사 실패 여러 개로 보이거나 설치와 무관한 검사만 있는 단계가 통과하는 것
 ```
 
 【통과】
 - [x] G-S7.3 통과
+- [x] G-S7.9 통과
 
 ### ☑ S7.T4 — Workers 에서 OmniRoute 3xx 를 따라가지 않는다 (S6 보안 리뷰)
 선행 없음 · 산출 `apps/server/test/workers.test.ts` · 되돌리기 커밋 1개
@@ -1230,14 +1246,15 @@ TC-S7.T6.b  edge 망의 Caddy 아닌 상대가 보낸 X-Forwarded-For 는 세션
 
 | id | 검사 | 명령 | 통과 기준 |
 |---|---|---|---|
-| G-S7.1 | TC-S7.T1.a·b | `node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-5combos.yml --expect 6 --expect-fail` | 종료코드 0 |
+| G-S7.1 | TC-S7.T1.a·b·c | `node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-5combos.yml --expect 6 --expect-fail && node scripts/check-ci-matrix.mjs --fixture-dir test/fixtures/ci-guard --expect 6 --expect-fail` | 종료코드 0 |
 | G-S7.2 | TC-S7.T2.a | `test ! -e spikes && { grep -rn --exclude-dir=node_modules … "spikes/" apps packages scripts tests; test $? -eq 1; }` | 종료코드 0 |
-| G-S7.3 | TC-S7.T3.a | grep `\.(only\|skip\|skipIf\|todo)\(\|\b(xit\|xdescribe\|xtest)\(\|TODO\|FIXME\|not implemented` in `apps/ packages/ tests/` (빌드 산출 제외) | 0 |
+| G-S7.3 | TC-S7.T3.a | grep `\.(only\|skip\|skipIf\|todo)\(\|\.(skip\|only)\.\|runIf\(\|\b(skip\|todo)\s*:\s*true\|\b(xit\|xdescribe\|xtest)\(\|TODO\|FIXME\|not implemented` in `apps/ packages/ tests/ scripts/` (빌드 산출·`scripts/gate.test.mjs` 제외) | 0 |
 | G-S7.4 | 앞 단계 봉인 모두 유효 | `node scripts/gate.mjs --status --json` | S0~S6 모두 ✅ (⚠ 0) |
 | G-S7.5 | 순서 위반 없음 | `node scripts/gate.mjs --assert-order --base $(git rev-list --max-parents=0 HEAD)` | 종료코드 0 |
 | G-S7.6 | TC-S7.T4.a | `pnpm -C apps/server test:workers -t "TC-S7.T4.a"` | 종료코드 0 |
 | G-S7.7 | TC-S7.T5.a | `pnpm test:deploy -t "TC-S7.T5.a"` | 종료코드 0 |
 | G-S7.8 | TC-S7.T6.a·b | `pnpm test:deploy -t "TC-S7.T6"` | 종료코드 0 |
+| G-S7.9 | TC-S0.T2.n | `node --test --test-reporter=tap --test-name-pattern="TC-S0.T2.n" scripts/gate.test.mjs` | 종료코드 0 |
 
 `node scripts/gate.mjs S7 --seal`
 
