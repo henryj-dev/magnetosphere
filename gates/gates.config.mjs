@@ -69,6 +69,7 @@ export const GATES = {
       { id: "G-S2.3", how: "cmd", desc: "TC-S2.T1.c 린트 음성 대조 (픽스처 위반 3)", cmd: "node scripts/schema-lint.mjs --fixture test/fixtures/bad-schema.ts --expect 3" },
       { id: "G-S2.4", how: "test", desc: "TC-S2.T2.a 시드 기본값", cmd: 'pnpm -C packages/db test -t "TC-S2.T2.a"' },
       { id: "G-S2.5", how: "test", desc: "TC-S2.T2.b 시드가 운영자 값을 덮지 않음", cmd: 'pnpm -C packages/db test -t "TC-S2.T2.b"' },
+      { id: "G-S2.7", how: "cmd", desc: "TC-S2.T3.b 마이그레이션과 스키마가 같음", cmd: "pnpm -C packages/db check:drift" },
     ],
   },
   S3: {

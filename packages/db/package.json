@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "gen": "node scripts/gen-schema.mjs",
+    "migrate:gen": "drizzle-kit generate --config drizzle.sqlite.config.ts && drizzle-kit generate --config drizzle.mysql.config.ts && drizzle-kit generate --config drizzle.pg.config.ts",
+    "check:drift": "node scripts/check-drift.mjs",
     "test": "vitest run"
   },
   "dependencies": {
