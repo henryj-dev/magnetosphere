@@ -143,7 +143,9 @@ export const omnirouteJobs = sqliteTable("omniroute_jobs", {
   lastError: text("last_error"),
   nextRunAt: integer("next_run_at", { mode: "timestamp_ms" }).notNull(),
   doneAt: integer("done_at", { mode: "timestamp_ms" }),
-});
+}, (table) => [
+  index("idx_omniroute_jobs_due").on(table.doneAt, table.nextRunAt),
+]);
 
 // 여러 인스턴스에서 주기 작업 중복 실행 방지 (임대 잠금)
 export const jobLeases = sqliteTable("job_leases", {
@@ -161,4 +163,6 @@ export const auditLog = sqliteTable("audit_log", {
   detail: text("detail"),
   ip: text("ip"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
-});
+}, (table) => [
+  index("idx_audit_log_created").on(table.createdAt),
+]);

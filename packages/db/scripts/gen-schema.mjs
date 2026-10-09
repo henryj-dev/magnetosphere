@@ -82,16 +82,26 @@ const DIALECTS = {
     column(c) {
       switch (c.kind) {
         case "id": return ["varchar", `varchar(${lit(c.name)}, { length: 36 })`];
-        case "string": return ["varchar", `varchar(${lit(c.name)}, { length: ${c.length} })`];
-        case "text": case "json": return ["text", `text(${lit(c.name)})`];
+        case "string": return c.exact ? ["customType", `varcharBin(${lit(c.name)}, { length: ${c.length} })`] : ["varchar", `varchar(${lit(c.name)}, { length: ${c.length} })`];
+        case "text": return c.exact ? ["customType", `textBin(${lit(c.name)})`] : ["text", `text(${lit(c.name)})`];
+        case "json": return ["text", `text(${lit(c.name)})`];
         case "integer": return ["int", `int(${lit(c.name)})`];
         case "bigint": return ["bigint", `bigint(${lit(c.name)}, { mode: "number" })`];
         case "boolean": return ["boolean", `boolean(${lit(c.name)})`];
-        case "timestamp": return ["timestamp", `timestamp(${lit(c.name)}, { fsp: 3 })`];
+        case "timestamp": return ["datetime", `datetime(${lit(c.name)}, { fsp: 3 })`];
         case "usd": return ["decimal", `decimal(${lit(c.name)}, { precision: 12, scale: 6, mode: "number" })`];
       }
     },
-    now: { sql: false, code: ".defaultNow()" },
+    // datetime 에는 defaultNow 가 없다. 밀리초까지 넣는다.
+    now: { sql: true, code: ".default(sql`(now(3))`)" },
+    // drizzle mysql-core 에는 칼럼 정렬 옵션이 없어 customType 으로 utf8mb4_bin 칼럼을 만든다.
+    prelude: [
+      "// 대소문자까지 정확히 같아야 하는 칼럼 (common.ts 의 exact). MySQL·MariaDB 기본 정렬은 대소문자를 무시한다.",
+      "const varcharBin = customType<{ data: string; config: { length: number } }>({",
+      "  dataType: (config) => `varchar(${config?.length}) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,",
+      "});",
+      'const textBin = customType<{ data: string }>({ dataType: () => "text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin" });',
+    ],
   },
   pg: {
     module: "drizzle-orm/pg-core",
@@ -123,6 +133,7 @@ function render(dialect) {
     const lines = [];
     for (const [field, c] of Object.entries(t.columns)) {
       if (c.kind === "string" && !Number.isInteger(c.length)) throw new Error(`${key}.${field}: string 칼럼에 length 가 없다`);
+      if (c.exact && c.kind !== "string" && c.kind !== "text") throw new Error(`${key}.${field}: exact 는 string·text 칼럼에만 쓴다`);
       const [fn, base] = d.column(c);
       imports.add(fn);
       let code = base;
@@ -156,7 +167,8 @@ function render(dialect) {
     ...(usesSql ? ['import { sql } from "drizzle-orm";'] : []),
     `import { ${[...imports].sort().join(", ")} } from "${d.module}";`,
   ];
-  return `${head.join("\n")}\n\n${blocks.join("\n\n")}\n`;
+  const prelude = imports.has("customType") ? `${d.prelude.join("\n")}\n\n` : "";
+  return `${head.join("\n")}\n\n${prelude}${blocks.join("\n\n")}\n`;
 }
 
 const problems = checkBetterAuth();

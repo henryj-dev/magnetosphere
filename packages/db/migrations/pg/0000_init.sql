@@ -120,7 +120,7 @@ CREATE TABLE "sso_provider_settings" (
 --> statement-breakpoint
 CREATE TABLE "user" (
 	"id" varchar(36) PRIMARY KEY NOT NULL,
-	"name" varchar(255) NOT NULL,
+	"name" text NOT NULL,
 	"email" varchar(255) NOT NULL,
 	"email_verified" boolean DEFAULT false NOT NULL,
 	"image" text,
@@ -136,7 +136,7 @@ CREATE TABLE "user" (
 --> statement-breakpoint
 CREATE TABLE "verification" (
 	"id" varchar(36) PRIMARY KEY NOT NULL,
-	"identifier" varchar(255) NOT NULL,
+	"identifier" varchar(768) NOT NULL,
 	"value" text NOT NULL,
 	"expires_at" timestamp NOT NULL,
 	"created_at" timestamp DEFAULT now() NOT NULL,
@@ -149,5 +149,7 @@ ALTER TABLE "session" ADD CONSTRAINT "session_user_id_user_id_fk" FOREIGN KEY ("
 ALTER TABLE "sso_provider" ADD CONSTRAINT "sso_provider_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "account_userId_idx" ON "account" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "idx_api_keys_user" ON "api_keys" USING btree ("user_id");--> statement-breakpoint
+CREATE INDEX "idx_audit_log_created" ON "audit_log" USING btree ("created_at");--> statement-breakpoint
+CREATE INDEX "idx_omniroute_jobs_due" ON "omniroute_jobs" USING btree ("done_at","next_run_at");--> statement-breakpoint
 CREATE INDEX "session_userId_idx" ON "session" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "verification_identifier_idx" ON "verification" USING btree ("identifier");

@@ -50,6 +50,7 @@ CREATE TABLE `audit_log` (
 	`created_at` integer NOT NULL
 );
 --> statement-breakpoint
+CREATE INDEX `idx_audit_log_created` ON `audit_log` (`created_at`);--> statement-breakpoint
 CREATE TABLE `invites` (
 	`id` text PRIMARY KEY NOT NULL,
 	`email` text,
@@ -77,6 +78,7 @@ CREATE TABLE `omniroute_jobs` (
 	`done_at` integer
 );
 --> statement-breakpoint
+CREATE INDEX `idx_omniroute_jobs_due` ON `omniroute_jobs` (`done_at`,`next_run_at`);--> statement-breakpoint
 CREATE TABLE `rate_limit` (
 	`id` text PRIMARY KEY NOT NULL,
 	`key` text NOT NULL,

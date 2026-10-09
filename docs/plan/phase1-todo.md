@@ -420,6 +420,7 @@ TC-S2.T2.b  시드는 두 번 돌려도 운영자 값을 덮지 않는다
 【작업】
 1. drizzle-kit으로 DB별 마이그레이션 생성, 저장소에 커밋. 커밋.
 2. 테스트용 Compose: `mysql:8.0`, `mariadb:10.11`, `postgres:14`. D1은 `wrangler d1 migrations apply --local`. 빈 DB 다섯(SQLite, MySQL, MariaDB, Postgres, D1)에 적용·시드·테이블 목록 비교. 커밋.
+3. S2 리뷰 반영: MySQL 계열 시각 칼럼 `DATETIME(3)`, 토큰·해시·식별자 칼럼 `utf8mb4_bin`, `verification.identifier` 768자·`user.name` text, 작업·감사 인덱스. 커밋.
 
 【테스트】
 ```
@@ -432,10 +433,16 @@ TC-S2.T3.b  마이그레이션과 스키마가 어긋나지 않는다
 TC-S2.T3.c  이메일은 소문자로 저장되고 대소문자 중복이 막힌다
   단언:  DB 다섯 × 저장 계층에 "A@x.test" 저장 → 저장값 "a@x.test", 이어서 "a@x.test" 저장 → 고유 제약 오류
   검출:  V26 c 의 DB 간 정렬 차이를 저장 계층이 흡수하지 못하는 것
+TC-S2.T3.e  2038 년 이후 시각을 저장하고 그대로 읽는다
+  단언:  DB 다섯 × invites·session·verification 시각 칼럼에 2040-01-01T00:00:00.123Z 저장 → 읽은 값의 ISO 문자열이 같음
+  검출:  MySQL·MariaDB TIMESTAMP 가 2038-01-19 이후 값을 거부해 장기 초대·세션 만료 저장이 실패하는 것 (S2 리뷰 M2)
+TC-S2.T3.f  토큰·식별자는 대소문자를 구분한다
+  단언:  DB 다섯 × 정확 일치 칼럼 9개(session.token, verification.identifier, sso_provider.provider_id, rate_limit.key, app_settings.key, sso_provider_settings.provider_id, invites.token_hash, api_keys.omniroute_key_id, job_leases.name)에 대소문자만 다른 두 값 저장 → 둘 다 들어가고, 대문자 값으로 찾으면 그 행 하나만
+  검출:  MySQL 계열 기본 정렬이 대소문자를 무시해 다른 토큰으로 조회가 맞거나 고유 제약에 막히는 것 (S2 리뷰 M3)
 ```
 
 【통과】
-- [ ] G-S2.6 ~ G-S2.8 통과
+- [ ] G-S2.6 ~ G-S2.8, G-S2.11, G-S2.12 통과
 
 ## 🚪 GATE S2
 
@@ -451,6 +458,8 @@ TC-S2.T3.c  이메일은 소문자로 저장되고 대소문자 중복이 막힌
 | G-S2.8 | TC-S2.T3.c | `pnpm -C packages/db test:migrate -t "TC-S2.T3.c"` | 종료코드 0 |
 | G-S2.9 | id 길이 | grep `varchar\("id", \{ length: 36` in `packages/db/src/schema/mysql.ts` | ≥ 4 (`invites`, `api_keys`, `omniroute_jobs`, `audit_log`) |
 | G-S2.10 | 지원 DB 최소 버전 고정 | grep `mysql:8.0\|mariadb:10.11\|postgres:14` in `docker-compose.test.yml` | 3 |
+| G-S2.11 | TC-S2.T3.e | `pnpm -C packages/db test:migrate -t "TC-S2.T3.e"` | 종료코드 0 |
+| G-S2.12 | TC-S2.T3.f | `pnpm -C packages/db test:migrate -t "TC-S2.T3.f"` | 종료코드 0 |
 
 `node scripts/gate.mjs S2 --seal`
 

@@ -5,7 +5,7 @@ import { bigint, boolean, index, integer, numeric, pgTable, text, timestamp, var
 // 회원. Better Auth 칼럼 + 권한 칼럼 다섯
 export const user = pgTable("user", {
   id: varchar("id", { length: 36 }).primaryKey(),
-  name: varchar("name", { length: 255 }).notNull(),
+  name: text("name").notNull(),
   email: varchar("email", { length: 255 }).notNull().unique(),
   emailVerified: boolean("email_verified").default(false).notNull(),
   image: text("image"),
@@ -54,7 +54,7 @@ export const account = pgTable("account", {
 // 메일 인증·비밀번호 재설정 등 일회용 값
 export const verification = pgTable("verification", {
   id: varchar("id", { length: 36 }).primaryKey(),
-  identifier: varchar("identifier", { length: 255 }).notNull(),
+  identifier: varchar("identifier", { length: 768 }).notNull(),
   value: text("value").notNull(),
   expiresAt: timestamp("expires_at").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -142,7 +142,9 @@ export const omnirouteJobs = pgTable("omniroute_jobs", {
   lastError: text("last_error"),
   nextRunAt: timestamp("next_run_at").notNull(),
   doneAt: timestamp("done_at"),
-});
+}, (table) => [
+  index("idx_omniroute_jobs_due").on(table.doneAt, table.nextRunAt),
+]);
 
 // 여러 인스턴스에서 주기 작업 중복 실행 방지 (임대 잠금)
 export const jobLeases = pgTable("job_leases", {
@@ -160,4 +162,6 @@ export const auditLog = pgTable("audit_log", {
   detail: text("detail"),
   ip: varchar("ip", { length: 64 }),
   createdAt: timestamp("created_at").notNull(),
-});
+}, (table) => [
+  index("idx_audit_log_created").on(table.createdAt),
+]);

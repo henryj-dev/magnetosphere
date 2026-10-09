@@ -74,4 +74,51 @@ describe.each(cases)("$label", (d) => {
     const rows = await h.db.select({ id: h.schema.user.id }).from(h.schema.user).where(eq(h.schema.user.email, lower));
     expect(rows).toHaveLength(1);
   });
+
+  test("TC-S2.T3.e 2038 년 이후 시각을 저장하고 그대로 읽는다", async () => {
+    const s = h.schema;
+    const at = new Date("2040-01-01T00:00:00.123Z");
+    const userId = randomUUID();
+    await insertUser(h.db, s, { id: userId, name: "미래", email: `future-${userId}@x.test` });
+    const inviteId = randomUUID();
+    const sessionId = randomUUID();
+    const verificationId = randomUUID();
+    await h.db.insert(s.invites).values({ id: inviteId, tokenHash: `future-${inviteId}`, expiresAt: at, usedAt: at, createdBy: userId });
+    await h.db.insert(s.session).values({ id: sessionId, token: `future-${sessionId}`, userId, expiresAt: at, createdAt: at, updatedAt: at });
+    await h.db.insert(s.verification).values({ id: verificationId, identifier: `future-${verificationId}`, value: "v", expiresAt: at, createdAt: at, updatedAt: at });
+
+    const [inv] = await h.db.select().from(s.invites).where(eq(s.invites.id, inviteId));
+    const [ses] = await h.db.select().from(s.session).where(eq(s.session.id, sessionId));
+    const [ver] = await h.db.select().from(s.verification).where(eq(s.verification.id, verificationId));
+    expect([inv.expiresAt, inv.usedAt, ses.expiresAt, ses.createdAt, ver.expiresAt].map((d: Date) => d.toISOString())).toEqual(Array(5).fill(at.toISOString()));
+  });
+
+  test("TC-S2.T3.f 토큰·식별자는 대소문자를 구분한다", async () => {
+    const s = h.schema;
+    const userId = randomUUID();
+    await insertUser(h.db, s, { id: userId, name: "구분", email: `case-${userId}@x.test` });
+    const now = new Date();
+    // [테이블, 정확 일치 칼럼, 값으로 행 만들기]
+    const cases: [string, string, (v: string) => Record<string, unknown>][] = [
+      ["session", "token", (v) => ({ id: randomUUID(), token: v, userId, expiresAt: now, createdAt: now, updatedAt: now })],
+      ["verification", "identifier", (v) => ({ id: randomUUID(), identifier: v, value: "v", expiresAt: now, createdAt: now, updatedAt: now })],
+      ["ssoProvider", "providerId", (v) => ({ id: randomUUID(), issuer: "https://idp.test", providerId: v, domain: "x.test" })],
+      ["rateLimit", "key", (v) => ({ id: randomUUID(), key: v, count: 1, lastRequest: now.getTime() })],
+      ["appSettings", "key", (v) => ({ key: v, value: "1", updatedAt: now })],
+      ["ssoProviderSettings", "providerId", (v) => ({ providerId: v, displayName: "IdP" })],
+      ["invites", "tokenHash", (v) => ({ id: randomUUID(), tokenHash: v, expiresAt: now, createdBy: userId })],
+      ["apiKeys", "omnirouteKeyId", (v) => ({ id: randomUUID(), userId, omnirouteKeyId: v, keyPreview: "abcd", state: "active", createdAt: now })],
+      ["jobLeases", "name", (v) => ({ name: v, holder: "h", lockedUntil: now })],
+    ];
+    for (const [table, col, row] of cases) {
+      const upper = `CaseKey-${randomUUID().slice(0, 8)}`;
+      const lower = upper.toLowerCase();
+      await h.db.insert(s[table]).values(row(upper));
+      await h.db.insert(s[table]).values(row(lower)).catch((e: unknown) => {
+        throw new Error(`${table}.${col}: 대소문자만 다른 값이 거부됨 — ${messages(e)}`);
+      });
+      const found = await h.db.select().from(s[table]).where(eq(s[table][col], upper));
+      expect(found.map((r: Record<string, unknown>) => r[col]), `${table}.${col}`).toEqual([upper]);
+    }
+  });
 });

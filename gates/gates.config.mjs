@@ -74,6 +74,8 @@ export const GATES = {
       { id: "G-S2.8", how: "test", desc: "TC-S2.T3.c 이메일 소문자 저장·대소문자 중복 거부", cmd: 'pnpm -C packages/db test:migrate -t "TC-S2.T3.c"' },
       { id: "G-S2.9", how: "grep", desc: "MySQL id 는 VARCHAR(36)", pattern: 'varchar\\("id", \\{ length: 36', in: ["packages/db/src/schema/mysql.ts"], op: ">=", limit: 4 },
       { id: "G-S2.10", how: "grep", desc: "지원 DB 최소 버전 고정", pattern: "mysql:8.0|mariadb:10.11|postgres:14", in: ["docker-compose.test.yml"], op: "==", limit: 3 },
+      { id: "G-S2.11", how: "test", desc: "TC-S2.T3.e 2038 년 이후 시각 왕복", cmd: 'pnpm -C packages/db test:migrate -t "TC-S2.T3.e"' },
+      { id: "G-S2.12", how: "test", desc: "TC-S2.T3.f 토큰·식별자 대소문자 구분", cmd: 'pnpm -C packages/db test:migrate -t "TC-S2.T3.f"' },
     ],
   },
   S3: {

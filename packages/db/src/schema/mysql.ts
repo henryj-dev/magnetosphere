@@ -1,16 +1,23 @@
 // 자동 생성 파일이다. 손으로 고치지 않는다.
 // 원본: packages/db/src/schema/common.ts · 생성: pnpm -C packages/db gen
-import { bigint, boolean, decimal, index, int, mysqlTable, text, timestamp, varchar } from "drizzle-orm/mysql-core";
+import { sql } from "drizzle-orm";
+import { bigint, boolean, customType, datetime, decimal, index, int, mysqlTable, text, varchar } from "drizzle-orm/mysql-core";
+
+// 대소문자까지 정확히 같아야 하는 칼럼 (common.ts 의 exact). MySQL·MariaDB 기본 정렬은 대소문자를 무시한다.
+const varcharBin = customType<{ data: string; config: { length: number } }>({
+  dataType: (config) => `varchar(${config?.length}) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin`,
+});
+const textBin = customType<{ data: string }>({ dataType: () => "text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin" });
 
 // 회원. Better Auth 칼럼 + 권한 칼럼 다섯
 export const user = mysqlTable("user", {
   id: varchar("id", { length: 36 }).primaryKey(),
-  name: varchar("name", { length: 255 }).notNull(),
+  name: text("name").notNull(),
   email: varchar("email", { length: 255 }).notNull().unique(),
   emailVerified: boolean("email_verified").default(false).notNull(),
   image: text("image"),
-  createdAt: timestamp("created_at", { fsp: 3 }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { fsp: 3 }).defaultNow().$onUpdate(() => new Date()).notNull(),
+  createdAt: datetime("created_at", { fsp: 3 }).default(sql`(now(3))`).notNull(),
+  updatedAt: datetime("updated_at", { fsp: 3 }).default(sql`(now(3))`).$onUpdate(() => new Date()).notNull(),
   role: varchar("role", { length: 16 }).default("member").notNull(),
   status: varchar("status", { length: 16 }).default("active").notNull(),
   monthlyLimitUsd: decimal("monthly_limit_usd", { precision: 12, scale: 6, mode: "number" }),
@@ -21,10 +28,10 @@ export const user = mysqlTable("user", {
 // 로그인 세션
 export const session = mysqlTable("session", {
   id: varchar("id", { length: 36 }).primaryKey(),
-  expiresAt: timestamp("expires_at", { fsp: 3 }).notNull(),
-  token: varchar("token", { length: 255 }).notNull().unique(),
-  createdAt: timestamp("created_at", { fsp: 3 }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { fsp: 3 }).$onUpdate(() => new Date()).notNull(),
+  expiresAt: datetime("expires_at", { fsp: 3 }).notNull(),
+  token: varcharBin("token", { length: 255 }).notNull().unique(),
+  createdAt: datetime("created_at", { fsp: 3 }).default(sql`(now(3))`).notNull(),
+  updatedAt: datetime("updated_at", { fsp: 3 }).$onUpdate(() => new Date()).notNull(),
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
   userId: varchar("user_id", { length: 36 }).notNull().references(() => user.id, { onDelete: "cascade" }),
@@ -35,18 +42,18 @@ export const session = mysqlTable("session", {
 // 로그인 방식 (비밀번호, OAuth, SSO)
 export const account = mysqlTable("account", {
   id: varchar("id", { length: 36 }).primaryKey(),
-  accountId: text("account_id").notNull(),
-  providerId: text("provider_id").notNull(),
+  accountId: textBin("account_id").notNull(),
+  providerId: textBin("provider_id").notNull(),
   userId: varchar("user_id", { length: 36 }).notNull().references(() => user.id, { onDelete: "cascade" }),
   accessToken: text("access_token"),
   refreshToken: text("refresh_token"),
   idToken: text("id_token"),
-  accessTokenExpiresAt: timestamp("access_token_expires_at", { fsp: 3 }),
-  refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { fsp: 3 }),
+  accessTokenExpiresAt: datetime("access_token_expires_at", { fsp: 3 }),
+  refreshTokenExpiresAt: datetime("refresh_token_expires_at", { fsp: 3 }),
   scope: text("scope"),
   password: text("password"),
-  createdAt: timestamp("created_at", { fsp: 3 }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { fsp: 3 }).$onUpdate(() => new Date()).notNull(),
+  createdAt: datetime("created_at", { fsp: 3 }).default(sql`(now(3))`).notNull(),
+  updatedAt: datetime("updated_at", { fsp: 3 }).$onUpdate(() => new Date()).notNull(),
 }, (table) => [
   index("account_userId_idx").on(table.userId),
 ]);
@@ -54,11 +61,11 @@ export const account = mysqlTable("account", {
 // 메일 인증·비밀번호 재설정 등 일회용 값
 export const verification = mysqlTable("verification", {
   id: varchar("id", { length: 36 }).primaryKey(),
-  identifier: varchar("identifier", { length: 255 }).notNull(),
+  identifier: varcharBin("identifier", { length: 768 }).notNull(),
   value: text("value").notNull(),
-  expiresAt: timestamp("expires_at", { fsp: 3 }).notNull(),
-  createdAt: timestamp("created_at", { fsp: 3 }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { fsp: 3 }).defaultNow().$onUpdate(() => new Date()).notNull(),
+  expiresAt: datetime("expires_at", { fsp: 3 }).notNull(),
+  createdAt: datetime("created_at", { fsp: 3 }).default(sql`(now(3))`).notNull(),
+  updatedAt: datetime("updated_at", { fsp: 3 }).default(sql`(now(3))`).$onUpdate(() => new Date()).notNull(),
 }, (table) => [
   index("verification_identifier_idx").on(table.identifier),
 ]);
@@ -70,7 +77,7 @@ export const ssoProvider = mysqlTable("sso_provider", {
   oidcConfig: text("oidc_config"),
   samlConfig: text("saml_config"),
   userId: varchar("user_id", { length: 36 }).references(() => user.id, { onDelete: "cascade" }),
-  providerId: varchar("provider_id", { length: 255 }).notNull().unique(),
+  providerId: varcharBin("provider_id", { length: 255 }).notNull().unique(),
   organizationId: text("organization_id"),
   domain: text("domain").notNull(),
 });
@@ -78,22 +85,22 @@ export const ssoProvider = mysqlTable("sso_provider", {
 // 인증 경로 요청 수 제한 (Better Auth rateLimit storage: "database", 계획서 3.2)
 export const rateLimit = mysqlTable("rate_limit", {
   id: varchar("id", { length: 36 }).primaryKey(),
-  key: varchar("key", { length: 255 }).notNull().unique(),
+  key: varcharBin("key", { length: 255 }).notNull().unique(),
   count: int("count").notNull(),
   lastRequest: bigint("last_request", { mode: "number" }).notNull(),
 });
 
 // 운영 설정. 키마다 한 행, 값은 JSON
 export const appSettings = mysqlTable("app_settings", {
-  key: varchar("key", { length: 64 }).primaryKey(),
+  key: varcharBin("key", { length: 64 }).primaryKey(),
   value: text("value").notNull(),
-  updatedAt: timestamp("updated_at", { fsp: 3 }).notNull(),
+  updatedAt: datetime("updated_at", { fsp: 3 }).notNull(),
   updatedBy: varchar("updated_by", { length: 36 }),
 });
 
 // SSO 제공자마다 우리 쪽 설정 (계획서 4.3)
 export const ssoProviderSettings = mysqlTable("sso_provider_settings", {
-  providerId: varchar("provider_id", { length: 255 }).primaryKey(),
+  providerId: varcharBin("provider_id", { length: 255 }).primaryKey(),
   displayName: varchar("display_name", { length: 255 }).notNull(),
   showButton: boolean("show_button").default(true).notNull(),
   enabled: boolean("enabled").default(true).notNull(),
@@ -109,10 +116,10 @@ export const ssoProviderSettings = mysqlTable("sso_provider_settings", {
 export const invites = mysqlTable("invites", {
   id: varchar("id", { length: 36 }).primaryKey(),
   email: varchar("email", { length: 255 }),
-  tokenHash: varchar("token_hash", { length: 128 }).notNull().unique(),
+  tokenHash: varcharBin("token_hash", { length: 128 }).notNull().unique(),
   role: varchar("role", { length: 16 }).default("member").notNull(),
-  expiresAt: timestamp("expires_at", { fsp: 3 }).notNull(),
-  usedAt: timestamp("used_at", { fsp: 3 }),
+  expiresAt: datetime("expires_at", { fsp: 3 }).notNull(),
+  usedAt: datetime("used_at", { fsp: 3 }),
   createdBy: varchar("created_by", { length: 36 }).notNull(),
 });
 
@@ -120,15 +127,15 @@ export const invites = mysqlTable("invites", {
 export const apiKeys = mysqlTable("api_keys", {
   id: varchar("id", { length: 36 }).primaryKey(),
   userId: varchar("user_id", { length: 36 }).notNull().references(() => user.id),
-  omnirouteKeyId: varchar("omniroute_key_id", { length: 255 }).notNull().unique(),
+  omnirouteKeyId: varcharBin("omniroute_key_id", { length: 255 }).notNull().unique(),
   keyPreview: varchar("key_preview", { length: 16 }).notNull(),
   label: varchar("label", { length: 255 }),
   state: varchar("state", { length: 16 }).notNull(),
   disabledReason: varchar("disabled_reason", { length: 16 }),
   syncState: varchar("sync_state", { length: 16 }).default("synced").notNull(),
   budgetUsd: decimal("budget_usd", { precision: 12, scale: 6, mode: "number" }),
-  createdAt: timestamp("created_at", { fsp: 3 }).notNull(),
-  deletedAt: timestamp("deleted_at", { fsp: 3 }),
+  createdAt: datetime("created_at", { fsp: 3 }).notNull(),
+  deletedAt: datetime("deleted_at", { fsp: 3 }),
 }, (table) => [
   index("idx_api_keys_user").on(table.userId),
 ]);
@@ -140,15 +147,17 @@ export const omnirouteJobs = mysqlTable("omniroute_jobs", {
   payload: text("payload").notNull(),
   attempts: int("attempts").default(0).notNull(),
   lastError: text("last_error"),
-  nextRunAt: timestamp("next_run_at", { fsp: 3 }).notNull(),
-  doneAt: timestamp("done_at", { fsp: 3 }),
-});
+  nextRunAt: datetime("next_run_at", { fsp: 3 }).notNull(),
+  doneAt: datetime("done_at", { fsp: 3 }),
+}, (table) => [
+  index("idx_omniroute_jobs_due").on(table.doneAt, table.nextRunAt),
+]);
 
 // 여러 인스턴스에서 주기 작업 중복 실행 방지 (임대 잠금)
 export const jobLeases = mysqlTable("job_leases", {
-  name: varchar("name", { length: 64 }).primaryKey(),
-  holder: varchar("holder", { length: 255 }).notNull(),
-  lockedUntil: timestamp("locked_until", { fsp: 3 }).notNull(),
+  name: varcharBin("name", { length: 64 }).primaryKey(),
+  holder: varcharBin("holder", { length: 255 }).notNull(),
+  lockedUntil: datetime("locked_until", { fsp: 3 }).notNull(),
 });
 
 // 감사 기록
@@ -159,5 +168,7 @@ export const auditLog = mysqlTable("audit_log", {
   target: varchar("target", { length: 255 }),
   detail: text("detail"),
   ip: varchar("ip", { length: 64 }),
-  createdAt: timestamp("created_at", { fsp: 3 }).notNull(),
-});
+  createdAt: datetime("created_at", { fsp: 3 }).notNull(),
+}, (table) => [
+  index("idx_audit_log_created").on(table.createdAt),
+]);

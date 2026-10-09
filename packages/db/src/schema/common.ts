@@ -4,14 +4,19 @@
 //
 // 칼럼 종류와 DB별 타입 (생성기 packages/db/scripts/gen-schema.mjs 가 이 표대로 바꾼다)
 //   id        문자열 id          sqlite text · mysql varchar(36) · pg varchar(36)
-//   string    길이 있는 문자열   sqlite text · mysql/pg varchar(length)  — 기본 키·고유 키·인덱스는 이것만 쓴다
+//   string    길이 있는 문자열   sqlite text · mysql/pg varchar(length)  — 기본 키·고유 키·인덱스는 이것만 쓴다.
+//                                MySQL 인덱스 바이트 한도(utf8mb4 3072바이트) 때문에 키 칼럼은 768자 이하
 //   text      긴 문자열          text
 //   json      JSON 문자열        text. 앱에서 파싱한다. DB 전용 JSON 타입·연산은 쓰지 않는다
 //   integer   정수               sqlite integer · mysql int · pg integer
 //   bigint    큰 정수 (JS number) sqlite integer · mysql bigint · pg bigint
 //   boolean   참·거짓            sqlite integer(boolean) · mysql boolean(tinyint(1)) · pg boolean
-//   timestamp 시각 (UTC)         sqlite integer(timestamp_ms) · mysql timestamp(3) · pg timestamp  — Better Auth 생성기와 같은 규칙 (V26)
+//   timestamp 시각 (UTC)         sqlite integer(timestamp_ms) · mysql datetime(3) · pg timestamp
+//                                MySQL TIMESTAMP 는 2038-01-19 이후 값을 거부해 DATETIME(3) 을 쓴다 (값은 Drizzle 이 UTC 로 쓰고 읽는다)
 //   usd       금액               sqlite real · mysql/pg decimal(12,6). 칼럼 이름은 *_usd
+//
+// exact: true — 토큰·해시·식별자처럼 대소문자까지 정확히 같아야 하는 칼럼. MySQL·MariaDB 는 기본 정렬이
+// 대소문자를 무시하므로 utf8mb4_bin 으로 만든다. SQLite·Postgres 는 기본이 대소문자 구분이다.
 
 export type ColumnKind = "id" | "string" | "text" | "json" | "integer" | "bigint" | "boolean" | "timestamp" | "usd";
 
@@ -21,6 +26,8 @@ export interface Column {
   kind: ColumnKind;
   /** kind "string" 의 최대 길이 */
   length?: number;
+  /** 대소문자까지 정확 일치 (MySQL utf8mb4_bin). kind string·text 만 */
+  exact?: boolean;
   notNull?: boolean;
   primaryKey?: boolean;
   unique?: boolean;
@@ -64,7 +71,7 @@ export const TABLES: Record<string, Table> = {
     doc: "회원. Better Auth 칼럼 + 권한 칼럼 다섯",
     columns: {
       id: { name: "id", kind: "id", primaryKey: true },
-      name: { name: "name", kind: "string", length: 255, notNull: true },
+      name: { name: "name", kind: "text", notNull: true },
       email: { name: "email", kind: "string", length: 255, notNull: true, unique: true, doc: "항상 소문자로 저장한다 (V26)" },
       emailVerified: { name: "email_verified", kind: "boolean", notNull: true, default: false },
       image: { name: "image", kind: "text" },
@@ -84,7 +91,7 @@ export const TABLES: Record<string, Table> = {
     columns: {
       id: { name: "id", kind: "id", primaryKey: true },
       expiresAt: { name: "expires_at", kind: "timestamp", notNull: true },
-      token: { name: "token", kind: "string", length: 255, notNull: true, unique: true },
+      token: { name: "token", kind: "string", length: 255, exact: true, notNull: true, unique: true },
       createdAt: { name: "created_at", ...now },
       updatedAt: { name: "updated_at", kind: "timestamp", notNull: true, onUpdateNow: true },
       ipAddress: { name: "ip_address", kind: "text" },
@@ -99,8 +106,8 @@ export const TABLES: Record<string, Table> = {
     doc: "로그인 방식 (비밀번호, OAuth, SSO)",
     columns: {
       id: { name: "id", kind: "id", primaryKey: true },
-      accountId: { name: "account_id", kind: "text", notNull: true },
-      providerId: { name: "provider_id", kind: "text", notNull: true },
+      accountId: { name: "account_id", kind: "text", exact: true, notNull: true, doc: "IdP 의 사용자 id. Better Auth 가 이 값으로 계정을 찾는다" },
+      providerId: { name: "provider_id", kind: "text", exact: true, notNull: true },
       userId: { name: "user_id", kind: "id", notNull: true, references: { table: "user", column: "id", onDelete: "cascade" } },
       accessToken: { name: "access_token", kind: "text" },
       refreshToken: { name: "refresh_token", kind: "text" },
@@ -120,7 +127,7 @@ export const TABLES: Record<string, Table> = {
     doc: "메일 인증·비밀번호 재설정 등 일회용 값",
     columns: {
       id: { name: "id", kind: "id", primaryKey: true },
-      identifier: { name: "identifier", kind: "string", length: 255, notNull: true },
+      identifier: { name: "identifier", kind: "string", length: 768, exact: true, notNull: true, doc: "예: saml-session:${providerId}:${nameID}" },
       value: { name: "value", kind: "text", notNull: true },
       expiresAt: { name: "expires_at", kind: "timestamp", notNull: true },
       createdAt: { name: "created_at", ...now },
@@ -138,7 +145,7 @@ export const TABLES: Record<string, Table> = {
       oidcConfig: { name: "oidc_config", kind: "text", doc: "Better Auth 가 쓰는 JSON 문자열" },
       samlConfig: { name: "saml_config", kind: "text", doc: "Better Auth 가 쓰는 JSON 문자열" },
       userId: { name: "user_id", kind: "id", references: { table: "user", column: "id", onDelete: "cascade" } },
-      providerId: { name: "provider_id", kind: "string", length: 255, notNull: true, unique: true },
+      providerId: { name: "provider_id", kind: "string", length: 255, exact: true, notNull: true, unique: true },
       organizationId: { name: "organization_id", kind: "text" },
       domain: { name: "domain", kind: "text", notNull: true },
     },
@@ -150,7 +157,7 @@ export const TABLES: Record<string, Table> = {
     doc: "인증 경로 요청 수 제한 (Better Auth rateLimit storage: \"database\", 계획서 3.2)",
     columns: {
       id: { name: "id", kind: "id", primaryKey: true },
-      key: { name: "key", kind: "string", length: 255, notNull: true, unique: true, doc: "IP + 경로" },
+      key: { name: "key", kind: "string", length: 255, exact: true, notNull: true, unique: true, doc: "IP + 경로" },
       count: { name: "count", kind: "integer", notNull: true },
       lastRequest: { name: "last_request", kind: "bigint", notNull: true, doc: "epoch ms" },
     },
@@ -162,7 +169,7 @@ export const TABLES: Record<string, Table> = {
     owner: "app",
     doc: "운영 설정. 키마다 한 행, 값은 JSON",
     columns: {
-      key: { name: "key", kind: "string", length: 64, primaryKey: true, doc: "signup_mode, allowed_domains, default_limit_usd, default_max_keys, signup_requires_approval, daily_signup_cap, public_base_url, ..." },
+      key: { name: "key", kind: "string", length: 64, exact: true, primaryKey: true, doc: "signup_mode, allowed_domains, default_limit_usd, default_max_keys, signup_requires_approval, daily_signup_cap, public_base_url, ..." },
       value: { name: "value", kind: "json", notNull: true },
       updatedAt: { name: "updated_at", kind: "timestamp", notNull: true },
       updatedBy: { name: "updated_by", kind: "id", doc: "바꾼 회원 id. 시드는 NULL" },
@@ -173,7 +180,7 @@ export const TABLES: Record<string, Table> = {
     owner: "app",
     doc: "SSO 제공자마다 우리 쪽 설정 (계획서 4.3)",
     columns: {
-      providerId: { name: "provider_id", kind: "string", length: 255, primaryKey: true, doc: "Better Auth sso_provider.provider_id" },
+      providerId: { name: "provider_id", kind: "string", length: 255, exact: true, primaryKey: true, doc: "Better Auth sso_provider.provider_id" },
       displayName: { name: "display_name", kind: "string", length: 255, notNull: true },
       showButton: { name: "show_button", kind: "boolean", notNull: true, default: true },
       enabled: { name: "enabled", kind: "boolean", notNull: true, default: true },
@@ -192,7 +199,7 @@ export const TABLES: Record<string, Table> = {
     columns: {
       id: { name: "id", kind: "id", primaryKey: true },
       email: { name: "email", kind: "string", length: 255, doc: "소문자. role = admin 이면 필수" },
-      tokenHash: { name: "token_hash", kind: "string", length: 128, notNull: true, unique: true },
+      tokenHash: { name: "token_hash", kind: "string", length: 128, exact: true, notNull: true, unique: true },
       role: { name: "role", kind: "string", length: 16, notNull: true, default: "member" },
       expiresAt: { name: "expires_at", kind: "timestamp", notNull: true },
       usedAt: { name: "used_at", kind: "timestamp" },
@@ -206,7 +213,7 @@ export const TABLES: Record<string, Table> = {
     columns: {
       id: { name: "id", kind: "id", primaryKey: true },
       userId: { name: "user_id", kind: "id", notNull: true, references: { table: "user", column: "id" } },
-      omnirouteKeyId: { name: "omniroute_key_id", kind: "string", length: 255, notNull: true, unique: true },
+      omnirouteKeyId: { name: "omniroute_key_id", kind: "string", length: 255, exact: true, notNull: true, unique: true },
       keyPreview: { name: "key_preview", kind: "string", length: 16, notNull: true, doc: "끝 4자리" },
       label: { name: "label", kind: "string", length: 255 },
       state: { name: "state", kind: "string", length: 16, notNull: true, doc: "active | disabled | deleted" },
@@ -231,14 +238,16 @@ export const TABLES: Record<string, Table> = {
       nextRunAt: { name: "next_run_at", kind: "timestamp", notNull: true },
       doneAt: { name: "done_at", kind: "timestamp" },
     },
+    // 실행할 작업 찾기: done_at IS NULL AND next_run_at <= now
+    indexes: [{ name: "idx_omniroute_jobs_due", columns: ["doneAt", "nextRunAt"] }],
   },
   jobLeases: {
     name: "job_leases",
     owner: "app",
     doc: "여러 인스턴스에서 주기 작업 중복 실행 방지 (임대 잠금)",
     columns: {
-      name: { name: "name", kind: "string", length: 64, primaryKey: true, doc: "budget_rebalance, reconcile, ..." },
-      holder: { name: "holder", kind: "string", length: 255, notNull: true },
+      name: { name: "name", kind: "string", length: 64, exact: true, primaryKey: true, doc: "budget_rebalance, reconcile, ..." },
+      holder: { name: "holder", kind: "string", length: 255, exact: true, notNull: true },
       lockedUntil: { name: "locked_until", kind: "timestamp", notNull: true },
     },
   },
@@ -255,5 +264,6 @@ export const TABLES: Record<string, Table> = {
       ip: { name: "ip", kind: "string", length: 64 },
       createdAt: { name: "created_at", kind: "timestamp", notNull: true },
     },
+    indexes: [{ name: "idx_audit_log_created", columns: ["createdAt"] }],
   },
 };
