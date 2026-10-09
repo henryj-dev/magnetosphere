@@ -925,6 +925,7 @@ TC-S5.T3.f  부트스트랩 전체가 제한 시간 하나 안에 끝난다
 
 【작업】
 1. `node scripts/init.mjs` (나중에 `npx magnetosphere init`): `.env` 생성. 무작위 값: `INITIAL_PASSWORD`, V21 목록 전부, `APP_ENCRYPTION_KEY`(32바이트), `BETTER_AUTH_SECRET`. 고정 값: `REQUIRE_API_KEY=true`, `PRICING_SYNC_ENABLED=true`. 기존 `.env`가 있으면 덮지 않고 종료코드 1. 커밋.
+2. 회원 앱용 `OMNIROUTE_INITIAL_PASSWORD`는 `.env`가 아니라 최초 설치 때만 쓰는 `.env.setup`에 넣는다 (S5 보안 리뷰 M2). 이 비밀번호로는 admin 접근 토큰도 만들 수 있어서, 설치 뒤에도 회원 앱 환경에 남으면 회원 앱이 탈취됐을 때 write 최소 범위(계획서 5.8)가 의미 없어진다. init 출력과 설치 문서에 "최초 설치(관리자 생성·OmniRoute 연결)가 끝나면 `.env.setup`을 지우고 app 을 다시 띄운다"를 적는다. 커밋.
 
 【테스트】
 ```
@@ -937,10 +938,14 @@ TC-S6.T1.b  두 번 생성한 비밀 값이 서로 다르다
 TC-S6.T1.c  기존 .env 를 덮지 않는다
   단언:  .env 있는 상태에서 init → 종료코드 1, 파일 해시 불변
   검출:  재실행으로 APP_ENCRYPTION_KEY 가 바뀌어 저장된 비밀 값을 영영 못 읽는 것
+TC-S6.T1.d  OmniRoute 비밀번호는 설치 뒤 지울 파일에만 들어간다 (S5 보안 리뷰 M2)
+  단언:  init → .env 에 OMNIROUTE_INITIAL_PASSWORD 0건, .env.setup 에 1건(INITIAL_PASSWORD 와 같은 값).
+         init 표준 출력과 deploy/README.md 에 ".env.setup" 제거 안내가 있다
+  검출:  관리 비밀번호가 회원 앱 상시 환경에 남아 회원 앱 탈취가 곧 OmniRoute admin 탈취가 되는 것
 ```
 
 【통과】
-- [ ] G-S6.1 ~ G-S6.3 통과
+- [ ] G-S6.1 ~ G-S6.3, G-S6.26 통과
 
 ### ☐ S6.T2 — Docker Compose와 Caddy
 선행 S6.T1 · 산출 `docker-compose.yml`, `deploy/Caddyfile`, `apps/server/Dockerfile` · 되돌리기 커밋 1개
@@ -950,6 +955,7 @@ TC-S6.T1.c  기존 .env 를 덮지 않는다
 2. `app` 기본값에 `TRUSTED_PROXIES`(Compose 내부망의 Caddy)를 넣는다. Node 런타임은 신뢰하지 않는 상대가 `X-Forwarded-For`를 보내면 경고를 한 번 남긴다 — TCP 로 열면 시작 확인(TC-S4.T1.e)이 늘 통과해, 프록시 설정을 빠뜨려도 조용히 Caddy IP 하나로 묶이기 때문이다 (S4 보안 리뷰 M3). 커밋.
 3. 마이그레이션 단계: `app` 이 뜨기 전에 커밋된 마이그레이션을 적용하는 일회성 서비스(또는 진입 명령). 서버는 마이그레이션을 직접 적용하지 않는다 (S4). 커밋.
 4. 운영 문서(`deploy/README.md`)에 "최초 설치는 인스턴스 하나로 한다"를 적는다. 관리자가 없는 채로 여러 인스턴스가 동시에 뜨면 서로 설치 토큰을 덮어 마지막에 뜬 인스턴스의 토큰만 듣는다 (S4). 커밋.
+5. `OMNIROUTE_INITIAL_PASSWORD`를 최초 설치 때만 넘긴다 (S5 보안 리뷰 M2): `app` 서비스는 `env_file`에 `.env.setup`을 `required: false`로 걸어, 파일을 지우고 다시 띄우면 변수가 사라지게 한다. 회원 앱(Node·Workers)은 관리자가 있는데 `OMNIROUTE_INITIAL_PASSWORD`가 있으면 시작할 때(Workers 는 첫 요청 때) 경고를 한 줄 남긴다. 값은 출력하지 않는다. 커밋.
 
 【테스트】
 ```
@@ -972,10 +978,14 @@ TC-S6.T2.e  Caddy 뒤에서 클라이언트별로 세고, 프록시 설정 누�
 TC-S6.T2.f  빈 DB 에서 Compose 를 띄우면 마이그레이션이 먼저 적용된다
   단언:  프로필 sqlite·mysql·postgres 각각 빈 볼륨으로 up → GET /api/setup 200 {needed:true}, 마이그레이션 기록 테이블의 행 수 == 커밋된 마이그레이션 수
   검출:  마이그레이션 단계가 없어 첫 요청이 "no such table" 500 이 되는 것 (S4 는 서버가 마이그레이션을 적용하지 않는다)
+TC-S6.T2.g  설치가 끝났는데 OmniRoute 비밀번호가 남아 있으면 경고하고, 파일을 지우면 사라진다 (S5 보안 리뷰 M2)
+  단언:  관리자 있음 + OMNIROUTE_INITIAL_PASSWORD 있음 → 시작 로그에 경고 정확히 1줄, 비밀번호 값 0건. 관리자 없음 또는 변수 없음 → 경고 0줄.
+         .env.setup 을 지우고 docker compose up -d app → 컨테이너 환경(docker compose exec app env)에 OMNIROUTE_INITIAL_PASSWORD 0건
+  검출:  설치 뒤에도 관리 비밀번호가 회원 앱에 남아 write 최소 범위가 무력해지는데 아무 신호가 없는 것
 ```
 
 【통과】
-- [ ] G-S6.4 ~ G-S6.7, G-S6.19, G-S6.20, G-S6.25 통과
+- [ ] G-S6.4 ~ G-S6.7, G-S6.19, G-S6.20, G-S6.25, G-S6.27 통과
 
 ### ☐ S6.T3 — Workers 설정
 선행 없음 · 산출 `apps/server/wrangler.toml` (환경 `d1`, `mysql`, `pg`) · 되돌리기 커밋 1개
@@ -1018,7 +1028,7 @@ TC-S6.T3.d  Workers 배포 전에 마이그레이션이 적용된다
 【테스트】
 ```
 TC-S6.T4.a ~ f  조합마다 설치 → 관리자 → 부트스트랩 → 로그인이 된다
-  단언:  조합 하나당 setup 201, omniroute 연결 "ok", 로그인 200, 세션 쿠키 존재
+  단언:  조합 하나당 setup 201, 응답 omniroute "connected", 로그인 200, 세션 쿠키 존재
   검출:  특정 런타임·DB 조합에서만 설치가 깨지는 것 — 1단계 완료 기준 "여섯 조합" 위반
 ```
 
@@ -1044,6 +1054,8 @@ TC-S6.T4.a ~ f  조합마다 설치 → 관리자 → 부트스트랩 → 로그
 | G-S6.23 | TC-S6.T3.d | `pnpm -C apps/server test:workers -t "TC-S6.T3.d"` | 종료코드 0 |
 | G-S6.24 | 설치 운영 안내 | grep `한 인스턴스` in `deploy/README.md` | ≥ 1 |
 | G-S6.25 | Compose 신뢰 프록시 기본값 | grep `TRUSTED_PROXIES` in `docker-compose.yml` | ≥ 1 |
+| G-S6.26 | TC-S6.T1.d | `node --test --test-name-pattern="TC-S6.T1.d" scripts/init.test.mjs` | 종료코드 0 |
+| G-S6.27 | TC-S6.T2.g | `pnpm test:deploy -t "TC-S6.T2.g"` | 종료코드 0 |
 
 `node scripts/gate.mjs S6 --seal`
 
@@ -1056,6 +1068,9 @@ TC-S6.T4.a ~ f  조합마다 설치 → 관리자 → 부트스트랩 → 로그
 **브랜치** `s7/guard`.
 
 **백로그** (S7 에서 계획서 2차 항목으로 옮길지 정한다)
+- S5: OmniRoute 토큰 붙여 넣기 화면. API(`GET`·`PUT /api/setup/omniroute`)만 있고 화면이 없다 → 관리 화면 단계.
+- S5: OmniRoute 접근 토큰 갱신. 부트스트랩 토큰은 3650일짜리이고 갱신·교체 흐름이 없다 → 운영 단계.
+- S5: 계약 테스트 TC-S5.T3 이 만든 접근 토큰 회수. apps/server 계약 테스트는 OmniRoute 에 시험 토큰을 남긴다 (컨테이너를 다시 만들면 사라진다).
 - S4 보안 리뷰 L4: `job_leases` 임대 TTL 이 주기보다 5초 짧을 뿐이라, 작업이 주기보다 오래 걸리면 다음 경계에서 다른 인스턴스가 같은 작업을 겹쳐 돈다. 작업 중 임대 연장(하트비트)과 펜싱 토큰(임대마다 늘어나는 번호를 작업 결과 쓰기에 붙여 늦게 끝난 쪽의 쓰기를 거부)을 검토한다.
 
 ### ☐ S7.T1 — CI 매트릭스
