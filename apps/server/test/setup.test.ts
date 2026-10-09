@@ -1,7 +1,10 @@
 // 최초 설치 TC (pnpm test). Node 진입점을 실제로 띄우고 콘솔 출력(log)에서 설치 토큰을 읽는다.
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ADMIN, boot, closeAll, opened, post, sql, tokenIn } from "./helpers.ts";
+import { connectNode } from "@magnetosphere/runtime/node";
+import { createCipher } from "@magnetosphere/runtime/crypto";
+import { ensureSetupToken, restoreSetupToken, runSetup } from "../src/setup/index.ts";
+import { ADMIN, boot, closeAll, makeTestEnv, opened, post, sql, tokenIn, TEST_ENCRYPTION_KEY } from "./helpers.ts";
 
 afterEach(closeAll);
 
@@ -139,6 +142,49 @@ describe("TC-S4.T4.e 설치 전에는 가입을 막고, 이미 있는 이메일�
     expect(await res.json()).toEqual({ error: "email_taken" });
     expect(await sql(r.t, "SELECT 1 FROM app_settings WHERE key = 'setup_token_hash'")).toHaveLength(1);
     expect((await post(r, "/api/setup", { token, ...ADMIN, email: "real-admin@example.com" })).status).toBe(201);
+  });
+});
+
+describe("관리자 생성 실패 뒤 설치 토큰 복원 (S4 보안 리뷰 L5)", () => {
+  async function openDb() {
+    const t = await makeTestEnv();
+    const h = await connectNode(t.env.DATABASE_URL);
+    const token = (await ensureSetupToken(h, { rotate: true, log: () => {} }))!;
+    const cipher = async () => createCipher(TEST_ENCRYPTION_KEY);
+    const tokenRows = async () => (await h.db.select().from(h.schema.appSettings)).filter((r: { key: string }) => r.key === "setup_token_hash");
+    return { t, h, token, cipher, tokenRows, close: async () => (await h.close(), t.cleanup()) };
+  }
+
+  it("계정 행을 못 만들면 user 를 지우고 토큰을 되돌려 같은 토큰으로 다시 할 수 있다", async () => {
+    const d = await openDb();
+    try {
+      await d.h.db.run("CREATE TRIGGER fail_account BEFORE INSERT ON account BEGIN SELECT RAISE(ABORT, 'boom'); END");
+      await expect(runSetup(d.h, { token: d.token, ...ADMIN }, d.cipher)).rejects.toThrow();
+      expect(await d.h.db.select().from(d.h.schema.user)).toHaveLength(0);
+      expect(await d.tokenRows()).toHaveLength(1);
+      await d.h.db.run("DROP TRIGGER fail_account");
+      expect(await runSetup(d.h, { token: d.token, ...ADMIN }, d.cipher)).toMatchObject({ ok: true });
+    } finally {
+      await d.close();
+    }
+  });
+
+  it("그사이 다른 인스턴스가 새 토큰을 넣었으면 옛 토큰으로 덮지 않는다", async () => {
+    const d = await openDb();
+    try {
+      // user 행이 들어간 직후(토큰은 이미 소비) 다른 인스턴스가 새 토큰 해시를 넣고, 계정 행은 실패하게 한다
+      await d.h.db.run(`CREATE TRIGGER rotate AFTER INSERT ON user BEGIN
+        INSERT INTO app_settings (key, value, updated_at) VALUES ('setup_token_hash', '"other-instance-hash"', 0); END`);
+      await d.h.db.run("CREATE TRIGGER fail_account BEFORE INSERT ON account BEGIN SELECT RAISE(ABORT, 'boom'); END");
+      await expect(runSetup(d.h, { token: d.token, ...ADMIN }, d.cipher)).rejects.toThrow();
+      const rows = await d.tokenRows();
+      expect(rows.map((r: { value: string }) => JSON.parse(r.value))).toEqual(["other-instance-hash"]);
+      // 직접 불러도 같다: 행이 있으면 그대로, 없으면 넣는다
+      await restoreSetupToken(d.h, "old-hash");
+      expect((await d.tokenRows()).map((r: { value: string }) => JSON.parse(r.value))).toEqual(["other-instance-hash"]);
+    } finally {
+      await d.close();
+    }
   });
 });
 

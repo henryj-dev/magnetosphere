@@ -56,6 +56,17 @@ export async function writeSetting(h: DbHandle, key: string, value: unknown, upd
   await h.db.insert(t).values({ key, value: JSON.stringify(value), updatedAt: new Date(), updatedBy });
 }
 
+/**
+ * 소비한 설치 토큰 해시를 되돌린다. 그사이 다른 인스턴스가 새 토큰을 넣었으면(행이 있으면) 건드리지 않는다
+ * — 새 토큰을 옛 토큰으로 덮으면 운영자가 방금 본 토큰이 듣지 않는다 (S4 보안 리뷰 L5).
+ */
+export async function restoreSetupToken(h: DbHandle, hash: string): Promise<void> {
+  const t = h.schema.appSettings;
+  const row = { key: SETUP_TOKEN_KEY, value: JSON.stringify(hash), updatedAt: new Date(), updatedBy: null };
+  if (h.provider === "mysql") await h.db.insert(t).ignore().values(row);
+  else await h.db.insert(t).values(row).onConflictDoNothing();
+}
+
 /** 지운 행 수 (MySQL 은 RETURNING 이 없어 영향 행 수로 본다) */
 async function deleteCount(h: DbHandle, table: any, where: unknown): Promise<number> {
   if (h.provider === "mysql") {
@@ -155,7 +166,7 @@ export async function runSetup(h: DbHandle, input: Partial<SetupInput>, cipher: 
     // 반쯤 만든 관리자를 지우고 토큰을 되돌려 다시 시도할 수 있게 한다 (D1 은 대화형 트랜잭션이 없다)
     await h.db.delete(h.schema.account).where(eq(h.schema.account.userId, userId));
     await h.db.delete(h.schema.user).where(eq(h.schema.user.id, userId));
-    await writeSetting(h, SETUP_TOKEN_KEY, stored, null);
+    await restoreSetupToken(h, stored);
     // 위 검사와 관리자 생성 사이에 같은 이메일이 들어왔으면 고유 제약 위반이다. 500 대신 409 로 알린다
     if (await findUserByEmail(h.db, { user: h.schema.user }, v.email)) return EMAIL_TAKEN;
     throw e;
