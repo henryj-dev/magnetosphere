@@ -234,6 +234,11 @@ export const GATES = {
       { id: "G-S7.1", how: "cmd", desc: "TC-S7.T1.a·b CI 매트릭스 여섯 조합 (음성 대조 포함)", cmd: "node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-5combos.yml --expect 6 --expect-fail" },
       // grep 종료코드 1(일치 없음)만 통과다. 경로가 없어 grep 이 2 로 끝나면 실패한다
       { id: "G-S7.2", how: "cmd", desc: "TC-S7.T2.a 확인용 코드가 남지 않음", cmd: 'test ! -e spikes && { grep -rn --exclude-dir=node_modules --exclude-dir=build --exclude-dir=.svelte-kit --exclude-dir=.wrangler "spikes/" apps packages scripts tests; test $? -eq 1; }' },
+      // 꺼진 테스트(.only·.skip·.skipIf·.todo·x접두)와 미구현 표식. 빌드 산출(build·.svelte-kit·.wrangler·dist)은 보지 않는다 (node_modules 는 원래 안 본다)
+      { id: "G-S7.3", how: "grep", desc: "TC-S7.T3.a 건너뛴 테스트와 미구현 표식 0", pattern: "\\.(only|skip|skipIf|todo)\\(|\\b(xit|xdescribe|xtest)\\(|TODO|FIXME|not implemented", in: ["apps", "packages", "tests"], exclude: ["apps/web/build/**", "**/.svelte-kit/**", "**/.wrangler/**", "**/dist/**"], op: "==", limit: 0 },
+      // S0~S6 봉인이 모두 유효(✅)하다. 하나라도 ⚠·🔓·🔒 면 실패
+      { id: "G-S7.4", how: "cmd", desc: "앞 단계 봉인 모두 유효", cmd: `node -e 'const r=JSON.parse(require("child_process").execFileSync(process.execPath,["scripts/gate.mjs","--status","--json"],{encoding:"utf8"}));const want=["S0","S1","S2","S3","S4","S5","S6"];const bad=want.filter(p=>r.find(x=>x.phase===p)?.state!=="sealed");if(bad.length){console.error("봉인 무효·없음: "+bad.join(", "));process.exit(1)}console.log("S0~S6 봉인 유효")'` },
+      { id: "G-S7.5", how: "cmd", desc: "처음 커밋부터 순서 위반 없음", cmd: 'node scripts/gate.mjs --assert-order --base "$(git rev-list --max-parents=0 HEAD)"' },
     ],
   },
 };
