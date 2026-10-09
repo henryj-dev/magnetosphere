@@ -1,14 +1,24 @@
 // TC 공용: DB 하나에 Better Auth 를 올리고, user 행을 읽고 고치는 도구.
 import { eq } from "drizzle-orm";
-import { createAuth, type AuthConfig } from "../src/index.ts";
+import { createAuth, type AuthConfig, type MailMessage, type Mailer } from "../src/index.ts";
 import { BASE } from "./client.ts";
 import type { TestDb } from "./db.ts";
 
 export const SECRET = "mg-test-secret-mg-test-secret-mg-test-secret";
 
-export function makeAuth(h: TestDb, extra: Partial<AuthConfig> = {}) {
-  return createAuth({ database: h, baseURL: BASE, secret: SECRET, trustedOrigins: [BASE], ...extra });
+/** 보낸 메일을 모아 두는 어댑터 */
+export function outboxMailer() {
+  const outbox: MailMessage[] = [];
+  return { outbox, mailer: { send: async (m: MailMessage) => void outbox.push(m) } satisfies Mailer };
 }
+
+export function makeAuth(h: TestDb, extra: Partial<AuthConfig> = {}) {
+  const { outbox, mailer } = outboxMailer();
+  return { ...createAuth({ database: h, baseURL: BASE, secret: SECRET, trustedOrigins: [BASE], mailer, ...extra }), outbox };
+}
+
+/** 메일 본문에서 링크 하나를 꺼낸다 */
+export const linkIn = (text: string) => text.match(/https?:\/\/\S+/)?.[0];
 
 const user = (h: TestDb) => (h.schema as any).user;
 

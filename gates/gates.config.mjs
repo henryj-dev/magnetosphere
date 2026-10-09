@@ -91,6 +91,10 @@ export const GATES = {
       { id: "G-S3.2", how: "test", desc: "TC-S3.T1.b 이메일 인증 전 로그인 거부 (네 DB)", cmd: 'pnpm -C packages/auth test -t "TC-S3.T1.b"' },
       { id: "G-S3.3", how: "test", desc: "TC-S3.T1.c 세션 쿠키 속성", cmd: 'pnpm -C packages/auth test -t "TC-S3.T1.c"' },
       { id: "G-S3.4", how: "cmd", desc: "TC-S3.T1.d SSO 공개 관리 경로 차단 (음성 대조 포함)", cmd: "node scripts/check-sso-paths.mjs && node scripts/check-sso-paths.mjs --fixture test/fixtures/sso-unguarded --expect-fail" },
+      { id: "G-S3.5", how: "test", desc: "TC-S3.T2.a 콘솔 인증 링크로 인증 완료", cmd: 'pnpm -C packages/auth test -t "TC-S3.T2.a"' },
+      { id: "G-S3.6", how: "test", desc: "TC-S3.T2.b SMTP 어댑터 → mailpit", cmd: "pnpm -C packages/auth test:smtp" },
+      { id: "G-S3.7", how: "test", desc: "TC-S3.T2.c Resend·Cloudflare 요청과 오류 전달", cmd: 'pnpm -C packages/auth test -t "TC-S3.T2.c"' },
+      { id: "G-S3.8", how: "test", desc: "TC-S3.T2.d 재설정 토큰 1회용", cmd: 'pnpm -C packages/auth test -t "TC-S3.T2.d"' },
       { id: "G-S3.12", how: "json", desc: "Better Auth 버전 고정", file: "packages/auth/package.json", path: "dependencies.better-auth", op: "==", value: "1.7.7" },
       // 권한 칼럼 다섯은 packages/db 의 USER_ADDITIONAL_FIELDS 에 정의되고 auth 구성이 AUTH_SCHEMA_OPTIONS 로 그대로 쓴다.
       // 칼럼 이름과 input: false 가 한 줄에 있는 정의만 센다 (주석·TABLES 의 칼럼 정의는 걸리지 않는다).

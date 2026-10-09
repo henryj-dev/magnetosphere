@@ -6,6 +6,10 @@ import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { createAuthMiddleware } from "better-auth/api";
 import { AUTH_SCHEMA_OPTIONS } from "@magnetosphere/db/src/auth-options.ts";
+import { resetPasswordMessage, verifyEmailMessage } from "./mail/messages.ts";
+import type { Mailer } from "./mail/types.ts";
+
+export type { Mailer, MailMessage } from "./mail/types.ts";
 
 // @better-auth/sso 1.7.7 이 공개 경로로 여는 관리 엔드포인트 전부 (dist/index.mjs 의 createAuthEndpoint 경로).
 // 기본값은 로그인한 누구나 IdP 를 등록·수정·삭제할 수 있고, 0단계에서 /sso/register 로 관리자 계정을 가로챘다
@@ -36,6 +40,8 @@ export interface AuthConfig {
   baseURL: string;
   secret: string;
   trustedOrigins?: string[];
+  /** 인증·비밀번호 재설정 메일을 보낼 어댑터 (src/mail) */
+  mailer: Mailer;
 }
 
 /** 가입·로그인 요청의 이메일을 다듬는다. Better Auth 도 소문자로 바꾸지만 앞뒤 공백까지 우리가 먼저 정리한다 (V26). */
@@ -60,6 +66,11 @@ export function authOptions(cfg: AuthConfig) {
       ...AUTH_SCHEMA_OPTIONS.emailAndPassword,
       // 인증 전에는 로그인되지 않는다 (계획서 4.2 "인증 후 키 발급"의 전제)
       requireEmailVerification: true,
+      sendResetPassword: async ({ user, url }) => cfg.mailer.send(resetPasswordMessage(user.email, url)),
+    },
+    emailVerification: {
+      sendOnSignUp: true,
+      sendVerificationEmail: async ({ user, url }) => cfg.mailer.send(verifyEmailMessage(user.email, url)),
     },
     disabledPaths: SSO_DISABLED_PATHS,
     hooks: { before: normalizeEmailBody },

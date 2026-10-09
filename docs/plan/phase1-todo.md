@@ -514,10 +514,11 @@ TC-S3.T1.e  Better Auth 구성과 스키마 생성기가 같은 옵션 객체를
 - [ ] G-S3.1 ~ G-S3.4, G-S3.14 통과
 
 ### ☐ S3.T2 — 메일 어댑터 네 종류
-선행 S3.T1 · 산출 `packages/auth/src/mail/{smtp,resend,cloudflare,console}.ts` · 되돌리기 커밋 1개
+선행 S3.T1 · 산출 `packages/auth/src/mail/{smtp,resend,cloudflare,console,types,messages,index}.ts`, `packages/auth/test/mailpit.compose.yml`, `packages/auth/scripts/test-smtp.mjs` · 되돌리기 커밋 1개
 
 【작업】
-1. 공통 인터페이스 `send({to, subject, text, html})`. SMTP(nodemailer, Node 전용), Resend(fetch), Cloudflare Email Service(Workers 바인딩/REST), 콘솔. 인증 메일·비밀번호 재설정 메일 연결. 커밋.
+1. 공통 인터페이스 `send({to, subject, text, html})`. SMTP(nodemailer, Node 전용 — 진입점 `@magnetosphere/auth/mail/smtp`로만 내보내 Workers 가 부르는 `.`·`./mail`에 섞이지 않게), Resend(fetch), Cloudflare Email Service(Workers 바인딩/REST), 콘솔. 인증 메일·비밀번호 재설정 메일 연결. 커밋.
+   - 실측: Better Auth 는 가입 때 `sendVerificationEmail` 예외를 잡아 기록만 하고 가입은 200 으로 끝낸다 ("Failed to run background task"). 메일 실패를 가입 실패로 바꾸지 않는다. 재전송은 `/send-verification-email`.
 
 【테스트】
 ```
@@ -525,7 +526,8 @@ TC-S3.T2.a  콘솔 어댑터로 받은 인증 링크가 실제로 인증을 끝�
   단언:  가입 → 콘솔 출력에서 URL 추출 → GET → 이후 로그인 200
   검출:  링크의 기준 주소(BETTER_AUTH_URL)가 틀려 운영에서 인증 메일이 깨진 링크가 되는 것
 TC-S3.T2.b  SMTP 어댑터가 실제 SMTP 서버로 보낸다
-  단언:  mailpit 컨테이너 → 가입 → mailpit API 에 수신 1건, 제목에 인증 문구
+  단언:  mailpit 컨테이너(axllent/mailpit:v1.31.2, SMTP 127.0.0.1:31025·API :38025, SMTP AUTH 켬) → 가입 → mailpit API 에 수신 1건,
+         제목이 인증 메일 제목. requireTLS 인데 서버가 STARTTLS 를 내지 않으면 예외 + 수신 0
   검출:  TLS·인증 옵션 처리 오류로 운영 SMTP 에서만 실패하는 것
 TC-S3.T2.c  Resend·Cloudflare 어댑터가 올바른 요청을 만든다
   단언:  fetch 가로채기 → 엔드포인트·인증 헤더·수신자가 기대값과 일치, 비 2xx 응답이면 예외

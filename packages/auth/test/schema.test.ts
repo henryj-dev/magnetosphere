@@ -5,6 +5,7 @@ import { getAuthTables } from "better-auth/db";
 import { describe, expect, test } from "vitest";
 import { TABLES } from "@magnetosphere/db/src/schema/common.ts";
 import { authOptions } from "../src/index.ts";
+import { consoleMailer } from "../src/mail/index.ts";
 import { BASE } from "./client.ts";
 import { SECRET } from "./helpers.ts";
 
@@ -46,7 +47,7 @@ export function diffAuthTables(options: Parameters<typeof getAuthTables>[0]): st
   return problems;
 }
 
-const options = () => authOptions({ database: { db: {}, provider: "sqlite", schema: {} }, baseURL: BASE, secret: SECRET });
+const options = () => authOptions({ database: { db: {}, provider: "sqlite", schema: {} }, baseURL: BASE, secret: SECRET, mailer: consoleMailer() });
 
 describe("TC-S3.T1.e 구성과 스키마", () => {
   test("TC-S3.T1.e Better Auth 구성의 테이블이 공통 정의와 같다", () => {

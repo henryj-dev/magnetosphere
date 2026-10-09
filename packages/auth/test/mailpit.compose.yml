@@ -1,0 +1,18 @@
+# TC-S3.T2.b 용 SMTP 서버 (pnpm -C packages/auth test:smtp 가 띄운다). 데이터는 남기지 않는다. 포트는 127.0.0.1 에만 연다.
+# SMTP 인증은 아무 계정이나 받되 켜 둔다. 어댑터가 AUTH 를 실제로 거치는지 보려는 것이다 (평문 연결이라 insecure 허용).
+name: magnetosphere-mail-test
+
+services:
+  mailpit:
+    image: axllent/mailpit:v1.31.2
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    ports:
+      - "127.0.0.1:31025:1025"
+      - "127.0.0.1:38025:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 2s
+      timeout: 5s
+      retries: 30

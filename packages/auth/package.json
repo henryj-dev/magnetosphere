@@ -4,16 +4,20 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./mail": "./src/mail/index.ts",
+    "./mail/smtp": "./src/mail/smtp.ts"
   },
   "scripts": {
-    "test": "node scripts/test.mjs"
+    "test": "node scripts/test.mjs",
+    "test:smtp": "node scripts/test-smtp.mjs"
   },
   "dependencies": {
     "@better-auth/core": "1.7.7",
     "@better-auth/sso": "1.7.7",
     "@magnetosphere/db": "workspace:*",
-    "better-auth": "1.7.7"
+    "better-auth": "1.7.7",
+    "nodemailer": "10.0.10"
   },
   "devDependencies": {
     "@libsql/client": "0.18.0",
