@@ -213,9 +213,8 @@ jobs:
           git worktree add --detach "$RUNNER_TEMP/s1" "$head"
           echo "S1_ROOT=$RUNNER_TEMP/s1" >> "$GITHUB_ENV"
           # G-S1.4 가 읽는 V16 수집 로그(spikes/v16/paths.log)는 봉인 뒤 커밋에서야 저장소에 들어갔다 (그 전에는 이 컴퓨터에만 있었다).
-          # 그 로그를 추가한 커밋에서 꺼내 봉인 커밋 작업 트리에 둔다
-          added=$(git log -1 --format=%H --diff-filter=A -- spikes/v16/paths.log)
-          git show "$added:spikes/v16/paths.log" > "$RUNNER_TEMP/s1/spikes/v16/paths.log"
+          # 그 로그를 추가한 커밋(8af3175, 고정)에서 꺼내 봉인 커밋 작업 트리에 둔다. 커밋이나 파일이 없으면 이 스텝이 실패한다
+          git show "8af317565f41ffc12d64464771a3a843c67ece4c:spikes/v16/paths.log" > "$RUNNER_TEMP/s1/spikes/v16/paths.log"
       - name: 확인용 코드 의존성
         working-directory: ${{ runner.temp }}/s1
         run: |
