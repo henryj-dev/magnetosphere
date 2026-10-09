@@ -1,0 +1,53 @@
+{
+  "item": "V26",
+  "question": "better-auth 1.7.7 + @better-auth/sso 1.7.7 + Drizzle 어댑터가 SQLite·MySQL 8.0·MariaDB 10.11·Postgres 14 에서 테이블 생성, 가입, 로그인, 세션 시각 왕복을 같게 처리하는가? resolveUser 가 트랜잭션 안에서 돌아 예외 시 사용자 생성이 되돌려지는가? 대소문자만 다른 이메일 중복이 네 DB 에서 같게 처리되는가?",
+  "answer": {
+    "tables": "Better Auth 생성기(@better-auth/drizzle-adapter relations-v2 createSchema)로 sqlite·mysql·pg 스키마를 만들고 drizzle-kit/api generate*Migration 의 DDL 로 빈 DB 에 적용 — 네 DB 모두 성공. MySQL 스키마는 id·email 이 VARCHAR(36)/VARCHAR(255), 시각은 timestamp(fsp 3).",
+    "sign_up_sign_in_session": {
+      "result": "네 DB 모두 가입 200, 로그인 200, get-session 200 (즉시 만료 없음)",
+      "expiresAt_roundtrip": "네 DB 모두 API 값과 DB 값 차이 0ms. 로그인 시각 + 7일 과의 차이 50~52ms (요청 처리 시간). 테스트 프로세스 TZ=Asia/Seoul 로 돌려 시간대 오차가 섞이면 드러나게 했다.",
+      "stored_raw": "SQLite 정수 epoch ms, MySQL·MariaDB 'YYYY-MM-DD HH:MM:SS.mmm'(UTC, time_zone=SYSTEM=UTC 컨테이너), Postgres timestamp without time zone 에 UTC 값"
+    },
+    "resolveUser_transaction": {
+      "result": "네 DB 모두 롤백된다 (user·account 증가 0). 대조군 continue 는 네 DB 모두 user +1, account +1.",
+      "how": "실제 Keycloak 26.4.0 OIDC 로그인(로그인 화면 POST → code 리다이렉트)을 DB 마다 4번씩 Better Auth 의 /sso/callback/:providerId 까지 몰았다. @better-auth/sso 1.7.7 의 OIDC 콜백은 runWithTransaction(adapter, ...) 안에서 provider 행 잠금 → resolveUser → handleOAuthUserInfo(user·account 생성) 순으로 실행한다 (dist/index.mjs 3955~4020행). 손으로 만든 트랜잭션은 없다.",
+      "cases": [
+        "resolveUser 가 바로 throw → error=SSO_USER_RESOLUTION_FAILED, 증가 0. (resolveUser 는 user 생성 전에 불리므로 이 경우만으로는 롤백을 증명하지 못한다)",
+        "resolveUser 가 두 번째 인자 { database }(트랜잭션 어댑터)로 user 행을 create 하고, 같은 어댑터로 findOne 해 보이는 것을 확인한 뒤 throw → 네 DB 모두 그 행이 사라짐. 트랜잭션이 실제로 걸리고 롤백됨을 보여주는 핵심 증거.",
+        "resolveUser 는 continue, databaseHooks.account.create.before 가 throw (Better Auth 가 user 를 넣은 뒤 account 에서 실패) → error=unable+to+create+user, user 증가 0.",
+        "resolveUser 가 받은 providerClaims.groups = ['omni-admins'] (Keycloak groups 클레임 수신 확인)"
+      ],
+      "preconditions": "sso 플러그인은 resolveUser 가 있으면 adapter.options.adapterConfig.transaction 이 함수인지 검사한다. Drizzle 어댑터는 transaction 기본값이 false 라서 drizzleAdapter(db, { transaction: true }) 를 줘야 한다. 없으면 error=SSO_USER_RESOLUTION_REQUIRES_NATIVE_TRANSACTIONS 로 로그인이 거부된다 (안전한 쪽으로 실패). secondaryStorage 를 쓰면 세션을 DB 에도 남겨야 한다 (SSO_USER_RESOLUTION_REQUIRES_DATABASE_SESSIONS)."
+    },
+    "email_case": {
+      "result": "네 DB 모두 'A@x.test' 가입 200 후 'a@x.test' 가입 422 USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL. lower(email) 기준 행 1개.",
+      "better_auth_lowercases": "Better Auth 가 직접 소문자로 바꿔 저장한다 (저장값 'a-…@x.test'). sign-up.mjs 158행 email.toLowerCase(), internal-adapter createUser/updateUser 의 email?.toLowerCase(), sign-in 의 findUserByEmail(email.toLowerCase()), OAuth link-account 도 소문자.",
+      "direct_drizzle_insert": "Better Auth 를 거치지 않고 Drizzle 로 'B@…','b@…' 를 바로 넣으면 SQLite·Postgres 는 두 행 허용, MySQL(utf8mb4_0900_ai_ci)·MariaDB(utf8mb4_general_ci)는 unique 위반으로 거부 — DB 마다 다르다."
+    },
+    "sqlite_driver": {
+      "chosen": "libsql (@libsql/client 0.18.0 + drizzle-orm/libsql, 파일 DB)",
+      "why_not_better_sqlite3": "drizzle-orm 의 better-sqlite3 트랜잭션은 동기 전용이다 (better-sqlite3 가 'Transaction function cannot return a promise' 로 거부). Better Auth 는 트랜잭션 콜백을 async 로 넘기므로 transaction:true 면 가입부터 500 이 나는데, 비동기 콜백은 트랜잭션 밖에서 계속 돌아 user 행이 남는다 (원자성 깨짐). transaction:false 면 가입은 되지만 resolveUser 가 있는 SSO 로그인은 SSO_USER_RESOLUTION_REQUIRES_NATIVE_TRANSACTIONS 로 거부된다. 실측: spikes/v26/test/better-sqlite3.test.mjs."
+    },
+    "design_rules": [
+      "SQLite 드라이버는 libsql 로 고정한다 (better-sqlite3 + Drizzle 은 Better Auth 의 비동기 트랜잭션과 맞지 않는다). 계획서 3.2 표의 'better-sqlite3 또는 libSQL' 중 libSQL 만 쓴다. 이번 확인은 libsql 파일 DB(file:)로 했다 (:memory: 는 확인하지 않음).",
+      "Drizzle 어댑터는 네 DB 모두 drizzleAdapter(db, { provider, schema, transaction: true }) 로 만든다. 기본값(false)이면 resolveUser 를 쓰는 SSO 가 막힌다.",
+      "이메일은 항상 소문자로 저장한다. Better Auth 경로(internalAdapter)는 스스로 소문자로 바꾸지만, 우리 코드가 Drizzle 로 user.email 을 직접 쓰거나 찾는 곳(관리자 API, 최초 설치, 가져오기)은 직접 소문자로 바꾼다. DB 정렬 규칙에 기대지 않는다.",
+      "MySQL 계열 Drizzle 스키마는 Better Auth 생성기 결과를 쓴다 (timestamp fsp 3, VARCHAR(36) id). 시각은 UTC 로 저장되고 왕복 오차 0ms.",
+      "Drizzle 스키마 생성: @better-auth/drizzle-adapter/relations-v2 의 createSchema 는 drizzle 1.0 용 defineRelationsPart 를 덧붙이므로 drizzle-orm 0.45 에서는 그 부분을 잘라 쓴다 (spikes/v26/gen-schema.mjs)."
+    ],
+    "versions": "better-auth 1.7.7, @better-auth/sso 1.7.7, @better-auth/drizzle-adapter 1.7.7, drizzle-orm 0.45.4, drizzle-kit 0.31.11, @libsql/client 0.18.0, better-sqlite3 13.0.3(참고용), mysql2 3.24.5, postgres 3.4.9, vitest 5.0.3, Node 26.4.0. DB: MySQL 8.0.46, MariaDB 10.11.19, PostgreSQL 14.24, Keycloak 26.4.0 (start-dev)"
+  },
+  "evidence": [
+    "spikes/v26/up.sh — v26-mysql(127.0.0.1:13306), v26-mariadb(:13307), v26-pg(:15432), v26-keycloak(:8181) 을 띄우고 준비될 때까지 기다린 뒤 kc-setup.mjs 로 realm v26, 비밀 클라이언트 v26-oidc(groups 매퍼), 그룹 omni-admins, 사용자 alice 를 admin REST 로 만든다. down.sh 로 지운다.",
+    "spikes/v26/test/v26.test.mjs — describe.each 로 네 DB × TC-S1.T6.a/b/c. test/dbs.mjs(연결·DDL), test/auth.mjs(Better Auth 구성), test/keycloak.mjs(실제 로그인 화면 통과)",
+    "pnpm -C spikes/v26 test -t \"TC-S1.T6.a\" → 종료코드 0, 4 passed. 로그 예: MySQL 8.0 {apiExp:'2026-10-16T09:50:48.310Z', dbExp 같음, raw:'2026-10-16 09:50:48.310', diffApiDbMs:0}",
+    "pnpm -C spikes/v26 test -t \"TC-S1.T6.b\" → 종료코드 0, 4 passed. DB 마다 resolveUser-throws {user:0,account:0} / resolveUser-writes-then-throws {user:0,account:0} / account-create-fails-after-user-insert {user:0,account:0} / continue-control {user:1,account:1}",
+    "pnpm -C spikes/v26 test -t \"TC-S1.T6.c\" → 종료코드 0, 4 passed. 네 DB 모두 first 200, storedEmail 소문자, second 422 USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL",
+    "spikes/v26/test/better-sqlite3.test.mjs (게이트 밖 참고) — transaction:true: 가입 500 'Transaction function cannot return a promise', 그런데 user 행 1개 남음 / transaction:false: SSO 콜백 error=SSO_USER_RESOLUTION_REQUIRES_NATIVE_TRANSACTIONS",
+    "node_modules/@better-auth/sso/dist/index.mjs 1600~1649행(resolveSSOUser, 네이티브 트랜잭션·세션 저장소 검사), 3955~4020행(OIDC 콜백 runWithTransaction)",
+    "@better-auth/drizzle-adapter dist/index.mjs 559행 — transaction: config.transaction ?? false"
+  ],
+  "blocking": false,
+  "was_blocking": false,
+  "resolved_in": null
+}

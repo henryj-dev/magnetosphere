@@ -1,0 +1,31 @@
+{
+  "item": "V17",
+  "question": "Better Auth 1.7.7 에서 user 추가 칼럼(role, status, monthly_limit_usd, max_keys, is_bootstrap_admin)을 input: false 로 두면, 가입(/sign-up/email)과 회원정보 수정(/update-user) 요청 본문에 권한 값을 넣어도 DB 에 들어가지 않는가? input 을 지정하지 않으면 실제로 들어가는가 (대조군)?",
+  "answer": {
+    "protected": true,
+    "control_accepts_privileged_values": true,
+    "behavior": {
+      "sign_up_all_five": "400 FIELD_NOT_ALLOWED (\"monthly_limit_usd is not allowed to be set\"). 계정이 만들어지지 않는다.",
+      "sign_up_one_field_with_default": "role·status·is_bootstrap_admin 처럼 defaultValue 가 있는 칼럼은 거부하지 않고 조용히 기본값으로 바꿔 저장한다 (200, role='member').",
+      "sign_up_one_field_without_default": "monthly_limit_usd·max_keys 처럼 defaultValue 가 없는 칼럼은 400 FIELD_NOT_ALLOWED.",
+      "update_user": "다섯 칼럼 모두, 하나씩 넣든 한꺼번에 넣든 400 FIELD_NOT_ALLOWED. DB 값은 그대로.",
+      "control_input_unspecified": "가입 200, DB 에 role='admin', status='active-admin', monthly_limit_usd=999999, max_keys=999, is_bootstrap_admin=1 이 그대로 들어간다. update-user 로 role='owner', max_keys=5 로도 바뀐다."
+    },
+    "mechanism": "better-auth/dist/db/schema.mjs parseInputData: input === false 인 필드가 본문에 있으면, 생성(create)이고 defaultValue 가 있으면 기본값으로 덮어쓰고, 그 밖(수정이거나 기본값 없음)이면 값이 참일 때 FIELD_NOT_ALLOWED 를 던진다. 거짓 값(0, '', false, null)은 던지지 않고 건너뛴다(저장도 안 함).",
+    "design_rules": [
+      "권한 칼럼 다섯은 모두 input: false 로 둔다 (계획서 4.6 그대로). 기본값이 있는 칼럼은 가입 때 조용히 무시되고, 나머지는 400 으로 거부된다. 클라이언트 오류 처리는 두 경우를 모두 감안한다.",
+      "회귀 테스트는 '가입 200 + 기본값 유지'만 보지 말고 '400 FIELD_NOT_ALLOWED + 계정 미생성'도 통과로 본다. 칼럼마다 따로 보내 보는 경우를 넣는다 (기본값 유무에 따라 동작이 다르다)."
+    ],
+    "versions": "better-auth 1.7.7, better-sqlite3 13.0.3 (Better Auth 내장 Kysely 경로, :memory:), vitest 5.0.3, Node 26.4.0"
+  },
+  "evidence": [
+    "spikes/v17/test/app.mjs — 최소 앱. auth.handler 에 Request 를 직접 넣는다. protect=true 면 다섯 칼럼 input:false, false 면 input 미지정.",
+    "spikes/v17/test/v17.test.mjs — TC-S1.T4.a, TC-S1.T4.b",
+    "pnpm -C spikes/v17 test -t \"TC-S1.T4.a\" → 종료코드 0. 로그: sign-up(다섯 값) 400 FIELD_NOT_ALLOWED / sign-up role 200(기본값 저장) / status 200 / monthly_limit_usd 400 / max_keys 400 / is_bootstrap_admin 200(기본값 저장) / update-user(다섯 값) 400 / update-user 칼럼별 다섯 번 모두 400. 매 단계 DB 값 = {role:'member', status:'active', monthly_limit_usd:null, max_keys:null, is_bootstrap_admin:0}",
+    "pnpm -C spikes/v17 test -t \"TC-S1.T4.b\" → 종료코드 0. 로그: sign-up 200, DB {role:'admin', status:'active-admin', monthly_limit_usd:999999, max_keys:999, is_bootstrap_admin:1}; update-user 200, role:'owner', max_keys:5",
+    "node_modules/better-auth/dist/db/schema.mjs parseInputData (59~77행) — input:false 처리 분기"
+  ],
+  "blocking": false,
+  "was_blocking": false,
+  "resolved_in": null
+}
