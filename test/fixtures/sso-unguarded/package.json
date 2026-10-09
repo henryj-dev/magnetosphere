@@ -1,8 +1,0 @@
-{
-  "name": "sso-unguarded-fixture",
-  "private": true,
-  "dependencies": {
-    "@better-auth/sso": "1.7.7",
-    "better-auth": "1.7.7"
-  }
-}

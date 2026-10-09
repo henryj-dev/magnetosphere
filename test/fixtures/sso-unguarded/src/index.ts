@@ -1,9 +1,8 @@
 // check-sso-paths.mjs 음성 대조 (TC-S3.T1.d): sso 플러그인은 있는데 disabledPaths 가 없는 구성.
-// 경로 이름이 주석에만 있으면 세지 않는다: "/sso/register"
-import { betterAuth } from "better-auth";
-import { sso } from "@better-auth/sso";
+// 검사기는 authOptions() 의 결과만 본다. 경로 문자열이 파일 어딘가에 있어도 통과하지 않는다:
+const NOT_WIRED = ["/sso/register", "/sso/update-provider", "/sso/delete-provider", "/sso/request-domain-verification", "/sso/verify-domain", "/sso/providers", "/sso/get-provider"];
 
-export const auth = betterAuth({
-  emailAndPassword: { enabled: true },
-  plugins: [sso()],
-});
+export function authOptions(_cfg: unknown) {
+  void NOT_WIRED;
+  return { emailAndPassword: { enabled: true }, plugins: [{ id: "sso" }] };
+}

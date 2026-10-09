@@ -498,9 +498,10 @@ TC-S3.T1.c  세션 쿠키 속성
   단언:  로그인 응답 set-cookie 에 HttpOnly, Secure, SameSite=Lax 셋 다
   검출:  XSS 로 세션 탈취 가능한 쿠키
 TC-S3.T1.d  SSO 플러그인이 설치되면 공개 관리 경로 차단 목록이 비어 있지 않아야 한다 (음성 대조 포함)
-  단언:  package.json 에 @better-auth/sso 가 없고 src/ 가 플러그인을 부르지 않으면 통과. 있으면 disabledPaths 에 위 관리 경로 일곱과
-         설치된 @better-auth/sso 가 여는 /sso/* 중 로그인 흐름이 아닌 경로 전부 포함 필수.
-         픽스처(플러그인 있음, disabledPaths 없음) → 검사 실패. vitest 같은 이름 TC: 로그인한 일반 회원의 관리 경로 요청 → 404
+  단언:  검사기가 대상 src/index.ts 의 authOptions(가짜 설정)를 실제로 불러, plugins 에 sso 가 없으면 통과. 있으면 disabledPaths 에
+         위 관리 경로 일곱과 설치된 @better-auth/sso 가 여는 /sso/* 중 로그인 흐름이 아닌 경로 전부 포함 필수 (문자열 검색이 아니다, S3 보안 리뷰 L5).
+         픽스처(플러그인 있음, disabledPaths 없음, 경로 문자열은 파일에 있음) → 검사 실패.
+         vitest 같은 이름 TC: 로그인한 일반 회원의 관리 경로 요청 → 404. 대조: 차단만 뺀 같은 구성에서 /sso/register → 404 아님
   검출:  이후 단계에서 플러그인만 먼저 설치돼 일반 사용자가 IdP 를 등록하는 창이 열리는 것 (0단계 실측 계정 탈취)
 TC-S3.T1.e  Better Auth 구성과 스키마 생성기가 같은 옵션 객체를 쓴다
   단언:  packages/auth 의 auth 옵션(플러그인 포함)으로 getAuthTables 를 돌린 결과의 테이블·칼럼·타입·필수·고유·참조가
@@ -514,7 +515,7 @@ TC-S3.T1.f  secret 이 32자 미만이면 시작을 거부한다 (S3 보안 리�
 ```
 
 【통과】
-- [ ] G-S3.1 ~ G-S3.4, G-S3.14, G-S3.17 통과
+- [ ] G-S3.1 ~ G-S3.4, G-S3.14, G-S3.17, G-S3.19 통과
 
 ### ☐ S3.T2 — 메일 어댑터 네 종류
 선행 S3.T1 · 산출 `packages/auth/src/mail/{smtp,resend,cloudflare,console,types,messages,index}.ts`, `packages/auth/test/mailpit.compose.yml`, `packages/auth/scripts/test-smtp.mjs` · 되돌리기 커밋 1개
@@ -605,6 +606,7 @@ TC-S3.T3.d  HTTP 요청을 받는 함수는 감싼 handler 하나뿐이다 (S3 �
 | G-S3.16 | TC-S3.T3.d | `pnpm -C packages/auth test -t "TC-S3.T3.d"` | 종료코드 0 |
 | G-S3.17 | TC-S3.T1.f | `pnpm -C packages/auth test -t "TC-S3.T1.f"` | 종료코드 0 |
 | G-S3.18 | TC-S3.T2.f | `pnpm -C packages/auth test -t "TC-S3.T2.f"` | 종료코드 0 |
+| G-S3.19 | TC-S3.T1.d (HTTP) | `pnpm -C packages/auth test -t "TC-S3.T1.d"` | 종료코드 0 |
 
 `node scripts/gate.mjs S3 --seal`
 

@@ -107,6 +107,7 @@ export const GATES = {
       { id: "G-S3.16", how: "test", desc: "TC-S3.T3.d 감싼 handler 만 내보냄", cmd: 'pnpm -C packages/auth test -t "TC-S3.T3.d"' },
       { id: "G-S3.17", how: "test", desc: "TC-S3.T1.f 짧은 secret 거부", cmd: 'pnpm -C packages/auth test -t "TC-S3.T1.f"' },
       { id: "G-S3.18", how: "test", desc: "TC-S3.T2.f 운영에서 콘솔 어댑터 거부", cmd: 'pnpm -C packages/auth test -t "TC-S3.T2.f"' },
+      { id: "G-S3.19", how: "test", desc: "TC-S3.T1.d 관리 경로 404 (대조: 차단 없으면 404 아님)", cmd: 'pnpm -C packages/auth test -t "TC-S3.T1.d"' },
     ],
   },
   S4: {

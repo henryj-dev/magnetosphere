@@ -2,7 +2,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { client, email, PASSWORD } from "./client.ts";
 import { ALL_DBS, OPEN, type TestDb } from "./db.ts";
-import { makeAuth, markVerified, PRIVILEGE_DEFAULTS, privileges, userRow } from "./helpers.ts";
+import { betterAuth } from "better-auth";
+import { authOptions } from "../src/index.ts";
+import { makeAuth, makeAuthConfig, markVerified, PRIVILEGE_DEFAULTS, privileges, userRow } from "./helpers.ts";
 
 // 공격 본문. 객체 키는 Better Auth 필드 이름(camelCase)이다. snake_case 는 DB 칼럼 이름으로 보내 보는 경우.
 const SIGN_UP_CASES: { name: string; body: Record<string, unknown>; expect: 200 | 400 }[] = [
@@ -122,6 +124,13 @@ describe("세션·이메일 (SQLite)", () => {
   });
 });
 
+const EVIL_PROVIDER = {
+  providerId: "evil",
+  issuer: "https://idp.evil.test",
+  domain: "example.test",
+  oidcConfig: { clientId: "a", clientSecret: "b", skipDiscovery: true, authorizationEndpoint: "https://idp.evil.test/a", tokenEndpoint: "https://idp.evil.test/t", jwksEndpoint: "https://idp.evil.test/j" },
+};
+
 describe("SSO 공개 관리 경로 (SQLite)", () => {
   let h: TestDb;
   let app: ReturnType<typeof makeAuth>;
@@ -139,12 +148,7 @@ describe("SSO 공개 관리 경로 (SQLite)", () => {
     await c.post("/sign-up/email", { email: e, password: PASSWORD, name: "x" });
     await markVerified(h, e);
     expect((await c.post("/sign-in/email", { email: e, password: PASSWORD })).status).toBe(200);
-    const register = await c.post("/sso/register", {
-      providerId: "evil",
-      issuer: "https://idp.evil.test",
-      domain: "example.test",
-      oidcConfig: { clientId: "a", clientSecret: "b", skipDiscovery: true, authorizationEndpoint: "https://idp.evil.test/a", tokenEndpoint: "https://idp.evil.test/t", jwksEndpoint: "https://idp.evil.test/j" },
-    });
+    const register = await c.post("/sso/register", EVIL_PROVIDER);
     expect(register.status).toBe(404);
     for (const p of ["/sso/update-provider", "/sso/delete-provider", "/sso/request-domain-verification", "/sso/verify-domain"]) {
       expect((await c.post(p, { providerId: "evil" })).status, p).toBe(404);
@@ -152,5 +156,11 @@ describe("SSO 공개 관리 경로 (SQLite)", () => {
     for (const p of ["/sso/providers", "/sso/get-provider?providerId=evil"]) expect((await c.get(p)).status, p).toBe(404);
     // 대조: 같은 세션으로 다른 경로는 열린다 (404 가 세션·기준 경로 문제 때문이 아님)
     expect((await c.get("/get-session")).status).toBe(200);
+
+    // 대조: 차단만 뺀 같은 구성에서는 일반 회원의 /sso/register 가 404 가 아니다 (0단계 실측: 200 으로 등록됨)
+    const open = betterAuth({ ...authOptions(makeAuthConfig(h)), disabledPaths: [] });
+    const oc = client((r) => open.handler(r));
+    expect((await oc.post("/sign-in/email", { email: e, password: PASSWORD })).status).toBe(200);
+    expect((await oc.post("/sso/register", { ...EVIL_PROVIDER, providerId: "evil-open" })).status).not.toBe(404);
   });
 });

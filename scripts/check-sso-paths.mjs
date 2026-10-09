@@ -4,17 +4,16 @@
 //   node scripts/check-sso-paths.mjs                                       packages/auth 검사. 위반 0 이어야 통과
 //   node scripts/check-sso-paths.mjs --fixture <dir> --expect-fail         <dir> 검사가 실패해야 통과 (음성 대조)
 //
-// 판정
-//   1. 대상의 package.json 에 @better-auth/sso 가 없고 src/ 가 플러그인을 부르지 않으면(@better-auth/sso import,
-//      sso(…) 호출, sso 를 담은 AUTH_SCHEMA_OPTIONS) 통과.
-//   2. 플러그인이 있으면 src/ 에 disabledPaths 가 있고, 막을 경로 전부가 문자열로 들어 있어야 한다.
+// 판정: 대상의 src/index.ts 를 실제로 불러 authOptions(가짜 설정) 결과를 본다 (문자열 검색이 아니다, S3 보안 리뷰 L5).
+//   1. plugins 에 id "sso" 가 없으면 통과.
+//   2. 있으면 disabledPaths 가 막을 경로 전부를 담아야 한다.
 //      막을 경로 = 아래 MUST_DISABLE ∪ 설치된 @better-auth/sso 가 여는 /sso/* 경로 중 PUBLIC_FLOW 가 아닌 것.
 //      버전이 올라 관리 경로가 늘면 2번째 집합이 잡는다.
-// 주석 안의 문자열은 세지 않는다.
+// Node 의 TypeScript 타입 지우기로 .ts 를 바로 불러온다 (Node 24+).
 import fs from "node:fs";
 import path from "node:path";
 import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const AUTH_PKG = path.join(ROOT, "packages/auth");
@@ -46,22 +45,6 @@ function args() {
   return { dir: i >= 0 ? path.resolve(ROOT, a[i + 1] ?? "") : AUTH_PKG, expectFail: a.includes("--expect-fail") };
 }
 
-const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
-
-function sources(dir) {
-  const out = [];
-  const walk = (d) => {
-    if (!fs.existsSync(d)) return;
-    for (const name of fs.readdirSync(d)) {
-      const p = path.join(d, name);
-      if (fs.statSync(p).isDirectory()) walk(p);
-      else if (/\.[cm]?[jt]s$/.test(name)) out.push({ file: path.relative(ROOT, p), src: stripComments(fs.readFileSync(p, "utf8")) });
-    }
-  };
-  walk(path.join(dir, "src"));
-  return out;
-}
-
 // 설치된 @better-auth/sso 가 여는 /sso/* 경로 (packages/auth 의 node_modules 기준)
 function installedSsoPaths() {
   try {
@@ -73,29 +56,39 @@ function installedSsoPaths() {
   }
 }
 
-function check(dir) {
-  const problems = [];
-  const pkgFile = path.join(dir, "package.json");
-  if (!fs.existsSync(pkgFile)) return [`package.json 없음: ${path.relative(ROOT, pkgFile)}`];
-  const pkg = JSON.parse(fs.readFileSync(pkgFile, "utf8"));
-  const inPkg = Boolean(pkg.dependencies?.["@better-auth/sso"] ?? pkg.devDependencies?.["@better-auth/sso"]);
-  const files = sources(dir);
-  const usesInSrc = files.some(({ src }) => /@better-auth\/sso|\bsso\s*\(|AUTH_SCHEMA_OPTIONS/.test(src));
-  if (!inPkg && !usesInSrc) {
-    console.log("[sso-paths] @better-auth/sso 가 없다. 검사할 것 없음");
-    return problems;
+// authOptions 에 넘기는 가짜 설정. DB 연결 없이 옵션 객체만 만든다.
+const FAKE_CONFIG = {
+  database: { db: {}, provider: "sqlite", schema: {} },
+  baseURL: "http://localhost:3000",
+  secret: "check-sso-paths-check-sso-paths-check",
+  mailer: { send: async () => {} },
+  clientIp: () => null,
+  waitUntil: () => {},
+  onMailError: () => {},
+};
+
+async function check(dir) {
+  const entry = path.join(dir, "src/index.ts");
+  if (!fs.existsSync(entry)) return [`${path.relative(ROOT, entry)} 없음`];
+  const mod = await import(pathToFileURL(entry).href);
+  if (typeof mod.authOptions !== "function") return [`${path.relative(ROOT, entry)} 가 authOptions 를 내보내지 않는다`];
+  const options = mod.authOptions(FAKE_CONFIG);
+  if (!(options.plugins ?? []).some((p) => p?.id === "sso")) {
+    console.log("[sso-paths] sso 플러그인이 없다. 검사할 것 없음");
+    return [];
   }
+  const problems = [];
   const installed = installedSsoPaths();
   if (!installed) problems.push("@better-auth/sso 소스를 찾지 못해 열리는 경로를 셀 수 없다 (pnpm install 확인)");
   const mustDisable = new Set([...MUST_DISABLE, ...(installed ?? []).filter((p) => p.startsWith("/sso/") && !PUBLIC_FLOW.has(p))]);
-  const all = files.map((f) => f.src).join("\n");
-  if (!/\bdisabledPaths\b/.test(all)) problems.push("SSO 플러그인이 있는데 src/ 에 disabledPaths 가 없다");
-  for (const p of mustDisable) if (!all.includes(`"${p}"`) && !all.includes(`'${p}'`)) problems.push(`disabledPaths 에 ${p} 없음`);
+  const disabled = new Set(Array.isArray(options.disabledPaths) ? options.disabledPaths : []);
+  if (!Array.isArray(options.disabledPaths)) problems.push("SSO 플러그인이 있는데 disabledPaths 가 없다");
+  for (const p of mustDisable) if (!disabled.has(p)) problems.push(`disabledPaths 에 ${p} 없음`);
   return problems;
 }
 
 const { dir, expectFail } = args();
-const problems = check(dir);
+const problems = await check(dir);
 for (const p of problems) console.error(`[sso-paths] ${path.relative(ROOT, dir) || "."}: ${p}`);
 if (expectFail) {
   if (problems.length === 0) {
