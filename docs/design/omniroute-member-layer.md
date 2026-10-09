@@ -543,7 +543,7 @@ OmniRoute 노출
 - 프로젝트 이름: **Magnetosphere** (npm `magnetosphere` 비어 있음, 2026-10-09 확인). 설명 문구 "Member & usage layer for OmniRoute". 이름에 `omniroute`는 넣지 않는다 (공식 프로젝트로 오해 방지) — v5.1
 
 **정해야 할 것**
-1. GitHub 원격 저장소 위치 — 공개 전에 정한다. 로컬 폴더는 `~/github/hackers-github/magnetosphere`.
+1. GitHub 원격 저장소 위치 — 공개 전에 정한다. 로컬 폴더는 `~/github/henryj-dev/magnetosphere`.
 
 **확인 끝 (0단계)**
 - OmniRoute 1~5: `../research/phase0-omniroute.md`
