@@ -8,6 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import { after, describe, test } from "node:test";
 import https from "node:https";
+import { Readable } from "node:stream";
 import { APP_IMAGE, buildAppImage, createAdmin, createStack, ROOT, signIn, startCaddyProbe } from "./stack.mjs";
 
 const V16 = JSON.parse(fs.readFileSync(path.join(ROOT, "docs/verify/V16.json"), "utf8")).answer;
@@ -128,9 +129,26 @@ test("TC-S6.T2.c /api/* 는 OmniRoute 가 아니라 회원 앱으로 간다", as
   // 회원 앱 자신의 /api 는 그대로 닿는다
   const ok = await fetch(`${s.baseUrl}/api/auth/ok`);
   assert.deepEqual(await ok.json(), { ok: true });
-  // 본문 상한 (S6 보안 리뷰 L2): 회원 앱 쪽은 64KiB. 앱이 본문을 보지 않는 경로(POST /)도 Caddy 가 413
-  assert.equal((await fetch(`${s.baseUrl}/`, { method: "POST", body: "x".repeat(70 * 1024) })).status, 413);
-  assert.notEqual((await fetch(`${s.baseUrl}/`, { method: "POST", body: "x".repeat(1024) })).status, 413);
+  // 본문 상한 (S6 보안 리뷰 L2): 회원 앱 쪽은 64KiB. 앱이 본문을 보지 않는 경로(POST /, /api/keys)도 Caddy 가 413.
+  // 앱이 본문을 안 읽고 먼저 답하면 413 이 404 에 지는 경합이 있었다(CI 에서 가끔 404). 여러 번 보내 매번 413 인지 본다.
+  // chunked(Content-Length 없음) 본문도 같다
+  const chunked = (text) => ({ body: Readable.toWeb(Readable.from([text.slice(0, 40 * 1024), text.slice(40 * 1024)])), duplex: "half" });
+  const over = "x".repeat(70 * 1024);
+  for (const p of ["/", "/api/keys"]) {
+    const seen = [];
+    for (let i = 0; i < 20; i++) seen.push((await fetch(`${s.baseUrl}${p}`, { method: "POST", body: over })).status);
+    for (let i = 0; i < 5; i++) seen.push((await fetch(`${s.baseUrl}${p}`, { method: "POST", ...chunked(over) })).status);
+    assert.deepEqual(seen, Array(25).fill(413), `POST ${p} 70KiB → ${seen}`);
+    // 대조: 상한 아래는 413 이 아니다
+    assert.notEqual((await fetch(`${s.baseUrl}${p}`, { method: "POST", body: "x".repeat(1024) })).status, 413, p);
+    assert.notEqual((await fetch(`${s.baseUrl}${p}`, { method: "POST", ...chunked("x".repeat(1024)) })).status, 413, `${p} chunked`);
+  }
+  // /v1 쪽 상한(10MB)도 같은 방식으로 고정됐다: 10MB 를 넘는 본문은 길이가 있든 chunked 든 413
+  const v1Over = "x".repeat(10_000_001);
+  for (const init of [{ body: v1Over }, { body: v1Over }, chunked(v1Over)]) {
+    const res = await fetch(`${s.baseUrl}/v1/chat/completions`, { method: "POST", headers: { "content-type": "application/json" }, ...init });
+    assert.equal(res.status, 413, `/v1 10MB 초과 → ${res.status}`);
+  }
 
   // 클라이언트가 지어낸 IP 헤더는 뒤로 넘기지 않는다 (S6 보안 리뷰 L2). Caddy 단독 + 메아리 서버로 넘어간 헤더를 본다
   const probe = startCaddyProbe({ siteAddress: ":80", httpPort: HTTP_PORT + 20, httpsPort: HTTP_PORT + 21 });

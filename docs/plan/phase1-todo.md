@@ -973,6 +973,11 @@ TC-S6.T2.b  허용 목록 밖 /v1 경로는 Caddy 에서 404
 TC-S6.T2.c  /api/* 는 OmniRoute 가 아니라 회원 앱으로 간다
   단언:  Caddy 주소 /api/keys → 회원 앱 JSON 404, 본문에 "Invalid management token" 없음
   검출:  OmniRoute 관리 API 가 공개 주소로 노출되는 것
+  본문 상한(S6 보안 리뷰 L2, S7 에서 고침): 앱이 본문을 읽지 않는 경로(POST /, /api/keys)에 70KiB 를 길이 있게 20번, chunked 로
+         5번 보내 모두 413. 1KiB 대조는 413 이 아님. /v1/chat/completions 에 10MB 초과를 길이 있게 2번, chunked 로 1번 → 모두 413
+  검출:  413 이 경합으로 들쭉날쭉한 것. Caddy 의 max_size 는 본문을 읽다 넘을 때만 오류가 나서, 뒤가 본문을 안 읽고 먼저 답하면
+         그 답(404)이 이긴다 (CI 실측: 같은 커밋이 push 에선 413, pull_request 에선 404). Caddy 가 상한+1 바이트까지 먼저 읽고
+         넘으면 넘기기 전에 413 을 내야 한다
 TC-S6.T2.d  OmniRoute 포트는 루프백에만 열린다
   단언:  docker compose config --format json → omniroute.ports 의 모든 host_ip == "127.0.0.1"
   검출:  대시보드가 0.0.0.0 으로 열려 인터넷에서 관리 화면 접근

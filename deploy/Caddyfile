@@ -6,6 +6,10 @@
 # Caddy 는 신뢰 프록시 설정이 없으면 들어온 X-Forwarded-For 를 버리고 상대 주소로 새로 쓴다 (클라이언트가 지어낼 수 없다).
 # 앞에 다른 부하 분산기가 있으면 전역 옵션 servers { trusted_proxies static <주소> } 를 더한다.
 # 본문 상한: 회원 앱은 앱의 /api 상한(64KiB)과 같게, OmniRoute /v1 은 대화 본문이 커서 10MB. 넘으면 413 (S6 보안 리뷰 L2).
+# - max_size 만으로는 413 이 들쭉날쭉하다. 본문을 읽다가 넘을 때만 오류가 나서, 뒤가 본문을 안 읽고 먼저 답하면(POST / 의 404) 그 답이 이긴다.
+# - 그래서 넘기기 전에 Caddy 가 본문을 상한+1 바이트까지 다 읽고({http.request.body}), 상한을 넘으면 여기서 413 을 낸다.
+#   Content-Length 가 있든 chunked 든 같다. 읽은 본문은 버퍼로 바뀌어 그대로 넘어간다. 응답은 버퍼링하지 않는다(SSE 그대로).
+# - 상한+1 로 읽는 까닭: 정확히 상한인 본문과 잘린 본문을 길이로 가른다. size(bytes(..)) 는 글자가 아니라 바이트를 센다.
 # 클라이언트가 지어낸 IP 헤더(X-Real-IP, CF-Connecting-IP)는 뒤로 넘기지 않는다. HTTPS 로 받을 때만 HSTS 를 단다.
 {$SITE_ADDRESS::80} {
 	request_header -X-Real-IP
@@ -17,8 +21,10 @@
 	@omniroute path_regexp ^/v1/(messages|messages/count_tokens|chat/completions|completions|responses|responses/[^/]+|embeddings|models|models/[^/]+)$
 	handle @omniroute {
 		request_body {
-			max_size 10MB
+			max_size 10000001
 		}
+		@too_large expression size(bytes({http.request.body})) > 10000000
+		respond @too_large 413
 		reverse_proxy omniroute:20128
 	}
 
@@ -30,8 +36,10 @@
 
 	handle {
 		request_body {
-			max_size 64KiB
+			max_size 65537
 		}
+		@too_large expression size(bytes({http.request.body})) > 65536
+		respond @too_large 413
 		reverse_proxy app-edge:3000
 	}
 }
