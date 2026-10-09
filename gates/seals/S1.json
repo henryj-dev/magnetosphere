@@ -1,0 +1,112 @@
+{
+  "phase": "S1",
+  "sealed": true,
+  "head": "da1bba360e2ae51d9cddfa5ceb6deddb7ce99291",
+  "at": "2026-10-09T10:00:48.420Z",
+  "waived": false,
+  "reason": null,
+  "checks": [
+    {
+      "id": "G-S1.1",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-S1.2",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-S1.3",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-S1.4",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-S1.5",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-S1.6",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S1.7",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S1.8",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-S1.9",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-S1.10",
+      "ok": true,
+      "measured": "통과 4",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S1.11",
+      "ok": true,
+      "measured": "통과 4",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S1.12",
+      "ok": true,
+      "measured": "통과 4",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S1.13",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-S1.14",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-S1.15",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-S1.16",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-S1.17",
+      "ok": true,
+      "measured": "통과 4",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    }
+  ]
+}
