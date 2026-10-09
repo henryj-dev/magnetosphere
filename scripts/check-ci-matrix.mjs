@@ -9,7 +9,7 @@
 //            include·exclude·continue-on-error 로 조합을 빼거나 실패를 삼키지 않고, 스텝이 `pnpm e2e --combo ${{ matrix.combo }}` 를 돈다.
 //   stage    S1 을 뺀 모든 단계를 어떤 스텝이 `node scripts/gate.mjs <단계>` 로 돈다. --skip-requires 는 쓰지 않고,
 //            --skip-ids 로 뺄 수 있는 것은 매트릭스가 대신 도는 E2E 검사뿐이다. 그래서 CI 와 로컬 게이트가 어긋나지 않는다.
-//   s1       S1 은 확인용 코드(spikes/)가 S7.T2 에서 지워져 봉인 커밋에서만 돈다. `--root <봉인 커밋 작업 트리> S1` 스텝이 있다.
+//   s1       S1 은 확인용 코드가 S7.T2 에서 지워져 봉인 커밋에서만 돈다. `--root <봉인 커밋 작업 트리> S1` 스텝이 있다.
 //   pin      모든 `uses:` 가 40자리 커밋 SHA 로 고정돼 있다.
 import fs from "node:fs";
 import path from "node:path";

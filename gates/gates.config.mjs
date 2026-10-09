@@ -35,6 +35,8 @@ export const GATES = {
       { id: "G-S0.15", how: "test", desc: "CI 테스트 명령", cmd: 'node --test --test-reporter=tap "scripts/*.test.mjs"' },
     ],
   },
+  // S1 검사는 확인용 코드(spikes)로 돈다. spikes 는 S7.T2 에서 지웠으므로 main 에서 gate S1 은 돌지 않는다.
+  // 봉인 커밋에서만 돈다: gate --verify-seals --rerun (봉인 커밋 작업 트리) 과 CI 의 s1-seal 잡 (ci.yml).
   S1: {
     needs: ["S0"],
     waivable: false,
@@ -230,6 +232,8 @@ export const GATES = {
     outputs: [".github/workflows/ci.yml", "scripts/check-ci-matrix.mjs", "test/fixtures/ci-5combos.yml"],
     checks: [
       { id: "G-S7.1", how: "cmd", desc: "TC-S7.T1.a·b CI 매트릭스 여섯 조합 (음성 대조 포함)", cmd: "node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-5combos.yml --expect 6 --expect-fail" },
+      // grep 종료코드 1(일치 없음)만 통과다. 경로가 없어 grep 이 2 로 끝나면 실패한다
+      { id: "G-S7.2", how: "cmd", desc: "TC-S7.T2.a 확인용 코드가 남지 않음", cmd: 'test ! -e spikes && { grep -rn --exclude-dir=node_modules --exclude-dir=build --exclude-dir=.svelte-kit --exclude-dir=.wrangler "spikes/" apps packages scripts tests; test $? -eq 1; }' },
     ],
   },
 };

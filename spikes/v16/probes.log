@@ -1,2 +1,0 @@
-{"method":"GET","path":"/v1/models/mko/mock-gpt","status":404,"client":"curl"}
-{"method":"GET","path":"/v1/management/proxies","status":403,"client":"curl"}
