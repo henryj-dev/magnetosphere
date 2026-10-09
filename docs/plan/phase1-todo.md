@@ -921,7 +921,7 @@ TC-S5.T3.f  부트스트랩 전체가 제한 시간 하나 안에 끝난다
 **브랜치** `s6/deploy`. 계획서 3.2 표, 4.7, 7장 "OmniRoute 노출".
 
 ### ☐ S6.T1 — 설치 스크립트
-선행 없음 · 산출 `scripts/init.mjs`, `.env.example` · 되돌리기 커밋 1개
+선행 없음 · 산출 `scripts/init.mjs`, `scripts/init.test.mjs`, `.env.example` · 되돌리기 커밋 1개
 
 【작업】
 1. `node scripts/init.mjs` (나중에 `npx magnetosphere init`): `.env` 생성. 무작위 값: `INITIAL_PASSWORD`, V21 목록 전부, `APP_ENCRYPTION_KEY`(32바이트), `BETTER_AUTH_SECRET`. 고정 값: `REQUIRE_API_KEY=true`, `PRICING_SYNC_ENABLED=true`. 기존 `.env`가 있으면 덮지 않고 종료코드 1. 커밋.
@@ -948,7 +948,7 @@ TC-S6.T1.d  OmniRoute 비밀번호는 설치 뒤 지울 파일에만 들어간�
 - [ ] G-S6.1 ~ G-S6.3, G-S6.26 통과
 
 ### ☐ S6.T2 — Docker Compose와 Caddy
-선행 S6.T1 · 산출 `docker-compose.yml`, `deploy/Caddyfile`, `apps/server/Dockerfile` · 되돌리기 커밋 1개
+선행 S6.T1 · 산출 `docker-compose.yml`, `deploy/Caddyfile`, `deploy/README.md`, `apps/server/Dockerfile`, `.dockerignore`, `apps/server/src/migrate.ts`, `tests/deploy/` (`pnpm test:deploy`) · 되돌리기 커밋 1개
 
 【작업】
 1. 서비스: `caddy`, `app`, `omniroute`(3.8.51 digest 고정), 프로필 `mysql`(8.0), `postgres`(14). OmniRoute 대시보드는 `127.0.0.1:20128`에만 묶고 그 밖의 OmniRoute 포트는 호스트에 열지 않는다. Caddy: V16 `answer.allow`만 OmniRoute로, 그 밖의 `/v1/*`는 404, 나머지는 `app`으로. 커밋.
@@ -975,6 +975,9 @@ TC-S6.T2.e  Caddy 뒤에서 클라이언트별로 세고, 프록시 설정 누�
   단언:  docker compose config → app.environment.TRUSTED_PROXIES 비어 있지 않음. Caddy 를 거친 서로 다른 X-Forwarded-For 두 개 →
          세션 ip_address 가 각자 값. 신뢰 목록 밖 상대가 X-Forwarded-For 를 보내면 로그에 경고 정확히 1줄(여러 번 보내도 1줄)
   검출:  TRUSTED_PROXIES 를 빠뜨려 모든 요청이 Caddy IP 하나로 묶이고, 로그인 6번째부터 전원이 429 를 받는데 아무 신호도 없는 것
+  실측(S6): Caddy 는 신뢰 프록시 설정이 없으면 클라이언트가 보낸 X-Forwarded-For 를 버리고 상대 주소로 새로 쓴다. 그래서 "서로 다른
+         X-Forwarded-For 두 개"는 출발지 둘(호스트 → 공개 포트, 내부망 omniroute 컨테이너 → caddy)로 만든다. app 은 Caddy 만 있는
+         edge 망을 믿는다(TRUSTED_PROXIES 기본값). 비신뢰 상대는 내부망의 omniroute 컨테이너가 app 에 바로 보낸 요청이다.
 TC-S6.T2.f  빈 DB 에서 Compose 를 띄우면 마이그레이션이 먼저 적용된다
   단언:  프로필 sqlite·mysql·postgres 각각 빈 볼륨으로 up → GET /api/setup 200 {needed:true}, 마이그레이션 기록 테이블의 행 수 == 커밋된 마이그레이션 수
   검출:  마이그레이션 단계가 없어 첫 요청이 "no such table" 500 이 되는 것 (S4 는 서버가 마이그레이션을 적용하지 않는다)
@@ -988,7 +991,7 @@ TC-S6.T2.g  설치가 끝났는데 OmniRoute 비밀번호가 남아 있으면 �
 - [ ] G-S6.4 ~ G-S6.7, G-S6.19, G-S6.20, G-S6.25, G-S6.27 통과
 
 ### ☐ S6.T3 — Workers 설정
-선행 없음 · 산출 `apps/server/wrangler.toml` (환경 `d1`, `mysql`, `pg`) · 되돌리기 커밋 1개
+선행 없음 · 산출 `apps/server/wrangler.toml` (환경 `d1`, `mysql`, `pg`), `deploy/workers-deploy.mjs`, `apps/server/test/workers.test.ts` (`pnpm -C apps/server test:workers`) · 되돌리기 커밋 1개
 
 【작업】
 1. 환경별 바인딩: D1, Hyperdrive(MySQL), Hyperdrive(Postgres), Cron Trigger, 정적 자산(`apps/web/build`, `run_worker_first: true` — 정적 파일에도 보안 헤더, TC-S4.T3.f). `nodejs_compat`. 요청 수 제한은 KV 가 아니라 DB `rate_limit`이다 (계획서 v5.5 3.2). 커밋.
@@ -1006,10 +1009,14 @@ TC-S6.T3.b  Workers 설치 토큰을 잃어도 되살릴 수 있다 (S4 보안 �
          시크릿 없이 저장 토큰의 시각을 16분 전으로 바꾼 뒤 GET /api/setup → 새 토큰 1줄 출력, 옛 토큰 401, 새 토큰 201.
          15분 안이면 다시 만들지 않음. 관리자 없는 빈 DB 에 처음 GET 두 개 동시 → 둘 다 200, 저장된 토큰 행 1개
   검출:  첫 GET 의 로그를 아무도 못 봐 설치 토큰을 영영 알 수 없는 것. 동시 첫 GET 이 고유 키 충돌로 500 이 되는 것
+  실측(S6): 로컬 wrangler dev 는 동시 요청을 사실상 차례로 처리해, 조건부 쓰기를 빼도 동시 첫 GET 이 깨지지 않는다(음성 대조가 안 걸림).
+         실제로 겹치는 경쟁은 MySQL·Postgres 연결 풀에서 같은 함수를 10건 동시에 불러 본다 (pnpm -C apps/server test:db -t "TC-S6.T3.b").
 TC-S6.T3.c  DB 시간대와 무관하게 created_at 이 맞다 (Hyperdrive 시간대)
   단언:  created_at·updated_at 기본값이 앱 쪽($defaultFn)이다: 생성 스키마 세 벌에 DB now() 기본값 0건(스키마 린트).
          TC-S4.T1.d 조건(MySQL '+09:00', Postgres 'Asia/Seoul')에서 세션 시간대를 강제하지 않은 연결로도 차이 1초 미만
   검출:  실제 Hyperdrive 가 세션 시간대 설정을 지키지 않아 Workers 조합에서만 시각이 9시간 어긋나는 것 (로컬에서 재현 불가)
+  메모(S6): 스키마 린트에 R6(DB 현재 시각 기본값)을 더했다. 생성 스키마에 기본값이 없어졌으므로 TC-S4.T1.d 는 DB now() 를 직접 넣어
+         세션 시간대 강제를 계속 확인한다. Drizzle 을 거치지 않는 INSERT 는 created_at·updated_at 을 직접 넣어야 한다.
 TC-S6.T3.d  Workers 배포 전에 마이그레이션이 적용된다
   단언:  배포 스크립트 --dry-run 출력에 wrangler d1 migrations apply(D1)·Hyperdrive 대상 마이그레이션 단계가 배포보다 먼저 나옴.
          로컬 D1 빈 상태 → 스크립트 → GET /api/setup 200
@@ -1023,7 +1030,7 @@ TC-S6.T3.d  Workers 배포 전에 마이그레이션이 적용된다
 선행 S6.T2, S6.T3 · 산출 `tests/e2e/`, `package.json`의 `e2e` 스크립트 · 되돌리기 커밋 1개
 
 【작업】
-1. `pnpm e2e --combo <이름>`: 띄우기 → 로그에서 설치 토큰 추출 → `/setup`으로 관리자 생성 → OmniRoute 부트스트랩 확인 → 로그아웃 → 로그인. 조합 여섯: `docker-sqlite`, `docker-mysql`, `docker-pg`, `workers-d1`, `workers-mysql`, `workers-pg`. Workers 조합은 `wrangler dev`(D1 로컬, Hyperdrive `localConnectionString`)로 돌리고 OmniRoute는 로컬 주소로 직접 연결한다 (Workers 운영 연결 방식은 V24, 계획서 9장 8단계). 커밋.
+1. `pnpm e2e --combo <이름>`: 띄우기 → 로그에서 설치 토큰 추출 → `/setup`으로 관리자 생성 → OmniRoute 부트스트랩 확인 → 로그아웃 → 로그인. (실제: 설치는 세션을 만들지 않아 로그인 → 로그아웃 → 다시 로그인 순서로 확인한다. Workers 조합의 "로컬 OmniRoute"는 계약 환경 `127.0.0.1:20170` 이다.) 조합 여섯: `docker-sqlite`, `docker-mysql`, `docker-pg`, `workers-d1`, `workers-mysql`, `workers-pg`. Workers 조합은 `wrangler dev`(D1 로컬, Hyperdrive `localConnectionString`)로 돌리고 OmniRoute는 로컬 주소로 직접 연결한다 (Workers 운영 연결 방식은 V24, 계획서 9장 8단계). 커밋.
 
 【테스트】
 ```
@@ -1049,7 +1056,7 @@ TC-S6.T4.a ~ f  조합마다 설치 → 관리자 → 부트스트랩 → 로그
 | G-S6.18 | 대시보드 포트 루프백 고정 | grep `"127\.0\.0\.1:20128:20128"` in `docker-compose.yml` | 1 |
 | G-S6.19 | TC-S6.T2.e | `pnpm test:deploy -t "TC-S6.T2.e"` | 종료코드 0 |
 | G-S6.20 | TC-S6.T2.f | `pnpm test:deploy -t "TC-S6.T2.f"` | 종료코드 0 |
-| G-S6.21 | TC-S6.T3.b | `pnpm -C apps/server test:workers -t "TC-S6.T3.b"` | 종료코드 0 |
+| G-S6.21 | TC-S6.T3.b | `pnpm -C apps/server test:workers -t "TC-S6.T3.b" && pnpm -C apps/server test:db -t "TC-S6.T3.b" --db mysql,pg` | 종료코드 0 |
 | G-S6.22 | TC-S6.T3.c | `node scripts/schema-lint.mjs && pnpm -C packages/runtime test:db -t "TC-S6.T3.c" --db mysql,mariadb,pg` | 종료코드 0 (반드시 통과, 면제 없음) |
 | G-S6.23 | TC-S6.T3.d | `pnpm -C apps/server test:workers -t "TC-S6.T3.d"` | 종료코드 0 |
 | G-S6.24 | 설치 운영 안내 | grep `한 인스턴스` in `deploy/README.md` | ≥ 1 |
@@ -1071,6 +1078,9 @@ TC-S6.T4.a ~ f  조합마다 설치 → 관리자 → 부트스트랩 → 로그
 - S5: OmniRoute 토큰 붙여 넣기 화면. API(`GET`·`PUT /api/setup/omniroute`)만 있고 화면이 없다 → 관리 화면 단계.
 - S5: OmniRoute 접근 토큰 갱신. 부트스트랩 토큰은 3650일짜리이고 갱신·교체 흐름이 없다 → 운영 단계.
 - S5: 계약 테스트 TC-S5.T3 이 만든 접근 토큰 회수. apps/server 계약 테스트는 OmniRoute 에 시험 토큰을 남긴다 (컨테이너를 다시 만들면 사라진다).
+- S6 → S7.T1 (CI 에서 E2E·배포 시험 돌리기): `pnpm e2e --combo docker-*`·`pnpm test:deploy` 는 `apps/server/Dockerfile` 로 이미지를 만들고(`magnetosphere-app:local`) Compose 묶음을 빈 볼륨으로 띄운다. 호스트 포트는 28480·28490·28580 만 쓰고 OmniRoute 대시보드 포트는 시험 덧씌우기(`tests/deploy/compose.test.yml`)가 닫는다. `workers-*` 는 계약 환경 OmniRoute(`tests/contract`, 127.0.0.1:20170)와 `docker-compose.test.yml` 의 MySQL(33306)·Postgres(35432)를 쓴다 (없으면 띄운다). 잡마다 docker·pnpm install·`apps/web` 빌드가 필요하다. 묶음 하나가 1GB 남짓 메모리를 쓰므로 조합은 매트릭스 잡으로 나눈다.
+- S6: Workers 운영의 OmniRoute 연결(Caddy 관리 호스트 + 비밀 헤더 + Tunnel, V24)은 아직 없다. Workers 배포는 설치 화면에서 토큰을 붙여 넣는다 → 8단계.
+- S6: `wrangler.toml` 의 D1 `database_id`·Hyperdrive `id` 는 자리 표시 값이다. 실제 배포 때 운영자가 바꾼다 (deploy/README.md).
 - S4 보안 리뷰 L4: `job_leases` 임대 TTL 이 주기보다 5초 짧을 뿐이라, 작업이 주기보다 오래 걸리면 다음 경계에서 다른 인스턴스가 같은 작업을 겹쳐 돈다. 작업 중 임대 연장(하트비트)과 펜싱 토큰(임대마다 늘어나는 번호를 작업 결과 쓰기에 붙여 늦게 끝난 쪽의 쓰기를 거부)을 검토한다.
 
 ### ☐ S7.T1 — CI 매트릭스
@@ -1179,4 +1189,4 @@ TC-S7.T3.a  건너뛴 테스트와 미구현 표식이 없다
 | TC-S3.T1.b | 미인증 로그인 거부 응답이 403 `EMAIL_NOT_VERIFIED` | S3.T1 (확인함: 네 DB 403 `EMAIL_NOT_VERIFIED`) |
 | TC-S4.T1.d | 연결 옵션(mysql2 `timezone`·세션 `time_zone`, postgres `TimeZone`)으로 세션 시간대를 UTC 로 강제할 수 있음 | S4.T1 (확인함: 로컬 MySQL·MariaDB·Postgres. 실제 Hyperdrive 는 확인 못 함 → TC-S6.T3.c) |
 | TC-S5.T3.b | 접근 토큰의 범위를 읽을 수 있음 | S1.T1 (확인함: 목록은 admin 필요, `whoami` 는 어떤 범위든 200 → TC 를 whoami 로 바꿈) |
-| TC-S6.T4.d·e·f | `wrangler dev` + Hyperdrive 로컬 연결로 E2E 가능 | S1.T7 |
+| TC-S6.T4.d·e·f | `wrangler dev` + Hyperdrive 로컬 연결로 E2E 가능 | S1.T7 (확인함: S6 에서 여섯 조합 모두 통과. 이때 Workers fetch 가 `redirect: "error"` 를 받지 않는 것을 찾아 OmniRoute 어댑터를 `"manual"` 로 바꿨다) |
