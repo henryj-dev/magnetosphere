@@ -3,9 +3,10 @@
 작성일: 2026-10-09
 
 실행판(1단계)은 [`../plan/phase1-todo.md`](../plan/phase1-todo.md) 다.
-상태: 초안 v5.4 (설계 검토 1회 + S1 확인 + S2 리뷰 반영)
+상태: 초안 v5.5 (설계 검토 1회 + S1 확인 + S2 리뷰 + S4 보안 리뷰 반영)
 
 변경 이력
+- v5.5: S4 보안 리뷰 반영. Workers 조합의 요청 수 제한 저장소도 DB(`rate_limit`)로 바꾼다 (KV 아님).
 - v5.4: S2 리뷰 반영. Docker 조합의 요청 수 제한 저장소를 Better Auth `rateLimit` storage `"database"`(`rate_limit` 테이블)로 확정하고, 스키마를 바꾸는 Better Auth 옵션을 스키마 생성기와 공유한다. MySQL 계열 시각은 `DATETIME(3)`, 토큰·식별자 칼럼은 `utf8mb4_bin`.
 - v5.3: S1 Better Auth 확인 반영 (V17·V26). SQLite 드라이버를 libsql로 고정, Drizzle 어댑터 `transaction: true` 필수, 권한 칼럼 입력 차단의 실제 동작.
 - v5.2: S1 확인 결과 반영 (`../verify/`). 부트스트랩 API 확정(`POST /api/cli/connect`), 관리 토큰 `write` 범위와 그 권한 상승 한계, 키 끄기 즉시 반영, Caddy 허용 목록 9개, OmniRoute 필수 비밀 값은 `INITIAL_PASSWORD` 하나.
@@ -107,9 +108,13 @@ SAML·OIDC 프로토콜은 직접 구현하지 않는다.
 | Docker + SQLite (기본) | Node 컨테이너 1개 | SQLite 파일 (libSQL `@libsql/client`) | 프로세스 안 스케줄러 | DB (`rate_limit`) |
 | Docker + MySQL | Node 컨테이너 (여러 개 가능) | MySQL 8.0+ / MariaDB 10.11+ (InnoDB) | 프로세스 안 스케줄러 + DB 임대 잠금 | DB (`rate_limit`) |
 | Docker + Postgres | Node 컨테이너 (여러 개 가능) | Postgres 14+ | 프로세스 안 스케줄러 + DB 임대 잠금 | DB (`rate_limit`) |
-| Workers + D1 | Workers | D1 | Cron Trigger | KV |
-| Workers + MySQL | Workers | MySQL (Hyperdrive) | Cron Trigger | KV |
-| Workers + Postgres | Workers | Postgres (Hyperdrive) | Cron Trigger | KV |
+| Workers + D1 | Workers | D1 | Cron Trigger | DB (`rate_limit`) |
+| Workers + MySQL | Workers | MySQL (Hyperdrive) | Cron Trigger | DB (`rate_limit`) |
+| Workers + Postgres | Workers | Postgres (Hyperdrive) | Cron Trigger | DB (`rate_limit`) |
+
+요청 수 제한 저장소가 모든 조합에서 DB 인 이유 (v5.5)
+- Better Auth `rateLimit.storage` 는 스키마를 바꾸는 옵션이라 `AUTH_SCHEMA_OPTIONS` 에 `"database"` 로 고정했다. 런타임마다 다르게 두면 스키마 생성기와 실제 구성이 어긋난다 (TC-S3.T1.e).
+- KV 는 결과적 일관성이라 지역이 다른 요청이 같은 키를 동시에 읽고 쓰면 횟수를 잃는다. 비밀번호 대입을 막는 한도에는 DB 의 원자적 갱신이 맞다.
 
 DB 지원 원칙
 - DB 종류는 환경 변수 `DATABASE_URL`의 형식(`file:`, `mysql://`, `postgres://`)이나 Workers 바인딩(D1)으로 고른다.

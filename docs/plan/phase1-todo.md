@@ -622,7 +622,7 @@ TC-S3.T3.d  HTTP 요청을 받는 함수는 감싼 handler 하나뿐이다 (S3 �
 선행 없음 · 산출 `packages/runtime/src/{types,node,workers}.ts` · 되돌리기 커밋 1개
 
 【작업】
-1. 인터페이스: `db()`, `schedule(name, cron, fn)`(Node는 프로세스 안 + `job_leases` 임대, Workers는 Cron Trigger 연결), `rateLimitStore()`(Better Auth `rateLimit` storage 는 스키마를 바꾸는 옵션이라 `AUTH_SCHEMA_OPTIONS`에 `"database"`로 고정돼 있다 — 두 런타임 모두 DB `rate_limit`를 알려 준다. Workers KV 저장소는 스키마 옵션을 런타임별로 나눠야 해 S6 Workers 설정 때 다시 본다, 계획서 v5.4 3.2), `secret(name)`, `clientIp(req)`(Workers는 `CF-Connecting-IP`). 커밋.
+1. 인터페이스: `db()`, `schedule(name, cron, fn)`(Node는 프로세스 안 + `job_leases` 임대, Workers는 Cron Trigger 연결), `rateLimitStore()`(Better Auth `rateLimit` storage 는 스키마를 바꾸는 옵션이라 `AUTH_SCHEMA_OPTIONS`에 `"database"`로 고정돼 있다 — 두 런타임 모두 DB `rate_limit`를 알려 준다. Workers 도 KV 가 아니라 DB 다, 계획서 v5.5 3.2), `secret(name)`, `clientIp(req)`(Workers는 `CF-Connecting-IP`). 커밋.
 
 【테스트】
 ```
@@ -910,6 +910,9 @@ TC-S6.T1.c  기존 .env 를 덮지 않는다
 
 【작업】
 1. 서비스: `caddy`, `app`, `omniroute`(3.8.51 digest 고정), 프로필 `mysql`(8.0), `postgres`(14). OmniRoute 대시보드는 `127.0.0.1:20128`에만 묶고 그 밖의 OmniRoute 포트는 호스트에 열지 않는다. Caddy: V16 `answer.allow`만 OmniRoute로, 그 밖의 `/v1/*`는 404, 나머지는 `app`으로. 커밋.
+2. `app` 기본값에 `TRUSTED_PROXIES`(Compose 내부망의 Caddy)를 넣는다. Node 런타임은 신뢰하지 않는 상대가 `X-Forwarded-For`를 보내면 경고를 한 번 남긴다 — TCP 로 열면 시작 확인(TC-S4.T1.e)이 늘 통과해, 프록시 설정을 빠뜨려도 조용히 Caddy IP 하나로 묶이기 때문이다 (S4 보안 리뷰 M3). 커밋.
+3. 마이그레이션 단계: `app` 이 뜨기 전에 커밋된 마이그레이션을 적용하는 일회성 서비스(또는 진입 명령). 서버는 마이그레이션을 직접 적용하지 않는다 (S4). 커밋.
+4. 운영 문서(`deploy/README.md`)에 "최초 설치는 인스턴스 하나로 한다"를 적는다. 관리자가 없는 채로 여러 인스턴스가 동시에 뜨면 서로 설치 토큰을 덮어 마지막에 뜬 인스턴스의 토큰만 듣는다 (S4). 커밋.
 
 【테스트】
 ```
@@ -925,26 +928,49 @@ TC-S6.T2.c  /api/* 는 OmniRoute 가 아니라 회원 앱으로 간다
 TC-S6.T2.d  OmniRoute 포트는 루프백에만 열린다
   단언:  docker compose config --format json → omniroute.ports 의 모든 host_ip == "127.0.0.1"
   검출:  대시보드가 0.0.0.0 으로 열려 인터넷에서 관리 화면 접근
+TC-S6.T2.e  Caddy 뒤에서 클라이언트별로 세고, 프록시 설정 누락은 경고로 드러난다 (S4 보안 리뷰 M3)
+  단언:  docker compose config → app.environment.TRUSTED_PROXIES 비어 있지 않음. Caddy 를 거친 서로 다른 X-Forwarded-For 두 개 →
+         세션 ip_address 가 각자 값. 신뢰 목록 밖 상대가 X-Forwarded-For 를 보내면 로그에 경고 정확히 1줄(여러 번 보내도 1줄)
+  검출:  TRUSTED_PROXIES 를 빠뜨려 모든 요청이 Caddy IP 하나로 묶이고, 로그인 6번째부터 전원이 429 를 받는데 아무 신호도 없는 것
+TC-S6.T2.f  빈 DB 에서 Compose 를 띄우면 마이그레이션이 먼저 적용된다
+  단언:  프로필 sqlite·mysql·postgres 각각 빈 볼륨으로 up → GET /api/setup 200 {needed:true}, 마이그레이션 기록 테이블의 행 수 == 커밋된 마이그레이션 수
+  검출:  마이그레이션 단계가 없어 첫 요청이 "no such table" 500 이 되는 것 (S4 는 서버가 마이그레이션을 적용하지 않는다)
 ```
 
 【통과】
-- [ ] G-S6.4 ~ G-S6.7 통과
+- [ ] G-S6.4 ~ G-S6.7, G-S6.19, G-S6.20, G-S6.25 통과
 
 ### ☐ S6.T3 — Workers 설정
 선행 없음 · 산출 `apps/server/wrangler.toml` (환경 `d1`, `mysql`, `pg`) · 되돌리기 커밋 1개
 
 【작업】
-1. 환경별 바인딩: D1, Hyperdrive(MySQL), Hyperdrive(Postgres), KV(요청 수 제한), Cron Trigger, 정적 자산(`apps/web/build`). `nodejs_compat`. 커밋.
+1. 환경별 바인딩: D1, Hyperdrive(MySQL), Hyperdrive(Postgres), Cron Trigger, 정적 자산(`apps/web/build`, `run_worker_first: true` — 정적 파일에도 보안 헤더, TC-S4.T3.f). `nodejs_compat`. 요청 수 제한은 KV 가 아니라 DB `rate_limit`이다 (계획서 v5.5 3.2). 커밋.
+2. 설치 토큰 (S4 보안 리뷰 M2): `SETUP_TOKEN` 시크릿이 있으면 그 값을 쓴다(해시만 저장). 없으면 지금처럼 GET `/api/setup` 때 만들되, 저장한 토큰이 15분보다 오래됐으면 다시 만들어 출력한다 — 아무도 로그를 못 본 채 사라진 토큰을 되살릴 길이 없기 때문이다. 처음 GET 이 동시에 둘 와도 500 이 나지 않게 조건부 쓰기. 커밋.
+3. DB 시간대 (S4 리뷰): Hyperdrive 가 세션 시간대 설정(Postgres `TimeZone` 시작 파라미터, MySQL `SET time_zone`)을 지키는지 로컬에서 확인할 수 없다. 기본 방법은 `created_at`·`updated_at` 기본값을 DB `now()` 대신 앱 쪽 `$defaultFn(() => new Date())`로 옮겨 DB 시간대에 기대지 않는 것이다 (`packages/db` 공통 정의·세 벌 생성·마이그레이션 갱신). 실제 Hyperdrive 로 TC-S4.T1.d 를 돌릴 수 있게 되면 그것도 함께 둔다. 커밋.
+4. 배포 스크립트에 `wrangler d1 migrations apply`(D1)와 Hyperdrive 대상 DB 마이그레이션 단계를 넣는다. 커밋.
 
 【테스트】
 ```
 TC-S6.T3.a  세 환경 모두 번들이 만들어진다
   단언:  wrangler deploy --dry-run --env d1|mysql|pg → 셋 다 종료코드 0
   검출:  Node 전용 모듈(nodemailer 등)이 Workers 번들에 섞여 배포가 실패하는 것
+TC-S6.T3.b  Workers 설치 토큰을 잃어도 되살릴 수 있다 (S4 보안 리뷰 M2)
+  단언:  SETUP_TOKEN 시크릿을 준 wrangler dev → 그 값으로 /setup 201, 로그에 토큰 출력 없음.
+         시크릿 없이 저장 토큰의 시각을 16분 전으로 바꾼 뒤 GET /api/setup → 새 토큰 1줄 출력, 옛 토큰 401, 새 토큰 201.
+         15분 안이면 다시 만들지 않음. 관리자 없는 빈 DB 에 처음 GET 두 개 동시 → 둘 다 200, 저장된 토큰 행 1개
+  검출:  첫 GET 의 로그를 아무도 못 봐 설치 토큰을 영영 알 수 없는 것. 동시 첫 GET 이 고유 키 충돌로 500 이 되는 것
+TC-S6.T3.c  DB 시간대와 무관하게 created_at 이 맞다 (Hyperdrive 시간대)
+  단언:  created_at·updated_at 기본값이 앱 쪽($defaultFn)이다: 생성 스키마 세 벌에 DB now() 기본값 0건(스키마 린트).
+         TC-S4.T1.d 조건(MySQL '+09:00', Postgres 'Asia/Seoul')에서 세션 시간대를 강제하지 않은 연결로도 차이 1초 미만
+  검출:  실제 Hyperdrive 가 세션 시간대 설정을 지키지 않아 Workers 조합에서만 시각이 9시간 어긋나는 것 (로컬에서 재현 불가)
+TC-S6.T3.d  Workers 배포 전에 마이그레이션이 적용된다
+  단언:  배포 스크립트 --dry-run 출력에 wrangler d1 migrations apply(D1)·Hyperdrive 대상 마이그레이션 단계가 배포보다 먼저 나옴.
+         로컬 D1 빈 상태 → 스크립트 → GET /api/setup 200
+  검출:  Workers 에 새 코드만 올라가고 스키마가 그대로라 첫 요청이 500 이 되는 것
 ```
 
 【통과】
-- [ ] G-S6.8 통과
+- [ ] G-S6.8, G-S6.21 ~ G-S6.23 통과
 
 ### ☐ S6.T4 — 여섯 조합 E2E
 선행 S6.T2, S6.T3 · 산출 `tests/e2e/`, `package.json`의 `e2e` 스크립트 · 되돌리기 커밋 1개
@@ -974,6 +1000,13 @@ TC-S6.T4.a ~ f  조합마다 설치 → 관리자 → 부트스트랩 → 로그
 | G-S6.16 | `REQUIRE_API_KEY=true` 명시 | grep `REQUIRE_API_KEY=true` in `.env.example` | 1 |
 | G-S6.17 | DB 최소 버전 | grep `mysql:8.0\|postgres:14` in `docker-compose.yml` | 2 |
 | G-S6.18 | 대시보드 포트 루프백 고정 | grep `"127\.0\.0\.1:20128:20128"` in `docker-compose.yml` | 1 |
+| G-S6.19 | TC-S6.T2.e | `pnpm test:deploy -t "TC-S6.T2.e"` | 종료코드 0 |
+| G-S6.20 | TC-S6.T2.f | `pnpm test:deploy -t "TC-S6.T2.f"` | 종료코드 0 |
+| G-S6.21 | TC-S6.T3.b | `pnpm -C apps/server test:workers -t "TC-S6.T3.b"` | 종료코드 0 |
+| G-S6.22 | TC-S6.T3.c | `node scripts/schema-lint.mjs && pnpm -C packages/runtime test:db -t "TC-S6.T3.c" --db mysql,mariadb,pg` | 종료코드 0 (반드시 통과, 면제 없음) |
+| G-S6.23 | TC-S6.T3.d | `pnpm -C apps/server test:workers -t "TC-S6.T3.d"` | 종료코드 0 |
+| G-S6.24 | 설치 운영 안내 | grep `한 인스턴스` in `deploy/README.md` | ≥ 1 |
+| G-S6.25 | Compose 신뢰 프록시 기본값 | grep `TRUSTED_PROXIES` in `docker-compose.yml` | ≥ 1 |
 
 `node scripts/gate.mjs S6 --seal`
 
@@ -984,6 +1017,9 @@ TC-S6.T4.a ~ f  조합마다 설치 → 관리자 → 부트스트랩 → 로그
 # S7 — 재발 방지와 잔재 회수 🔒 (S6 필요)
 
 **브랜치** `s7/guard`.
+
+**백로그** (S7 에서 계획서 2차 항목으로 옮길지 정한다)
+- S4 보안 리뷰 L4: `job_leases` 임대 TTL 이 주기보다 5초 짧을 뿐이라, 작업이 주기보다 오래 걸리면 다음 경계에서 다른 인스턴스가 같은 작업을 겹쳐 돈다. 작업 중 임대 연장(하트비트)과 펜싱 토큰(임대마다 늘어나는 번호를 작업 결과 쓰기에 붙여 늦게 끝난 쪽의 쓰기를 거부)을 검토한다.
 
 ### ☐ S7.T1 — CI 매트릭스
 선행 없음 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
@@ -1089,6 +1125,6 @@ TC-S7.T3.a  건너뛴 테스트와 미구현 표식이 없다
 | TC-S1.T6.b | Drizzle 어댑터에서 `resolveUser` 트랜잭션 롤백 (MySQL·Postgres) | S1.T6 |
 | TC-S1.T7.a | Workers에서 MySQL 드라이버 동작 | S1.T7 |
 | TC-S3.T1.b | 미인증 로그인 거부 응답이 403 `EMAIL_NOT_VERIFIED` | S3.T1 (확인함: 네 DB 403 `EMAIL_NOT_VERIFIED`) |
-| TC-S4.T1.d | 연결 옵션(mysql2 `timezone`·세션 `time_zone`, postgres `TimeZone`)으로 세션 시간대를 UTC 로 강제할 수 있음 | S4.T1 |
+| TC-S4.T1.d | 연결 옵션(mysql2 `timezone`·세션 `time_zone`, postgres `TimeZone`)으로 세션 시간대를 UTC 로 강제할 수 있음 | S4.T1 (확인함: 로컬 MySQL·MariaDB·Postgres. 실제 Hyperdrive 는 확인 못 함 → TC-S6.T3.c) |
 | TC-S5.T3.b | 접근 토큰 목록에서 범위를 읽을 수 있음 | S1.T1 |
 | TC-S6.T4.d·e·f | `wrangler dev` + Hyperdrive 로컬 연결로 E2E 가능 | S1.T7 |
