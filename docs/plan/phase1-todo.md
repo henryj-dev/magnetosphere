@@ -639,10 +639,14 @@ TC-S4.T1.d  DB 연결이 세션 시간대를 UTC 로 강제한다
   단언:  MySQL 세션 time_zone '+09:00' / Postgres TimeZone 'Asia/Seoul' 로 설정된 서버에 runtime db() 로 붙어
          created_at 기본값(DB 가 채움)으로 행을 만들고 읽음 → 행을 만든 시각과의 차이 1초 미만 (MySQL·MariaDB·Postgres)
   검출:  서버 시간대가 UTC 가 아니면 DB 기본값 created_at 이 9시간 어긋나는 것 (S2 리뷰 M1 재현)
+TC-S4.T1.e  clientIp 어댑터가 IP 를 못 정하면 서버가 시작을 거부한다 (S3 보안 리뷰 참고 사항)
+  단언:  시작 때 테스트 요청 하나를 clientIp 에 넣어 null 이 나오는 설정(신뢰 프록시 오설정, 소켓 주소 없음 등) → 서버 시작 예외.
+         정상 설정 → 시작
+  검출:  clientIp 가 null 이면 Better Auth 가 모든 요청을 경로마다 한 칸에 세, 로그인 6번째 요청부터 전원이 429 를 받는 것 (S3 리뷰 실측)
 ```
 
 【통과】
-- [ ] G-S4.1 ~ G-S4.3, G-S4.15 통과
+- [ ] G-S4.1 ~ G-S4.3, G-S4.15, G-S4.16 통과
 
 ### ☐ S4.T2 — 암호화 유틸
 선행 없음 · 산출 `packages/runtime/src/crypto.ts` · 되돌리기 커밋 1개
@@ -667,11 +671,12 @@ TC-S4.T2.c  키가 32바이트가 아니면 시작을 거부한다
 - [ ] G-S4.4 ~ G-S4.6 통과
 
 ### ☐ S4.T3 — Hono 서버와 SvelteKit SPA
-선행 S4.T1 · 산출 `apps/server/src/`, `apps/web/` · 되돌리기 커밋 2개
+선행 S4.T1 · 산출 `apps/server/src/`, `apps/web/`, `tsconfig.json`, `apps/*/tsconfig.json`, `packages/*/tsconfig.json` · 되돌리기 커밋 3개
 
 【작업】
 1. Hono 앱: `/api/auth/*`에 S3의 Better Auth 연결, `/api/*` 그 밖은 JSON 404, `/healthz`. Node 진입점과 Workers 진입점. 커밋.
 2. `apps/web`: SvelteKit, `adapter-static`, 루트 `+layout.ts`에 `ssr = false`, `fallback: 'index.html'`. 빌드 결과를 Node는 Hono 정적 제공, Workers는 정적 자산으로. 커밋.
+3. TypeScript 타입 검사 (S3 보안 리뷰에서 넘김). 루트 `tsconfig.json`과 패키지마다 `typecheck` 스크립트(`tsc --noEmit`), 루트에서 `pnpm -r typecheck`. 모든 패키지(packages/db·auth·runtime·omniroute, apps/server·web) 통과. S4 를 열 때 `gates.config.mjs` S4 `outputs`에 tsconfig 경로를 넣는다. 커밋.
 
 【테스트】
 ```
@@ -684,10 +689,13 @@ TC-S4.T3.b  Node 와 Workers 가 같은 빌드 결과를 제공한다
 TC-S4.T3.c  SPA 빌드에 서버 렌더링 산출이 없다
   단언:  apps/web/build 에 server 디렉터리 없음, 모든 라우트가 정적 파일
   검출:  ssr=false 누락으로 adapter-static 빌드가 실패하거나 Hono 와 서버 역할이 겹치는 것
+TC-S4.T3.d  모든 패키지가 타입 검사를 통과한다
+  단언:  pnpm -r typecheck → 종료코드 0. 패키지마다 typecheck 스크립트가 있음
+  검출:  vitest·Node 타입 지우기는 타입 오류를 보지 않아, 잘못된 옵션 이름·반환 모양이 런타임에서야 드러나는 것 (S3 까지 타입 검사 없음)
 ```
 
 【통과】
-- [ ] G-S4.7 ~ G-S4.9 통과
+- [ ] G-S4.7 ~ G-S4.9, G-S4.17 통과
 
 ### ☐ S4.T4 — 최초 설치 흐름
 선행 S4.T2, S4.T3 · 산출 `apps/server/src/setup/`, `apps/web/src/routes/setup/` · 되돌리기 커밋 1개
@@ -733,6 +741,8 @@ TC-S4.T4.d  관리자가 있으면 설치 토큰을 만들지 않는다
 | G-S4.13 | TC-S4.T4.d | `pnpm -C apps/server test -t "TC-S4.T4.d"` | 종료코드 0 |
 | G-S4.14 | SPA 모드 고정 | grep `export const ssr = false` in `apps/web/src/routes/+layout.ts` | 1 |
 | G-S4.15 | TC-S4.T1.d | `pnpm -C packages/runtime test:db -t "TC-S4.T1.d" --db mysql,mariadb,pg` | 종료코드 0 |
+| G-S4.16 | TC-S4.T1.e | `pnpm -C packages/runtime test -t "TC-S4.T1.e"` | 종료코드 0 |
+| G-S4.17 | TC-S4.T3.d | `pnpm -r typecheck` | 종료코드 0 |
 
 `node scripts/gate.mjs S4 --seal`
 
