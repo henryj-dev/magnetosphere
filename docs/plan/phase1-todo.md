@@ -531,7 +531,8 @@ TC-S3.T2.a  콘솔 어댑터로 받은 인증 링크가 실제로 인증을 끝�
   검출:  링크의 기준 주소(BETTER_AUTH_URL)가 틀려 운영에서 인증 메일이 깨진 링크가 되는 것
 TC-S3.T2.b  SMTP 어댑터가 실제 SMTP 서버로 보낸다
   단언:  mailpit 컨테이너(axllent/mailpit:v1.31.2, SMTP 127.0.0.1:31025·API :38025, SMTP AUTH 켬) → 가입 → mailpit API 에 수신 1건,
-         제목이 인증 메일 제목. requireTLS 인데 서버가 STARTTLS 를 내지 않으면 예외 + 수신 0
+         제목이 인증 메일 제목 (평문 개발 서버라 requireTLS: false 를 명시). 기본 설정(secure false → requireTLS 기본 켬)
+         또는 requireTLS 로 STARTTLS 를 내지 않는 서버에 붙으면 예외 + 수신 0 (S3 보안 리뷰 L2)
   검출:  TLS·인증 옵션 처리 오류로 운영 SMTP 에서만 실패하는 것
 TC-S3.T2.c  Resend·Cloudflare 어댑터가 올바른 요청을 만든다
   단언:  fetch 가로채기 → 엔드포인트·인증 헤더·수신자가 기대값과 일치, 비 2xx 응답이면 예외

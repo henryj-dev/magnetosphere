@@ -8,7 +8,9 @@ import { OPEN, type TestDb } from "./db.ts";
 import { makeAuth } from "./helpers.ts";
 
 const API = "http://127.0.0.1:38025/api/v1";
+// mailpit 은 STARTTLS 를 내지 않는 평문 개발 서버다. 보내는 TC 에서만 requireTLS 를 명시적으로 끈다.
 const SMTP = { host: "127.0.0.1", port: 31025, secure: false, user: "mg", pass: "mgpass", from: "Magnetosphere <no-reply@mg.test>" };
+const DEV = { ...SMTP, requireTLS: false };
 
 async function received(to: string) {
   const res = await fetch(`${API}/search?query=${encodeURIComponent(`to:"${to}"`)}`);
@@ -26,7 +28,7 @@ describe("SMTP (mailpit)", () => {
   });
 
   test("TC-S3.T2.b 가입하면 mailpit 에 인증 메일 1건", async () => {
-    const app = makeAuth(h, { mailer: smtpMailer(SMTP) });
+    const app = makeAuth(h, { mailer: smtpMailer(DEV) });
     const e = email("smtp").toLowerCase();
     expect((await client(app.handler).post("/sign-up/email", { email: e, password: PASSWORD, name: "x" })).status).toBe(200);
     await app.settle();
@@ -35,6 +37,12 @@ describe("SMTP (mailpit)", () => {
     expect(msgs).toHaveLength(1);
     expect(msgs[0].Subject).toBe(VERIFY_SUBJECT);
     expect(msgs[0].To.map((t) => t.Address)).toEqual([e]);
+  });
+
+  test("TC-S3.T2.b 기본 설정으로 STARTTLS 를 내지 않는 서버에 붙으면 보내지 않고 예외", async () => {
+    const e = email("smtp-default").toLowerCase();
+    await expect(smtpMailer(SMTP).send({ to: e, subject: "x", text: "x", html: "x" })).rejects.toBeInstanceOf(MailError);
+    expect(await received(e)).toHaveLength(0);
   });
 
   test("TC-S3.T2.b 서버가 STARTTLS 를 내지 않는데 requireTLS 면 보내지 않고 예외", async () => {

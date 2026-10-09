@@ -8,7 +8,11 @@ export interface SmtpOptions {
   port: number;
   /** true: 처음부터 TLS (보통 465). false: 평문으로 붙고 서버가 STARTTLS 를 내면 올린다 (보통 587) */
   secure: boolean;
-  /** secure false 일 때 STARTTLS 를 강제한다. 서버가 STARTTLS 를 내지 않으면 보내지 않는다 */
+  /**
+   * secure false 일 때 STARTTLS 를 강제한다. 서버가 STARTTLS 를 내지 않으면 보내지 않는다.
+   * 기본값은 !secure — 중간자가 STARTTLS 를 벗겨 내면 비밀번호와 재설정 링크가 평문으로 나가므로 (S3 보안 리뷰 L2).
+   * 평문 개발 서버(mailpit 등)에만 명시적으로 false 를 준다.
+   */
   requireTLS?: boolean;
   user?: string;
   pass?: string;
@@ -20,7 +24,7 @@ export function smtpMailer(opts: SmtpOptions): Mailer {
     host: opts.host,
     port: opts.port,
     secure: opts.secure,
-    requireTLS: opts.requireTLS ?? false,
+    requireTLS: opts.requireTLS ?? !opts.secure,
     ...(opts.user ? { auth: { user: opts.user, pass: opts.pass ?? "" } } : {}),
   });
   return {
