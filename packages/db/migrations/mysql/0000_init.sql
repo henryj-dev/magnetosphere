@@ -10,7 +10,7 @@ CREATE TABLE `account` (
 	`refresh_token_expires_at` datetime(3),
 	`scope` text,
 	`password` text,
-	`created_at` datetime(3) NOT NULL DEFAULT (now(3)),
+	`created_at` datetime(3) NOT NULL,
 	`updated_at` datetime(3) NOT NULL,
 	CONSTRAINT `account_id` PRIMARY KEY(`id`)
 );
@@ -93,7 +93,7 @@ CREATE TABLE `session` (
 	`id` varchar(36) NOT NULL,
 	`expires_at` datetime(3) NOT NULL,
 	`token` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
-	`created_at` datetime(3) NOT NULL DEFAULT (now(3)),
+	`created_at` datetime(3) NOT NULL,
 	`updated_at` datetime(3) NOT NULL,
 	`ip_address` text,
 	`user_agent` text,
@@ -135,8 +135,8 @@ CREATE TABLE `user` (
 	`email` varchar(255) NOT NULL,
 	`email_verified` boolean NOT NULL DEFAULT false,
 	`image` text,
-	`created_at` datetime(3) NOT NULL DEFAULT (now(3)),
-	`updated_at` datetime(3) NOT NULL DEFAULT (now(3)),
+	`created_at` datetime(3) NOT NULL,
+	`updated_at` datetime(3) NOT NULL,
 	`role` varchar(16) NOT NULL DEFAULT 'member',
 	`status` varchar(16) NOT NULL DEFAULT 'active',
 	`monthly_limit_usd` decimal(12,6),
@@ -151,8 +151,8 @@ CREATE TABLE `verification` (
 	`identifier` varchar(768) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,
 	`value` text NOT NULL,
 	`expires_at` datetime(3) NOT NULL,
-	`created_at` datetime(3) NOT NULL DEFAULT (now(3)),
-	`updated_at` datetime(3) NOT NULL DEFAULT (now(3)),
+	`created_at` datetime(3) NOT NULL,
+	`updated_at` datetime(3) NOT NULL,
 	CONSTRAINT `verification_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint

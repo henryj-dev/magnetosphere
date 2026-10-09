@@ -32,7 +32,11 @@ export interface Column {
   primaryKey?: boolean;
   unique?: boolean;
   default?: string | number | boolean;
-  /** 행을 만들 때 DB 가 현재 시각을 넣는다 */
+  /**
+   * 행을 만들 때 현재 시각을 넣는다. DB now() 가 아니라 앱(Drizzle $defaultFn)이 넣으므로 DDL 에는 기본값이 없다.
+   * DB now() 는 세션 시간대를 따르는데 Hyperdrive 가 세션 시간대 설정을 지키는지 확인할 수 없어서다 (TC-S6.T3.c).
+   * Drizzle 을 거치지 않고 행을 넣는 코드는 이 칼럼 값을 직접 넣어야 한다.
+   */
   defaultNow?: boolean;
   /** Drizzle 로 고칠 때 현재 시각으로 바꾼다 */
   onUpdateNow?: boolean;

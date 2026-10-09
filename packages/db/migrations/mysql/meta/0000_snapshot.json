@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "13db6dce-9814-4d5f-876c-d1862acd1dde",
+  "id": "47c81143-92a2-48d1-b1bb-8166fab0a2f9",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -89,8 +89,7 @@
           "type": "datetime(3)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "(now(3))"
+          "autoincrement": false
         },
         "updated_at": {
           "name": "updated_at",
@@ -647,8 +646,7 @@
           "type": "datetime(3)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "(now(3))"
+          "autoincrement": false
         },
         "updated_at": {
           "name": "updated_at",
@@ -950,16 +948,14 @@
           "type": "datetime(3)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "(now(3))"
+          "autoincrement": false
         },
         "updated_at": {
           "name": "updated_at",
           "type": "datetime(3)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "(now(3))"
+          "autoincrement": false
         },
         "role": {
           "name": "role",
@@ -1056,16 +1052,14 @@
           "type": "datetime(3)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "(now(3))"
+          "autoincrement": false
         },
         "updated_at": {
           "name": "updated_at",
           "type": "datetime(3)",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false,
-          "default": "(now(3))"
+          "autoincrement": false
         }
       },
       "indexes": {

@@ -1,6 +1,5 @@
 // 자동 생성 파일이다. 손으로 고치지 않는다.
 // 원본: packages/db/src/schema/common.ts · 생성: pnpm -C packages/db gen
-import { sql } from "drizzle-orm";
 import { bigint, boolean, customType, datetime, decimal, index, int, mysqlTable, text, varchar } from "drizzle-orm/mysql-core";
 
 // 대소문자까지 정확히 같아야 하는 칼럼 (common.ts 의 exact). MySQL·MariaDB 기본 정렬은 대소문자를 무시한다.
@@ -16,8 +15,8 @@ export const user = mysqlTable("user", {
   email: varchar("email", { length: 255 }).notNull().unique(),
   emailVerified: boolean("email_verified").default(false).notNull(),
   image: text("image"),
-  createdAt: datetime("created_at", { fsp: 3 }).default(sql`(now(3))`).notNull(),
-  updatedAt: datetime("updated_at", { fsp: 3 }).default(sql`(now(3))`).$onUpdate(() => new Date()).notNull(),
+  createdAt: datetime("created_at", { fsp: 3 }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: datetime("updated_at", { fsp: 3 }).$defaultFn(() => new Date()).$onUpdate(() => new Date()).notNull(),
   role: varchar("role", { length: 16 }).default("member").notNull(),
   status: varchar("status", { length: 16 }).default("active").notNull(),
   monthlyLimitUsd: decimal("monthly_limit_usd", { precision: 12, scale: 6, mode: "number" }),
@@ -30,7 +29,7 @@ export const session = mysqlTable("session", {
   id: varchar("id", { length: 36 }).primaryKey(),
   expiresAt: datetime("expires_at", { fsp: 3 }).notNull(),
   token: varcharBin("token", { length: 255 }).notNull().unique(),
-  createdAt: datetime("created_at", { fsp: 3 }).default(sql`(now(3))`).notNull(),
+  createdAt: datetime("created_at", { fsp: 3 }).$defaultFn(() => new Date()).notNull(),
   updatedAt: datetime("updated_at", { fsp: 3 }).$onUpdate(() => new Date()).notNull(),
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
@@ -52,7 +51,7 @@ export const account = mysqlTable("account", {
   refreshTokenExpiresAt: datetime("refresh_token_expires_at", { fsp: 3 }),
   scope: text("scope"),
   password: text("password"),
-  createdAt: datetime("created_at", { fsp: 3 }).default(sql`(now(3))`).notNull(),
+  createdAt: datetime("created_at", { fsp: 3 }).$defaultFn(() => new Date()).notNull(),
   updatedAt: datetime("updated_at", { fsp: 3 }).$onUpdate(() => new Date()).notNull(),
 }, (table) => [
   index("account_userId_idx").on(table.userId),
@@ -64,8 +63,8 @@ export const verification = mysqlTable("verification", {
   identifier: varcharBin("identifier", { length: 768 }).notNull(),
   value: text("value").notNull(),
   expiresAt: datetime("expires_at", { fsp: 3 }).notNull(),
-  createdAt: datetime("created_at", { fsp: 3 }).default(sql`(now(3))`).notNull(),
-  updatedAt: datetime("updated_at", { fsp: 3 }).default(sql`(now(3))`).$onUpdate(() => new Date()).notNull(),
+  createdAt: datetime("created_at", { fsp: 3 }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: datetime("updated_at", { fsp: 3 }).$defaultFn(() => new Date()).$onUpdate(() => new Date()).notNull(),
 }, (table) => [
   index("verification_identifier_idx").on(table.identifier),
 ]);

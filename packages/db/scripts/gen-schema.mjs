@@ -60,6 +60,10 @@ function checkBetterAuth() {
 
 const lit = (v) => JSON.stringify(v);
 
+// defaultNow 칼럼의 현재 시각은 DB now() 가 아니라 앱이 넣는다 (Drizzle $defaultFn). DB now() 는 세션 시간대를 따르는데
+// Hyperdrive 가 세션 시간대 설정을 지키는지 로컬에서 확인할 수 없다 (TC-S6.T3.c). 그래서 DDL 에는 기본값이 없다.
+const APP_NOW = { sql: false, code: ".$defaultFn(() => new Date())" };
+
 const DIALECTS = {
   sqlite: {
     module: "drizzle-orm/sqlite-core",
@@ -73,8 +77,7 @@ const DIALECTS = {
         case "usd": return ["real", `real(${lit(c.name)})`];
       }
     },
-    // Better Auth 생성기와 같은 표현 (ms 단위 epoch 정수)
-    now: { sql: true, code: ".default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`)" },
+    now: APP_NOW,
   },
   mysql: {
     module: "drizzle-orm/mysql-core",
@@ -92,8 +95,7 @@ const DIALECTS = {
         case "usd": return ["decimal", `decimal(${lit(c.name)}, { precision: 12, scale: 6, mode: "number" })`];
       }
     },
-    // datetime 에는 defaultNow 가 없다. 밀리초까지 넣는다.
-    now: { sql: true, code: ".default(sql`(now(3))`)" },
+    now: APP_NOW,
     // drizzle mysql-core 에는 칼럼 정렬 옵션이 없어 customType 으로 utf8mb4_bin 칼럼을 만든다.
     prelude: [
       "// 대소문자까지 정확히 같아야 하는 칼럼 (common.ts 의 exact). MySQL·MariaDB 기본 정렬은 대소문자를 무시한다.",
@@ -118,7 +120,7 @@ const DIALECTS = {
         case "usd": return ["numeric", `numeric(${lit(c.name)}, { precision: 12, scale: 6, mode: "number" })`];
       }
     },
-    now: { sql: false, code: ".defaultNow()" },
+    now: APP_NOW,
   },
 };
 

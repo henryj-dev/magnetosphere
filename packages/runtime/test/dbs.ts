@@ -20,8 +20,10 @@ export interface TestDb {
   setNonUtcTimeZone(): Promise<void>;
   /** 런타임을 거치지 않은 연결의 세션 시간대 (대조용) */
   rawSessionTimeZone(): Promise<string>;
-  /** 런타임을 거치지 않은 연결로 user 행을 created_at 기본값으로 넣고 읽는다 (대조용) */
+  /** 런타임을 거치지 않은 연결로 user 행을 DB now() 로 넣고 읽는다 (대조용: 세션 시간대가 그대로 드러난다) */
   rawInsertUserCreatedAt(id: string): Promise<Date>;
+  /** 런타임을 거치지 않은(세션 시간대를 강제하지 않은) 연결로 생성 스키마 그대로 user 행을 넣고 읽는다 (TC-S6.T3.c) */
+  rawSchemaInsertUserCreatedAt(id: string): Promise<Date>;
   drop(): Promise<void>;
 }
 
@@ -53,6 +55,7 @@ async function sqlite(): Promise<TestDb> {
     setNonUtcTimeZone: unsupported,
     rawSessionTimeZone: unsupported,
     rawInsertUserCreatedAt: unsupported,
+    rawSchemaInsertUserCreatedAt: unsupported,
     async drop() {
       rmSync(dir, { recursive: true, force: true });
     },
@@ -91,6 +94,15 @@ async function mysqlLike(kind: "mysql" | "mariadb"): Promise<TestDb> {
       return s;
     },
     async rawInsertUserCreatedAt(id) {
+      const c = await raw();
+      const db = drizzle(c, { schema, mode: "default" });
+      await c.query("INSERT INTO `user` (id, name, email, created_at, updated_at) VALUES (?, ?, ?, NOW(3), NOW(3))", [id, id, `${id}@example.com`]);
+      const { eq } = await import("drizzle-orm");
+      const [row] = await db.select().from(schema.user).where(eq(schema.user.id, id));
+      await c.end();
+      return row.createdAt;
+    },
+    async rawSchemaInsertUserCreatedAt(id) {
       const c = await raw();
       const db = drizzle(c, { schema, mode: "default" });
       await db.insert(schema.user).values({ id, name: id, email: `${id}@example.com` });
@@ -133,6 +145,15 @@ async function pg(): Promise<TestDb> {
       return String(TimeZone);
     },
     async rawInsertUserCreatedAt(id) {
+      const c = raw();
+      const db = drizzle(c, { schema });
+      await c.unsafe(`INSERT INTO "user" (id, name, email, created_at, updated_at) VALUES ($1, $2, $3, now(), now())`, [id, id, `${id}@example.com`]);
+      const { eq } = await import("drizzle-orm");
+      const [row] = await db.select().from(schema.user).where(eq(schema.user.id, id));
+      await c.end();
+      return row.createdAt;
+    },
+    async rawSchemaInsertUserCreatedAt(id) {
       const c = raw();
       const db = drizzle(c, { schema });
       await db.insert(schema.user).values({ id, name: id, email: `${id}@example.com` });

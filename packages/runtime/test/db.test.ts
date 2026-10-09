@@ -1,5 +1,5 @@
 // 런타임 어댑터 DB TC (pnpm test:db). DB 는 --db 로 고른다 (scripts/test-db.mjs → MG_TEST_DBS).
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { acquireLease } from "../src/lease.ts";
 import { createNodeRuntime, type NodeRuntime } from "../src/node.ts";
@@ -64,20 +64,38 @@ describe.each(enabledDbs())("%s", (kind: DbKind) => {
 
   // SQLite 는 시각을 정수(unixepoch)로 둬 세션 시간대가 없다
   if (kind !== "sqlite") describe("TC-S4.T1.d DB 연결이 세션 시간대를 UTC 로 강제한다", () => {
-    it(`${LABEL[kind]}: 서버 시간대가 UTC 가 아니어도 created_at 기본값이 행을 만든 시각과 1초 안`, async () => {
+    it(`${LABEL[kind]}: 서버 시간대가 UTC 가 아니어도 DB now() 로 넣은 created_at 이 행을 만든 시각과 1초 안`, async () => {
       await t.setNonUtcTimeZone();
-      // 대조: 런타임을 거치지 않은 연결은 UTC 가 아닌 시간대로 시작하고, created_at 이 9시간 어긋난다
+      // 대조: 런타임을 거치지 않은 연결은 UTC 가 아닌 시간대로 시작하고, DB now() 로 넣은 created_at 이 9시간 어긋난다
       expect(["+09:00", "Asia/Seoul"]).toContain(await t.rawSessionTimeZone());
       const rawAt = Date.now();
       const raw = await t.rawInsertUserCreatedAt("tz-raw");
       expect(Math.abs(raw.getTime() - rawAt)).toBeGreaterThan(8 * 3600_000);
 
+      // 생성 스키마의 created_at 기본값은 앱이 넣으므로(TC-S6.T3.c) 세션 시간대를 보려면 DB now() 를 직접 쓴다
       const h = await instance();
       const before = Date.now();
-      await h.db.insert(h.schema.user).values({ id: "tz-runtime", name: "tz", email: "tz-runtime@example.com" });
+      const dbNow = kind === "pg" ? sql`now()` : sql`now(3)`;
+      await h.db.insert(h.schema.user).values({ id: "tz-runtime", name: "tz", email: "tz-runtime@example.com", createdAt: dbNow, updatedAt: dbNow });
       const [row] = await h.db.select().from(h.schema.user).where(eq(h.schema.user.id, "tz-runtime"));
       expect(row.createdAt).toBeInstanceOf(Date);
       expect(Math.abs(row.createdAt.getTime() - before)).toBeLessThan(1000);
+    });
+  });
+
+  // SQLite·D1 은 시각이 정수라 해당 없음. 스키마 쪽 단언(DB now() 기본값 0건)은 node scripts/schema-lint.mjs (R6) 가 한다
+  if (kind !== "sqlite") describe("TC-S6.T3.c DB 시간대와 무관하게 created_at 이 맞다 (Hyperdrive 시간대)", () => {
+    it(`${LABEL[kind]}: 세션 시간대를 강제하지 않은 연결(TC-S4.T1.d 조건)로 생성 스키마 그대로 넣어도 created_at·updated_at 차이 1초 미만`, async () => {
+      await t.setNonUtcTimeZone();
+      expect(["+09:00", "Asia/Seoul"]).toContain(await t.rawSessionTimeZone());
+      const before = Date.now();
+      const createdAt = await t.rawSchemaInsertUserCreatedAt("tz-app-default");
+      expect(Math.abs(createdAt.getTime() - before)).toBeLessThan(1000);
+      // 런타임 연결로 읽어도 같은 시각이다
+      const h = await instance();
+      const [row] = await h.db.select().from(h.schema.user).where(eq(h.schema.user.id, "tz-app-default"));
+      expect(Math.abs(row.createdAt.getTime() - before)).toBeLessThan(1000);
+      expect(Math.abs(row.updatedAt.getTime() - before)).toBeLessThan(1000);
     });
   });
 });

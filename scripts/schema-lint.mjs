@@ -11,6 +11,8 @@
 //   R3 금액 칼럼(*_usd)이 DECIMAL(12,6) 이 아님 (mysql·pg), 실수가 아님 (sqlite)
 //   R4 DB 전용 JSON 칼럼 타입: json()·jsonb(), text/blob 의 mode: "json"
 //   R5 MySQL 인덱스 바이트 한도 초과: 키 칼럼 varchar 길이 × 4(utf8mb4) > 3072
+//   R6 DB 현재 시각 기본값: .defaultNow(), .default(sql`... now() / unixepoch / current_timestamp ...`)
+//      — DB now() 는 세션 시간대를 따르는데 Hyperdrive 가 세션 시간대 설정을 지키는지 알 수 없다. 앱 $defaultFn 을 쓴다 (TC-S6.T3.c)
 // 방언은 테이블 함수(sqliteTable·mysqlTable·pgTable)로 테이블마다 정한다.
 // 생성기는 칼럼 하나를 한 줄에 쓴다. 이 검사기도 그 모양을 읽는다.
 import fs from "node:fs";
@@ -66,6 +68,7 @@ function lint(file) {
         if (!ok) add(t, c, "R3", dialect === "sqlite" ? "금액이 실수가 아님" : "금액이 DECIMAL(12,6) 이 아님");
       }
       if (c.fn === "json" || c.fn === "jsonb" || /mode:\s*["']json["']/.test(c.opts)) add(t, c, "R4", "DB 전용 JSON 칼럼 타입");
+      if (/\.defaultNow\(\)|\.default\(sql`[^`]*(now\(|unixepoch|current_timestamp)/i.test(c.chain)) add(t, c, "R6", "DB 현재 시각 기본값 (앱 $defaultFn 을 쓴다)");
     }
   }
   return violations;

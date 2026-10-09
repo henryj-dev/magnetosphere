@@ -136,7 +136,9 @@ describe("TC-S4.T4.e 설치 전에는 가입을 막고, 이미 있는 이메일�
   it("같은 이메일 계정이 먼저 있으면 /setup → 409 email_taken (500 아님), 토큰은 남아 다른 이메일로 설치된다", async () => {
     const r = await boot();
     const token = tokenIn(r.logs)!;
-    await sql(r.t, "INSERT INTO user (id, name, email, email_verified) VALUES ('squatter', 'x', 'admin@example.com', 0)");
+    // created_at·updated_at 은 앱이 넣는 값이라(TC-S6.T3.c) Drizzle 을 거치지 않는 INSERT 는 직접 넣는다
+    const now = Date.now();
+    await sql(r.t, `INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES ('squatter', 'x', 'admin@example.com', 0, ${now}, ${now})`);
     const res = await post(r, "/api/setup", { token, ...ADMIN });
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: "email_taken" });

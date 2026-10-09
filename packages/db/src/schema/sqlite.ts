@@ -1,6 +1,5 @@
 // 자동 생성 파일이다. 손으로 고치지 않는다.
 // 원본: packages/db/src/schema/common.ts · 생성: pnpm -C packages/db gen
-import { sql } from "drizzle-orm";
 import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 // 회원. Better Auth 칼럼 + 권한 칼럼 다섯
@@ -10,8 +9,8 @@ export const user = sqliteTable("user", {
   email: text("email").notNull().unique(),
   emailVerified: integer("email_verified", { mode: "boolean" }).default(false).notNull(),
   image: text("image"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`).$onUpdate(() => new Date()).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).$defaultFn(() => new Date()).$onUpdate(() => new Date()).notNull(),
   role: text("role").default("member").notNull(),
   status: text("status").default("active").notNull(),
   monthlyLimitUsd: real("monthly_limit_usd"),
@@ -24,7 +23,7 @@ export const session = sqliteTable("session", {
   id: text("id").primaryKey(),
   expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
   token: text("token").notNull().unique(),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).$onUpdate(() => new Date()).notNull(),
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
@@ -46,7 +45,7 @@ export const account = sqliteTable("account", {
   refreshTokenExpiresAt: integer("refresh_token_expires_at", { mode: "timestamp_ms" }),
   scope: text("scope"),
   password: text("password"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).$defaultFn(() => new Date()).notNull(),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).$onUpdate(() => new Date()).notNull(),
 }, (table) => [
   index("account_userId_idx").on(table.userId),
@@ -58,8 +57,8 @@ export const verification = sqliteTable("verification", {
   identifier: text("identifier").notNull(),
   value: text("value").notNull(),
   expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`).notNull(),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).default(sql`(cast(unixepoch('subsecond') * 1000 as integer))`).$onUpdate(() => new Date()).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).$defaultFn(() => new Date()).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).$defaultFn(() => new Date()).$onUpdate(() => new Date()).notNull(),
 }, (table) => [
   index("verification_identifier_idx").on(table.identifier),
 ]);
