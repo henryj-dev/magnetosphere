@@ -499,10 +499,17 @@ TC-S3.T1.d  SSO 플러그인이 설치되면 공개 관리 경로 차단 목록�
   단언:  package.json 에 @better-auth/sso 가 없으면 통과. 있으면 disabledPaths 에 "/sso/register" 포함 필수.
          픽스처(플러그인 있음, disabledPaths 없음) → 검사 실패
   검출:  이후 단계에서 플러그인만 먼저 설치돼 일반 사용자가 IdP 를 등록하는 창이 열리는 것 (0단계 실측 계정 탈취)
+TC-S3.T1.e  Better Auth 구성과 스키마 생성기가 같은 옵션 객체를 쓴다
+  단언:  packages/auth 의 auth 옵션(플러그인 포함)으로 getAuthTables 를 돌린 결과의 테이블·칼럼·타입·필수·고유·참조가
+         packages/db 의 common.ts(better-auth 소유 테이블)와 일치. 옵션은 packages/db/src/auth-options.ts 의 AUTH_SCHEMA_OPTIONS 를 펼쳐 쓴다
+  검출:  S3 에서 플러그인·rateLimit DB 저장소를 켜 테이블이 늘었는데 스키마가 그대로라 런타임에 실패하는 것 (S2 리뷰 M4)
+  주의:  AUTH_SCHEMA_OPTIONS 에는 sso 플러그인이 들어 있다 (sso_provider 테이블). 위 작업 1의 "sso 를 이 단계에서 설치하지 않는다"와
+         충돌하므로, S3 시작 때 둘 중 하나로 정한다 — sso 를 지금 넣고 TC-S3.T1.d 의 disabledPaths 로 공개 관리 경로를 막거나,
+         비교에서 플러그인 테이블을 빼는 근거를 적는다
 ```
 
 【통과】
-- [ ] G-S3.1 ~ G-S3.4 통과
+- [ ] G-S3.1 ~ G-S3.4, G-S3.14 통과
 
 ### ☐ S3.T2 — 메일 어댑터 네 종류
 선행 S3.T1 · 산출 `packages/auth/src/mail/{smtp,resend,cloudflare,console}.ts` · 되돌리기 커밋 1개
@@ -568,6 +575,7 @@ TC-S3.T3.c  신뢰 프록시 뒤에서는 실제 클라이언트별로 센다
 | G-S3.11 | TC-S3.T3.c | `pnpm -C packages/auth test -t "TC-S3.T3.c"` | 종료코드 0 |
 | G-S3.12 | Better Auth 버전 고정 | json `packages/auth/package.json` `dependencies.better-auth` | `"1.7.7"` (범위 기호 없음) |
 | G-S3.13 | `input: false` 다섯 칼럼 | grep `input:\s*false` in `packages/auth/src/index.ts` | ≥ 5 |
+| G-S3.14 | TC-S3.T1.e | `pnpm -C packages/auth test -t "TC-S3.T1.e"` | 종료코드 0 |
 
 `node scripts/gate.mjs S3 --seal`
 
@@ -583,7 +591,7 @@ TC-S3.T3.c  신뢰 프록시 뒤에서는 실제 클라이언트별로 센다
 선행 없음 · 산출 `packages/runtime/src/{types,node,workers}.ts` · 되돌리기 커밋 1개
 
 【작업】
-1. 인터페이스: `db()`, `schedule(name, cron, fn)`(Node는 프로세스 안 + `job_leases` 임대, Workers는 Cron Trigger 연결), `rateLimitStore()`(Node 단일=메모리, 여러 인스턴스=DB, Workers=KV), `secret(name)`, `clientIp(req)`(Workers는 `CF-Connecting-IP`). 커밋.
+1. 인터페이스: `db()`, `schedule(name, cron, fn)`(Node는 프로세스 안 + `job_leases` 임대, Workers는 Cron Trigger 연결), `rateLimitStore()`(Docker=DB `rate_limit`, Workers=KV, 계획서 v5.4 3.2), `secret(name)`, `clientIp(req)`(Workers는 `CF-Connecting-IP`). 커밋.
 
 【테스트】
 ```
@@ -596,10 +604,14 @@ TC-S4.T1.b  임대 만료 후에는 다른 인스턴스가 잡는다
 TC-S4.T1.c  Workers clientIp 는 CF-Connecting-IP 를 쓰고 X-Forwarded-For 를 무시한다
   단언:  두 헤더가 다른 요청 → CF-Connecting-IP 값
   검출:  Workers 에서 헤더 위조로 요청 수 제한 우회
+TC-S4.T1.d  DB 연결이 세션 시간대를 UTC 로 강제한다
+  단언:  MySQL 세션 time_zone '+09:00' / Postgres TimeZone 'Asia/Seoul' 로 설정된 서버에 runtime db() 로 붙어
+         created_at 기본값(DB 가 채움)으로 행을 만들고 읽음 → 행을 만든 시각과의 차이 1초 미만 (MySQL·MariaDB·Postgres)
+  검출:  서버 시간대가 UTC 가 아니면 DB 기본값 created_at 이 9시간 어긋나는 것 (S2 리뷰 M1 재현)
 ```
 
 【통과】
-- [ ] G-S4.1 ~ G-S4.3 통과
+- [ ] G-S4.1 ~ G-S4.3, G-S4.15 통과
 
 ### ☐ S4.T2 — 암호화 유틸
 선행 없음 · 산출 `packages/runtime/src/crypto.ts` · 되돌리기 커밋 1개
@@ -689,6 +701,7 @@ TC-S4.T4.d  관리자가 있으면 설치 토큰을 만들지 않는다
 | G-S4.12 | TC-S4.T4.c | `pnpm -C apps/server test -t "TC-S4.T4.c"` | 종료코드 0 |
 | G-S4.13 | TC-S4.T4.d | `pnpm -C apps/server test -t "TC-S4.T4.d"` | 종료코드 0 |
 | G-S4.14 | SPA 모드 고정 | grep `export const ssr = false` in `apps/web/src/routes/+layout.ts` | 1 |
+| G-S4.15 | TC-S4.T1.d | `pnpm -C packages/runtime test:db -t "TC-S4.T1.d" --db mysql,mariadb,pg` | 종료코드 0 |
 
 `node scripts/gate.mjs S4 --seal`
 
@@ -1001,5 +1014,6 @@ TC-S7.T3.a  건너뛴 테스트와 미구현 표식이 없다
 | TC-S1.T6.b | Drizzle 어댑터에서 `resolveUser` 트랜잭션 롤백 (MySQL·Postgres) | S1.T6 |
 | TC-S1.T7.a | Workers에서 MySQL 드라이버 동작 | S1.T7 |
 | TC-S3.T1.b | 미인증 로그인 거부 응답이 403 `EMAIL_NOT_VERIFIED` | S3.T1 |
+| TC-S4.T1.d | 연결 옵션(mysql2 `timezone`·세션 `time_zone`, postgres `TimeZone`)으로 세션 시간대를 UTC 로 강제할 수 있음 | S4.T1 |
 | TC-S5.T3.b | 접근 토큰 목록에서 범위를 읽을 수 있음 | S1.T1 |
 | TC-S6.T4.d·e·f | `wrangler dev` + Hyperdrive 로컬 연결로 E2E 가능 | S1.T7 |
