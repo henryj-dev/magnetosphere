@@ -884,10 +884,13 @@ TC-S5.T3.d  붙여 넣기 입력은 관리자 세션만, write 범위 토큰만 
 TC-S5.T3.e  발급 뒤 확인·저장이 실패하면 회수할 토큰 id 를 남긴다
   단언:  실제 OmniRoute 에서 발급 뒤 암호화 실패·whoami 500 → manual_required, 이유에 "토큰 tok_…" 있고 "oma_live_" 없음. 발급 전 실패면 id 없음
   검출:  쓰지 않는 10년짜리 write 토큰이 OmniRoute 에 남는데 운영자가 그 존재를 모르는 것 (S5 보안 리뷰 L2)
+TC-S5.T3.f  부트스트랩 전체가 제한 시간 하나 안에 끝난다
+  단언:  발급·whoami 가 각각 600ms 걸리는 가짜 OmniRoute, 전체 제한 1000ms → 950~1150ms 에 manual_required
+  검출:  호출마다 제한 시간을 따로 둬 /setup 이 최대 20초 붙잡히는 것 (S5 보안 리뷰 L5)
 ```
 
 【통과】
-- [ ] G-S5.10 ~ G-S5.12, G-S5.15, G-S5.18 통과
+- [ ] G-S5.10 ~ G-S5.12, G-S5.15, G-S5.18, G-S5.21 통과
 
 ## 🚪 GATE S5
 
@@ -905,6 +908,7 @@ TC-S5.T3.e  발급 뒤 확인·저장이 실패하면 회수할 토큰 id 를 �
 | G-S5.18 | TC-S5.T3.e | `pnpm test:contract -t "TC-S5.T3.e"` | 종료코드 0 |
 | G-S5.19 | TC-S5.T2.l | `pnpm test:contract -t "TC-S5.T2.l"` | 종료코드 0 |
 | G-S5.20 | TC-S5.T2.m | `pnpm test:contract -t "TC-S5.T2.m"` | 종료코드 0 |
+| G-S5.21 | TC-S5.T3.f | `pnpm test:contract -t "TC-S5.T3.f"` | 종료코드 0 |
 
 `node scripts/gate.mjs S5 --seal`
 

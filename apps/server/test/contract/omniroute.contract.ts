@@ -1,6 +1,8 @@
 // OmniRoute 부트스트랩 계약 테스트 (S5.T3, 계획서 4.7 3번). 계약 환경(tests/contract)의 OmniRoute 에 실제로 붙는다.
 // 회원 앱 Node 진입점을 띄워 /api/setup 을 부르고, 저장된 값은 SQLite 파일에서 직접 읽는다.
 import { readFileSync } from "node:fs";
+import http from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { createAccessToken, createClient } from "@magnetosphere/omniroute";
 import { connectNode } from "@magnetosphere/runtime/node";
@@ -174,5 +176,34 @@ describe("TC-S5.T3.e 발급 뒤 확인·저장이 실패하면 회수할 토큰 
     // 발급 전에 실패하면 남은 토큰이 없으니 id 도 없다
     const noConnect: typeof fetch = () => Promise.resolve(new Response("{}", { status: 503 }));
     expect((await run(real, noConnect)).reason).toBe("OmniRoute 503");
+  });
+});
+
+describe("TC-S5.T3.f 부트스트랩 전체가 제한 시간 하나 안에 끝난다", () => {
+  it("발급·whoami 가 각각 600ms 걸리는 OmniRoute, 전체 제한 1000ms → 약 1초에 manual_required (호출마다 제한이면 connected)", async () => {
+    const tokenBody = { token: "oma_live_slowslowslow", id: "tok_slow", scope: "write", expiresAt: null };
+    const whoBody = { id: "tok_slow", name: "slow", scope: "write", expiresAt: null };
+    const slow = http.createServer((req, res) => {
+      const body = req.url?.startsWith("/api/cli/connect") ? tokenBody : whoBody;
+      setTimeout(() => res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(body)), 600);
+      req.resume();
+    });
+    await new Promise<void>((r) => slow.listen(0, "127.0.0.1", r));
+    const t = await makeTestEnv();
+    const h = await connectNode(t.env.DATABASE_URL);
+    try {
+      const baseUrl = `http://127.0.0.1:${(slow.address() as AddressInfo).port}`;
+      const started = Date.now();
+      const r = await bootstrapOmniRoute(h, await createCipher(TEST_ENCRYPTION_KEY), { baseUrl, initialPassword: "x", timeoutMs: 1000 }, "admin");
+      const took = Date.now() - started;
+      expect(r.status).toBe("manual_required");
+      expect(took).toBeLessThan(1150);
+      expect(took).toBeGreaterThanOrEqual(950);
+    } finally {
+      await h.close();
+      t.cleanup();
+      slow.closeAllConnections();
+      await new Promise<void>((r) => slow.close(() => r()));
+    }
   });
 });

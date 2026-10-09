@@ -57,6 +57,8 @@ export interface ConnectOptions {
   fetch?: typeof fetch;
   /** 요청 하나의 제한 시간 (기본 15초) */
   timeoutMs?: number;
+  /** 여러 호출이 함께 쓸 중단 신호. 주면 timeoutMs 대신 이것만 쓴다 (호출 여러 개를 한 제한 시간에 묶을 때) */
+  signal?: AbortSignal;
 }
 
 export type Credential = { token: string } | { cookie: string };
@@ -91,7 +93,7 @@ async function call<S extends z.ZodType>(o: ConnectOptions, req: Request, schema
     method: req.method,
     headers,
     body: req.body === undefined ? undefined : JSON.stringify(req.body),
-    signal: AbortSignal.timeout(o.timeoutMs ?? 15_000),
+    signal: o.signal ?? AbortSignal.timeout(o.timeoutMs ?? 15_000),
     // 리다이렉트를 따라가지 않는다. 307·308 은 본문({password} 포함)과 함께 다른 출처로 넘어간다 (S5 보안 리뷰 L1)
     redirect: "error",
   });

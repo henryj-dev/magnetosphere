@@ -22,12 +22,15 @@ export const OMNIROUTE_TOKEN_AAD = "app_settings.omniroute_token";
 export const OMNIROUTE_SCOPE = "write";
 /** /api/cli/connect 가 받는 최대 기간. 갱신 흐름은 아직 없다 */
 const TOKEN_DAYS = 3650;
+/** 부트스트랩·붙여 넣기 한 번(발급 + whoami)의 전체 제한 시간. 호출마다가 아니라 합쳐서다 (S5 보안 리뷰 L5) */
 const TIMEOUT_MS = 10_000;
 
 export interface OmniRouteConfig {
   baseUrl: string | null;
   initialPassword: string | null;
   fetch?: typeof fetch;
+  /** 전체 제한 시간 (기본 TIMEOUT_MS). 테스트가 줄여 쓴다 */
+  timeoutMs?: number;
 }
 
 export type OmniRouteStatus = "connected" | "manual_required";
@@ -40,9 +43,12 @@ interface StoredToken {
   expiresAt: string | null;
 }
 
-function conn(cfg: OmniRouteConfig): ConnectOptions {
-  return { baseUrl: cfg.baseUrl!, fetch: cfg.fetch, timeoutMs: TIMEOUT_MS };
+/** 한 번의 부트스트랩·붙여 넣기에서 모든 호출이 같은 중단 신호를 쓴다 */
+function conn(cfg: OmniRouteConfig, signal: AbortSignal): ConnectOptions {
+  return { baseUrl: cfg.baseUrl!, fetch: cfg.fetch, signal };
 }
+
+const deadline = (cfg: OmniRouteConfig) => AbortSignal.timeout(cfg.timeoutMs ?? TIMEOUT_MS);
 
 /** 실패 이유. 비밀번호·토큰은 넣지 않는다 */
 function reason(e: unknown): string {
@@ -56,8 +62,8 @@ async function store(h: DbHandle, cipher: Cipher, token: string, info: { id: str
 }
 
 /** 토큰으로 whoami 를 불러 범위가 write 인지 본다. 아니면 이유를 돌려준다 */
-async function checkScope(cfg: OmniRouteConfig, token: string) {
-  const me = await createClient({ ...conn(cfg), credential: { token } }).whoami();
+async function checkScope(cfg: OmniRouteConfig, signal: AbortSignal, token: string) {
+  const me = await createClient({ ...conn(cfg, signal), credential: { token } }).whoami();
   return me.scope === OMNIROUTE_SCOPE ? { ok: true as const, me } : { ok: false as const, scope: me.scope };
 }
 
@@ -71,15 +77,16 @@ export async function bootstrapOmniRoute(
   if (!cfg.baseUrl) return { status: "manual_required", reason: "OMNIROUTE_URL 없음" };
   if (!cfg.initialPassword) return { status: "manual_required", reason: "OMNIROUTE_INITIAL_PASSWORD 없음" };
   let minted: string | null = null;
+  const signal = deadline(cfg);
   try {
-    const t = await createAccessToken(conn(cfg), {
+    const t = await createAccessToken(conn(cfg, signal), {
       password: cfg.initialPassword,
       scope: OMNIROUTE_SCOPE,
       name: `magnetosphere-${new Date().toISOString().slice(0, 10)}`,
       expiresInDays: TOKEN_DAYS,
     });
     minted = t.id;
-    const checked = await checkScope(cfg, t.token);
+    const checked = await checkScope(cfg, signal, t.token);
     if (!checked.ok) return { status: "manual_required", reason: `범위가 ${checked.scope}${orphan(minted)}` };
     await store(h, cipher, t.token, checked.me, updatedBy);
     return { status: "connected" };
@@ -103,7 +110,7 @@ export async function saveManualToken(h: DbHandle, cipher: Cipher, cfg: OmniRout
   if (typeof token !== "string" || !/^oma_live_[A-Za-z0-9_-]+$/.test(token.trim())) return { ok: false, error: "invalid_token" };
   if (!cfg.baseUrl) return { ok: false, error: "omniroute_unreachable" };
   try {
-    const checked = await checkScope(cfg, token.trim());
+    const checked = await checkScope(cfg, deadline(cfg), token.trim());
     if (!checked.ok) return { ok: false, error: "scope_not_write" };
     await store(h, cipher, token.trim(), checked.me, updatedBy);
     return { ok: true };
