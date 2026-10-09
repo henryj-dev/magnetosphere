@@ -100,3 +100,34 @@ export async function signIn(baseUrl, email, password) {
   const cookie = res.headers.getSetCookie().map((s) => s.split(";")[0]).filter((s) => /session_token=/.test(s)).join("; ");
   return { status: res.status, cookie, body: await res.json().catch(() => null) };
 }
+
+/**
+ * Caddy 하나만 deploy/Caddyfile 그대로 띄우고, 뒤(app-edge:3000·omniroute:20128)에는 받은 요청을 그대로 돌려주는 메아리 서버를 둔다.
+ * Caddy 가 뒤로 넘기는 헤더·본문을 직접 본다 (TC-S6.T2.c·d). 메아리는 회원 앱 이미지의 node 로 돈다.
+ * @param {{ siteAddress: string, httpPort: number, httpsPort: number }} opts
+ */
+export function startCaddyProbe({ siteAddress, httpPort, httpsPort }) {
+  const id = randomBytes(3).toString("hex");
+  const net = `mg-caddy-probe-${id}`;
+  const names = [`mg-caddy-echo-${id}`, `mg-caddy-${id}`];
+  const run = (...args) => sh("docker", args);
+  const echo = `const http=require("http");const h=(req,res)=>{let n=0;req.on("data",d=>n+=d.length);req.on("end",()=>{res.setHeader("content-type","application/json");res.end(JSON.stringify({path:req.url,headers:req.headers,bytes:n}))})};http.createServer(h).listen(3000);http.createServer(h).listen(20128);`;
+  const stop = () => {
+    run("rm", "-f", ...names);
+    run("network", "rm", net);
+  };
+  try {
+    for (const r of [
+      run("network", "create", net),
+      run("run", "-d", "--name", names[0], "--network", net, "--network-alias", "app-edge", "--network-alias", "omniroute", APP_IMAGE, "node", "-e", echo),
+      run("run", "-d", "--name", names[1], "--network", net, "-e", `SITE_ADDRESS=${siteAddress}`, "-p", `127.0.0.1:${httpPort}:80`, "-p", `127.0.0.1:${httpsPort}:443`,
+        "-v", `${path.join(ROOT, "deploy/Caddyfile")}:/etc/caddy/Caddyfile:ro`, "caddy:2.10.2-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d"),
+    ]) {
+      if (r.code !== 0) throw new Error(`Caddy 탐침 준비 실패\n${r.err}`);
+    }
+  } catch (e) {
+    stop();
+    throw e;
+  }
+  return { stop, logs: () => run("logs", names[1]).err };
+}

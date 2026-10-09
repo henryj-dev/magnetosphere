@@ -6,7 +6,8 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { after, describe, test } from "node:test";
-import { createAdmin, createStack, ROOT, signIn } from "./stack.mjs";
+import https from "node:https";
+import { createAdmin, createStack, ROOT, signIn, startCaddyProbe } from "./stack.mjs";
 
 const V16 = JSON.parse(fs.readFileSync(path.join(ROOT, "docs/verify/V16.json"), "utf8")).answer;
 const HTTP_PORT = 28480;
@@ -72,6 +73,10 @@ test("TC-S6.T2.a Caddy 를 거친 키 없는 /v1 은 401", async () => {
   assert.equal(res.status, 401);
   // OmniRoute 가 답했다 (회원 앱의 404 JSON 이 아니다)
   assert.match(await res.text(), /AUTH_00\d/);
+  // 본문 상한 (S6 보안 리뷰 L2): /v1 은 10MB. 1MB 대화는 OmniRoute 에 닿고(키가 없어 401), 11MB 는 Caddy 가 413
+  const post = (bytes) => fetch(`${s.baseUrl}/v1/chat/completions`, { method: "POST", headers: { "content-type": "application/json" }, body: "x".repeat(bytes) });
+  assert.equal((await post(1_000_000)).status, 401);
+  assert.equal((await post(11_000_000)).status, 413);
 });
 
 test("TC-S6.T2.b 허용 목록 밖 /v1 경로는 Caddy 에서 404", async () => {
@@ -120,10 +125,62 @@ test("TC-S6.T2.c /api/* 는 OmniRoute 가 아니라 회원 앱으로 간다", as
     assert.doesNotMatch(body, /Invalid management token/);
   }
   // 회원 앱 자신의 /api 는 그대로 닿는다
-  assert.deepEqual(await (await fetch(`${s.baseUrl}/api/auth/ok`)).json(), { ok: true });
+  const ok = await fetch(`${s.baseUrl}/api/auth/ok`);
+  assert.deepEqual(await ok.json(), { ok: true });
+  // 본문 상한 (S6 보안 리뷰 L2): 회원 앱 쪽은 64KiB. 앱이 본문을 보지 않는 경로(POST /)도 Caddy 가 413
+  assert.equal((await fetch(`${s.baseUrl}/`, { method: "POST", body: "x".repeat(70 * 1024) })).status, 413);
+  assert.notEqual((await fetch(`${s.baseUrl}/`, { method: "POST", body: "x".repeat(1024) })).status, 413);
+
+  // 클라이언트가 지어낸 IP 헤더는 뒤로 넘기지 않는다 (S6 보안 리뷰 L2). Caddy 단독 + 메아리 서버로 넘어간 헤더를 본다
+  const probe = startCaddyProbe({ siteAddress: ":80", httpPort: HTTP_PORT + 20, httpsPort: HTTP_PORT + 21 });
+  try {
+    const seen = await echoed(`http://127.0.0.1:${HTTP_PORT + 20}`, "/api/whatever", { "x-real-ip": "203.0.113.7", "cf-connecting-ip": "203.0.113.8", "x-other": "kept" });
+    assert.equal(seen.headers["x-real-ip"], undefined);
+    assert.equal(seen.headers["cf-connecting-ip"], undefined);
+    assert.equal(seen.headers["x-other"], "kept", "대조: 다른 헤더는 넘어간다");
+    const v1 = await echoed(`http://127.0.0.1:${HTTP_PORT + 20}`, "/v1/models", { "x-real-ip": "203.0.113.7", "cf-connecting-ip": "203.0.113.8" });
+    assert.equal(v1.path, "/v1/models");
+    assert.equal(v1.headers["x-real-ip"], undefined);
+    assert.equal(v1.headers["cf-connecting-ip"], undefined);
+  } finally {
+    probe.stop();
+  }
 });
 
-test("TC-S6.T2.d OmniRoute 포트는 루프백에만 열린다", () => {
+/** 메아리 서버가 받은 요청 (Caddy 가 뜰 때까지 기다린다) */
+async function echoed(base, p, headers) {
+  for (let i = 0; ; i++) {
+    try {
+      const res = await fetch(`${base}${p}`, { headers });
+      if (res.ok) return await res.json();
+    } catch {
+      // 아직 안 떴다
+    }
+    if (i > 100) throw new Error(`${base}${p} 가 응답하지 않는다`);
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
+/** 자체 서명 인증서를 받아들이고 HTTPS 응답 헤더 하나를 읽는다 (Caddy 가 뜰 때까지 기다린다) */
+async function httpsHeader(port, p, name) {
+  for (let i = 0; ; i++) {
+    try {
+      return await new Promise((resolve, reject) => {
+        const req = https.request({ host: "127.0.0.1", port, path: p, servername: "localhost", headers: { host: "localhost" }, rejectUnauthorized: false, agent: false }, (res) => {
+          res.resume();
+          resolve(res.headers[name] ?? null);
+        });
+        req.on("error", reject);
+        req.end();
+      });
+    } catch (e) {
+      if (i > 100) throw e;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+}
+
+test("TC-S6.T2.d OmniRoute 포트는 루프백에만 열린다", async () => {
   // 시험 덧씌우기 없이 운영 설정 그대로 본다. 묶음은 띄우지 않는다
   const s = createStack({ httpPort: HTTP_PORT, label: "config" });
   try {
@@ -138,6 +195,15 @@ test("TC-S6.T2.d OmniRoute 포트는 루프백에만 열린다", () => {
     for (const [name, svc] of Object.entries(cfg.services)) {
       if (name === "caddy" || name === "omniroute") continue;
       assert.equal((svc.ports ?? []).length, 0, `${name} 가 호스트 포트를 연다`);
+    }
+    // HTTPS 로 받을 때 Caddy 가 HSTS 를 단다 (S6 보안 리뷰 L2). 뒤가 메아리 서버라 이 헤더는 Caddy 가 단 것이다
+    // (회원 앱도 보안 헤더로 HSTS 를 달지만 OmniRoute /v1 응답에는 없다). 도메인 대신 localhost 로 Caddy 내부 인증서를 받는다
+    const probe = startCaddyProbe({ siteAddress: "localhost", httpPort: HTTP_PORT + 20, httpsPort: HTTP_PORT + 21 });
+    try {
+      const hsts = await httpsHeader(HTTP_PORT + 21, "/v1/models", "strict-transport-security");
+      assert.match(hsts ?? "", /max-age=\d{7,}/, `HTTPS 응답의 HSTS: ${hsts}`);
+    } finally {
+      probe.stop();
     }
   } finally {
     s.down();

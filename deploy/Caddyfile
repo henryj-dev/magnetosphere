@@ -5,9 +5,20 @@
 # 회원 앱은 edge 망 별칭(app-edge)으로만 부른다. app 은 TRUSTED_PROXIES 로 edge 망(Caddy)만 믿는다.
 # Caddy 는 신뢰 프록시 설정이 없으면 들어온 X-Forwarded-For 를 버리고 상대 주소로 새로 쓴다 (클라이언트가 지어낼 수 없다).
 # 앞에 다른 부하 분산기가 있으면 전역 옵션 servers { trusted_proxies static <주소> } 를 더한다.
+# 본문 상한: 회원 앱은 앱의 /api 상한(64KiB)과 같게, OmniRoute /v1 은 대화 본문이 커서 10MB. 넘으면 413 (S6 보안 리뷰 L2).
+# 클라이언트가 지어낸 IP 헤더(X-Real-IP, CF-Connecting-IP)는 뒤로 넘기지 않는다. HTTPS 로 받을 때만 HSTS 를 단다.
 {$SITE_ADDRESS::80} {
+	request_header -X-Real-IP
+	request_header -CF-Connecting-IP
+
+	@https protocol https
+	header @https Strict-Transport-Security "max-age=31536000"
+
 	@omniroute path_regexp ^/v1/(messages|messages/count_tokens|chat/completions|completions|responses|responses/[^/]+|embeddings|models|models/[^/]+)$
 	handle @omniroute {
+		request_body {
+			max_size 10MB
+		}
 		reverse_proxy omniroute:20128
 	}
 
@@ -18,6 +29,9 @@
 	}
 
 	handle {
+		request_body {
+			max_size 64KiB
+		}
 		reverse_proxy app-edge:3000
 	}
 }
