@@ -1,0 +1,7 @@
+{
+  // TC-S4.T2.a 전용 로컬 Worker. 배포하지 않는다. wrangler 4.115.0 의 workerd 는 2026-07-29 까지 받는다 (V27).
+  "name": "mg-runtime-crypto-test",
+  "main": "crypto-worker.ts",
+  "compatibility_date": "2026-07-29",
+  "compatibility_flags": ["nodejs_compat"]
+}

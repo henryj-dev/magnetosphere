@@ -7,11 +7,13 @@
     "./types": "./src/types.ts",
     "./node": "./src/node.ts",
     "./workers": "./src/workers.ts",
-    "./lease": "./src/lease.ts"
+    "./lease": "./src/lease.ts",
+    "./crypto": "./src/crypto.ts"
   },
   "scripts": {
     "test": "vitest run",
-    "test:db": "node scripts/test-db.mjs"
+    "test:db": "node scripts/test-db.mjs",
+    "test:cross-runtime": "vitest run --config vitest.cross-runtime.config.ts"
   },
   "dependencies": {
     "@better-auth/core": "1.7.7",
@@ -24,6 +26,7 @@
     "postgres": "3.4.9"
   },
   "devDependencies": {
-    "vitest": "5.0.3"
+    "vitest": "5.0.3",
+    "wrangler": "4.115.0"
   }
 }
