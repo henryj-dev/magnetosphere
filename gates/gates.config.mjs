@@ -43,7 +43,7 @@ export const GATES = {
       { id: "G-S1.1", how: "cmd", requires: ["local-services"], desc: "TC-S1.T1.a 최소 범위 토큰으로 관리 호출 7개", cmd: "node spikes/v10/run.mjs --assert min" },
       { id: "G-S1.2", how: "cmd", requires: ["local-services"], desc: "TC-S1.T1.b 더 낮은 범위는 실패", cmd: "node spikes/v10/run.mjs --assert lower-fails" },
       { id: "G-S1.3", how: "cmd", requires: ["local-services"], desc: "TC-S1.T2.a 끈 키 즉시 거부", cmd: "node spikes/v11/run.mjs --assert" },
-      { id: "G-S1.4", how: "cmd", desc: "TC-S1.T3.a 허용 목록이 실제 요청을 덮음", cmd: "node spikes/v16/check.mjs covers" },
+      { id: "G-S1.4", how: "cmd", requires: ["local-services"], desc: "TC-S1.T3.a 허용 목록이 실제 요청을 덮음", cmd: "node spikes/v16/check.mjs covers" },
       { id: "G-S1.5", how: "cmd", desc: "TC-S1.T3.b 관리 별칭은 허용 목록 밖", cmd: "node spikes/v16/check.mjs deny" },
       { id: "G-S1.6", how: "test", requires: ["local-services"], desc: "TC-S1.T4.a input:false 권한 칼럼 보호", cmd: 'pnpm -C spikes/v17 test -t "TC-S1.T4.a"' },
       { id: "G-S1.7", how: "test", requires: ["local-services"], desc: "TC-S1.T4.b 대조군", cmd: 'pnpm -C spikes/v17 test -t "TC-S1.T4.b"' },
