@@ -416,3 +416,18 @@ test("TC-S0.T2.m 봉인 뒤에 단 requires 태그도 재검에서 건너뛴다 
   const strict = gate(dir, "--verify-seals", "--rerun");
   assert.notEqual(strict.code, 0, "옵션 없이는 그대로 돌아 실패해야 한다 (대조)");
 });
+
+test("TC-S0.T2.n --verify-seals --rerun 은 봉인 커밋의 설치 실패를 그대로 보고한다", () => {
+  // 봉인 커밋의 lockfile 이 깨져 있으면 pnpm install 이 실패한다. 예전에는 이 실패를 넘기고 검사를 돌려
+  // 원인과 무관한 검사 실패 여러 개로 보였다 (S7 리뷰 M4). 여기 검사는 설치와 무관하게 통과하는 것뿐이다
+  const dir = repo(
+    { S0: { needs: [], checks: [ok("G0")] } },
+    { "package.json": JSON.stringify({ name: "t", private: true }), "pnpm-lock.yaml": "lockfileVersion: '9.0'\nimporters: [\n" },
+  );
+  sealAndCommit(dir, "S0");
+  const head = JSON.parse(fs.readFileSync(path.join(dir, "gates/seals/S0.json"), "utf8")).head;
+  const r = gate(dir, "--verify-seals", "--rerun");
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, new RegExp(`S0: 봉인 커밋 ${head.slice(0, 7)} 설치 실패`));
+  assert.doesNotMatch(r.out, /다시 돌린 검사 실패/, "설치가 실패했는데 검사를 돌렸다");
+});

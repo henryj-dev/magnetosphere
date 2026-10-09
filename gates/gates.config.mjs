@@ -230,7 +230,7 @@ export const GATES = {
     needs: ["S6"],
     waivable: false,
     outputs: [
-      ".github/workflows/ci.yml", "scripts/check-ci-matrix.mjs", "test/fixtures/ci-5combos.yml", "test/fixtures/ci-guard/**",
+      ".github/workflows/ci.yml", "scripts/check-ci-matrix.mjs", "test/fixtures/ci-5combos.yml", "test/fixtures/ci-guard/**", "scripts/gate.mjs", "scripts/gate.test.mjs",
       "docker-compose.yml", ".env.example", "deploy/README.md", "tests/deploy/deploy.test.mjs", "apps/server/test/workers.test.ts",
     ],
     checks: [
@@ -248,6 +248,7 @@ export const GATES = {
       { id: "G-S7.6", how: "test", requires: ["local-services"], desc: "TC-S7.T4.a Workers 에서 OmniRoute 3xx 를 따라가지 않음", cmd: 'pnpm -C apps/server test:workers -t "TC-S7.T4.a"' },
       { id: "G-S7.7", how: "test", requires: ["local-services"], desc: "TC-S7.T5.a 덧씌우기 없는 Compose 가 최상위 .env.setup 을 app 에 넘김", cmd: 'pnpm test:deploy -t "TC-S7.T5.a"' },
       { id: "G-S7.8", how: "test", requires: ["local-services"], desc: "TC-S7.T6.a·b app 은 Caddy 고정 주소 하나만 신뢰 (S6 보안 리뷰 L3)", cmd: 'pnpm test:deploy -t "TC-S7.T6"' },
+      { id: "G-S7.9", how: "test", desc: "TC-S0.T2.n 봉인 재검이 설치 실패를 보고 (S7 리뷰 M4)", cmd: nodeTest("scripts/gate.test.mjs", "TC-S0.T2.n") },
     ],
   },
 };

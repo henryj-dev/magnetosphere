@@ -418,12 +418,19 @@ function cmdVerifySeals(root, gates, rerun, sinceRef, skipTag = null) {
       const dir = fs.mkdtempSync(path.join(os.tmpdir(), `gate-verify-${phase}-`));
       git(root, ["worktree", "add", "--detach", "--quiet", dir, seal.head]);
       try {
-        if (fs.existsSync(path.join(dir, "pnpm-lock.yaml"))) run(dir, "pnpm install --frozen-lockfile --silent");
+        // 설치가 실패하면 검사를 돌리지 않고 바로 보고한다. 설치 실패를 넘기면 검사 여러 개가 엉뚱한 이유로 실패해 원인이 가려진다
+        if (fs.existsSync(path.join(dir, "pnpm-lock.yaml"))) {
+          const inst = run(dir, "pnpm install --frozen-lockfile");
+          if (inst.code !== 0) {
+            problems.push(`${phase}: 봉인 커밋 ${seal.head.slice(0, 7)} 설치 실패 (pnpm install --frozen-lockfile 종료코드 ${inst.code})\n${inst.output.split("\n").slice(-30).join("\n")}`);
+            continue;
+          }
+        }
         // 어떤 검사가 이 환경에서 못 도는지는 봉인 커밋이 아니라 지금 설정(requires)으로 정한다.
-      // 봉인 뒤에 태그를 단 검사도 건너뛰되, 태그 없는 검사는 봉인 커밋 코드로 그대로 다시 돈다.
-      const skipIds = skipTag ? (def.checks ?? []).filter((c) => (c.requires ?? []).includes(skipTag)).map((c) => c.id) : [];
-      const extra = skipIds.length ? ["--skip-ids", skipIds.join(",")] : [];
-      const r = spawnSync(process.execPath, [SELF, "--root", dir, phase, ...extra], { encoding: "utf8" });
+        // 봉인 뒤에 태그를 단 검사도 건너뛰되, 태그 없는 검사는 봉인 커밋 코드로 그대로 다시 돈다.
+        const skipIds = skipTag ? (def.checks ?? []).filter((c) => (c.requires ?? []).includes(skipTag)).map((c) => c.id) : [];
+        const extra = skipIds.length ? ["--skip-ids", skipIds.join(",")] : [];
+        const r = spawnSync(process.execPath, [SELF, "--root", dir, phase, ...extra], { encoding: "utf8" });
         if (r.status !== 0) problems.push(`${phase}: 봉인 커밋 ${seal.head.slice(0, 7)} 에서 다시 돌린 검사 실패\n${r.stdout}${r.stderr}`);
       } finally {
         git(root, ["worktree", "remove", "--force", dir], { allowFail: true });
