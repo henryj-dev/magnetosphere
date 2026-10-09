@@ -174,3 +174,18 @@ describe("TC-S5.T2.l 키 id 는 영숫자·_·- 만 받는다", () => {
     ]);
   });
 });
+
+describe("TC-S5.T2.m 비용이 음수인 응답은 오류다", () => {
+  it("summary.totalCost 또는 byApiKey.cost 가 음수 → OmniRouteFormatError. 0 은 받는다", async () => {
+    const neg = [
+      { ...ANALYTICS, summary: { ...ANALYTICS.summary, totalCost: -0.01 } },
+      { ...ANALYTICS, byApiKey: [{ apiKeyId: "k1", requests: 3, cost: -1 }] },
+    ];
+    for (const body of neg) {
+      const { fetch } = fakeFetch({ "GET /api/usage/analytics": { body } });
+      await expect(createClient({ baseUrl: "http://omni.test", credential: { token: "t" }, fetch }).getAnalytics(range)).rejects.toThrow(OmniRouteFormatError);
+    }
+    const { fetch } = fakeFetch({ "GET /api/usage/analytics": { body: { ...ANALYTICS, summary: { ...ANALYTICS.summary, totalCost: 0 } } } });
+    expect((await createClient({ baseUrl: "http://omni.test", credential: { token: "t" }, fetch }).getAnalytics(range)).totalCost).toBe(0);
+  });
+});

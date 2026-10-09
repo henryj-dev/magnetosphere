@@ -55,7 +55,8 @@ export const budgetSchema = z.object({
   }),
 });
 
-const money = z.number().finite();
+// 비용은 음수일 수 없다. 음수가 오면 남은 한도 계산이 한도를 늘린다 (S5 보안 리뷰 L4)
+const money = z.number().finite().nonnegative();
 const count = z.number().int().nonnegative();
 
 /** GET /api/usage/analytics */

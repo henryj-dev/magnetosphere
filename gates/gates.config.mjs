@@ -177,6 +177,7 @@ export const GATES = {
       { id: "G-S5.17", how: "test", requires: ["local-services"], desc: "TC-S5.T2.k 리다이렉트를 따라가지 않음", cmd: 'pnpm test:contract -t "TC-S5.T2.k"' },
       { id: "G-S5.18", how: "test", requires: ["local-services"], desc: "TC-S5.T3.e 남은 토큰 id 를 로그에", cmd: 'pnpm test:contract -t "TC-S5.T3.e"' },
       { id: "G-S5.19", how: "test", requires: ["local-services"], desc: "TC-S5.T2.l 키 id 형식 검사", cmd: 'pnpm test:contract -t "TC-S5.T2.l"' },
+      { id: "G-S5.20", how: "test", requires: ["local-services"], desc: "TC-S5.T2.m 음수 비용 거부", cmd: 'pnpm test:contract -t "TC-S5.T2.m"' },
     ],
   },
   S6: {
