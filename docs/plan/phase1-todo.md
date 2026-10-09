@@ -622,7 +622,7 @@ TC-S3.T3.d  HTTP 요청을 받는 함수는 감싼 handler 하나뿐이다 (S3 �
 선행 없음 · 산출 `packages/runtime/src/{types,node,workers}.ts` · 되돌리기 커밋 1개
 
 【작업】
-1. 인터페이스: `db()`, `schedule(name, cron, fn)`(Node는 프로세스 안 + `job_leases` 임대, Workers는 Cron Trigger 연결), `rateLimitStore()`(Docker=DB `rate_limit`, Workers=KV, 계획서 v5.4 3.2), `secret(name)`, `clientIp(req)`(Workers는 `CF-Connecting-IP`). 커밋.
+1. 인터페이스: `db()`, `schedule(name, cron, fn)`(Node는 프로세스 안 + `job_leases` 임대, Workers는 Cron Trigger 연결), `rateLimitStore()`(Better Auth `rateLimit` storage 는 스키마를 바꾸는 옵션이라 `AUTH_SCHEMA_OPTIONS`에 `"database"`로 고정돼 있다 — 두 런타임 모두 DB `rate_limit`를 알려 준다. Workers KV 저장소는 스키마 옵션을 런타임별로 나눠야 해 S6 Workers 설정 때 다시 본다, 계획서 v5.4 3.2), `secret(name)`, `clientIp(req)`(Workers는 `CF-Connecting-IP`). 커밋.
 
 【테스트】
 ```

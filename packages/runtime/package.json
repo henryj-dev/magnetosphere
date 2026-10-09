@@ -2,5 +2,28 @@
   "name": "@magnetosphere/runtime",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "exports": {
+    "./types": "./src/types.ts",
+    "./node": "./src/node.ts",
+    "./workers": "./src/workers.ts",
+    "./lease": "./src/lease.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:db": "node scripts/test-db.mjs"
+  },
+  "dependencies": {
+    "@better-auth/core": "1.7.7",
+    "@hono/node-server": "2.1.1",
+    "@libsql/client": "0.18.0",
+    "@magnetosphere/auth": "workspace:*",
+    "@magnetosphere/db": "workspace:*",
+    "drizzle-orm": "0.45.4",
+    "mysql2": "3.24.5",
+    "postgres": "3.4.9"
+  },
+  "devDependencies": {
+    "vitest": "5.0.3"
+  }
 }
