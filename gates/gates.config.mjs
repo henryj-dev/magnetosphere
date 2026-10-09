@@ -231,7 +231,7 @@ export const GATES = {
     waivable: false,
     outputs: [
       ".github/workflows/ci.yml", "scripts/check-ci-matrix.mjs", "test/fixtures/ci-5combos.yml",
-      "docker-compose.yml", ".env.example", "deploy/README.md", "tests/deploy/deploy.test.mjs",
+      "docker-compose.yml", ".env.example", "deploy/README.md", "tests/deploy/deploy.test.mjs", "apps/server/test/workers.test.ts",
     ],
     checks: [
       { id: "G-S7.1", how: "cmd", desc: "TC-S7.T1.a·b CI 매트릭스 여섯 조합 (음성 대조 포함)", cmd: "node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-5combos.yml --expect 6 --expect-fail" },
@@ -242,6 +242,7 @@ export const GATES = {
       // S0~S6 봉인이 모두 유효(✅)하다. 하나라도 ⚠·🔓·🔒 면 실패
       { id: "G-S7.4", how: "cmd", desc: "앞 단계 봉인 모두 유효", cmd: `node -e 'const r=JSON.parse(require("child_process").execFileSync(process.execPath,["scripts/gate.mjs","--status","--json"],{encoding:"utf8"}));const want=["S0","S1","S2","S3","S4","S5","S6"];const bad=want.filter(p=>r.find(x=>x.phase===p)?.state!=="sealed");if(bad.length){console.error("봉인 무효·없음: "+bad.join(", "));process.exit(1)}console.log("S0~S6 봉인 유효")'` },
       { id: "G-S7.5", how: "cmd", desc: "처음 커밋부터 순서 위반 없음", cmd: 'node scripts/gate.mjs --assert-order --base "$(git rev-list --max-parents=0 HEAD)"' },
+      { id: "G-S7.6", how: "test", requires: ["local-services"], desc: "TC-S7.T4.a Workers 에서 OmniRoute 3xx 를 따라가지 않음", cmd: 'pnpm -C apps/server test:workers -t "TC-S7.T4.a"' },
       { id: "G-S7.7", how: "test", requires: ["local-services"], desc: "TC-S7.T5.a 덧씌우기 없는 Compose 가 최상위 .env.setup 을 app 에 넘김", cmd: 'pnpm test:deploy -t "TC-S7.T5.a"' },
       { id: "G-S7.8", how: "test", requires: ["local-services"], desc: "TC-S7.T6.a·b app 은 Caddy 고정 주소 하나만 신뢰 (S6 보안 리뷰 L3)", cmd: 'pnpm test:deploy -t "TC-S7.T6"' },
     ],
