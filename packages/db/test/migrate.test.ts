@@ -75,6 +75,17 @@ describe.each(cases)("$label", (d) => {
     expect(rows).toHaveLength(1);
   });
 
+  test("TC-S2.T3.d 마이그레이션으로 만든 DB 구조가 스키마에서 바로 만든 DB 구조와 같다", async () => {
+    const ref = await d.openFromSchema();
+    try {
+      const expected = await ref.structure();
+      expect(JSON.stringify(expected).length).toBeGreaterThan(1000);
+      expect(await h.structure()).toEqual(expected);
+    } finally {
+      await ref.close();
+    }
+  });
+
   test("TC-S2.T3.e 2038 년 이후 시각을 저장하고 그대로 읽는다", async () => {
     const s = h.schema;
     const at = new Date("2040-01-01T00:00:00.123Z");

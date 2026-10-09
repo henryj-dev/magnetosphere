@@ -428,11 +428,16 @@ TC-S2.T3.a  다섯 DB 에서 빈 상태 → 최신 마이그레이션이 성공�
   단언:  DB 다섯 × migrate 종료코드 0, 테이블 13개 존재
   검출:  한 DB 에서만 문법 오류로 설치가 실패하는 것 (MariaDB 의 JSON·DEFAULT 표현 차이 등)
 TC-S2.T3.b  마이그레이션과 스키마가 어긋나지 않는다
-  단언:  커밋된 마이그레이션 사본 위에서 drizzle-kit generate → 세 벌 모두 "변경 없음", 새 파일 0 (0.31 에는 --dry 가 없다)
-  검출:  스키마만 고치고 마이그레이션을 안 만들어 운영 DB 와 코드가 어긋나는 것
+  단언:  커밋된 마이그레이션 사본 위에서 drizzle-kit generate → 세 벌 모두 "변경 없음", 새 파일 0 (0.31 에는 --dry 가 없다).
+         그리고 커밋된 SQL 마다 직전·현재 스냅숏에서 다시 만든 SQL 과 공백 정규화 후 같음
+  검출:  스키마만 고치고 마이그레이션을 안 만들어 운영 DB 와 코드가 어긋나는 것, 마이그레이션 SQL 만 손으로 고친 것 (S2 리뷰 H1)
 TC-S2.T3.c  이메일은 소문자로 저장되고 대소문자 중복이 막힌다
   단언:  DB 다섯 × 저장 계층에 "A@x.test" 저장 → 저장값 "a@x.test", 이어서 "a@x.test" 저장 → 고유 제약 오류
   검출:  V26 c 의 DB 간 정렬 차이를 저장 계층이 흡수하지 못하는 것
+TC-S2.T3.d  마이그레이션으로 만든 DB 구조가 스키마에서 바로 만든 DB 구조와 같다
+  단언:  DB 다섯 × 마이그레이션 적용 DB 와 스키마 DDL(drizzle-kit/api generate) 로 만든 빈 DB 의 구조(칼럼 타입·NULL·기본값·정렬, 인덱스, 고유·검사·외래 키 제약)가 같음.
+         D1 은 같은 스키마의 SQLite DB 와 sqlite_master 정의를 비교
+  검출:  마이그레이션 SQL 을 손으로 고쳐 고유 제약이 빠지거나 CHECK 로 바뀌었는데 테이블 이름만 보는 a 가 초록인 것 (S2 리뷰 H1)
 TC-S2.T3.e  2038 년 이후 시각을 저장하고 그대로 읽는다
   단언:  DB 다섯 × invites·session·verification 시각 칼럼에 2040-01-01T00:00:00.123Z 저장 → 읽은 값의 ISO 문자열이 같음
   검출:  MySQL·MariaDB TIMESTAMP 가 2038-01-19 이후 값을 거부해 장기 초대·세션 만료 저장이 실패하는 것 (S2 리뷰 M2)
@@ -442,7 +447,7 @@ TC-S2.T3.f  토큰·식별자는 대소문자를 구분한다
 ```
 
 【통과】
-- [ ] G-S2.6 ~ G-S2.8, G-S2.11, G-S2.12 통과
+- [ ] G-S2.6 ~ G-S2.8, G-S2.11 ~ G-S2.13 통과
 
 ## 🚪 GATE S2
 
@@ -460,6 +465,7 @@ TC-S2.T3.f  토큰·식별자는 대소문자를 구분한다
 | G-S2.10 | 지원 DB 최소 버전 고정 | grep `mysql:8.0\|mariadb:10.11\|postgres:14` in `docker-compose.test.yml` | 3 |
 | G-S2.11 | TC-S2.T3.e | `pnpm -C packages/db test:migrate -t "TC-S2.T3.e"` | 종료코드 0 |
 | G-S2.12 | TC-S2.T3.f | `pnpm -C packages/db test:migrate -t "TC-S2.T3.f"` | 종료코드 0 |
+| G-S2.13 | TC-S2.T3.d | `pnpm -C packages/db test:migrate -t "TC-S2.T3.d"` | 종료코드 0 |
 
 `node scripts/gate.mjs S2 --seal`
 
