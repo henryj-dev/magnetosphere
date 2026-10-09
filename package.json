@@ -17,5 +17,8 @@
     "test:contract": "node tests/contract/run.mjs",
     "test:deploy": "node tests/deploy/run.mjs",
     "e2e": "node tests/e2e/run.mjs"
+  },
+  "devDependencies": {
+    "yaml": "2.9.0"
   }
 }

@@ -2,8 +2,8 @@
 // 검사가 빈 단계는 gate 가 실행·봉인을 거부한다. 각 단계 검사는 그 단계를 시작할 때 실행판 GATE 표대로 채운다.
 // outputs 는 --assert-order 가 잠긴 단계의 변경을 잡는 데 쓰는 글롭이다.
 // requires: ["local-services"] 는 이 컴퓨터에서만 띄워 둔 서비스가 필요한 검사다 (시험용 OmniRoute·Keycloak·
-// mailpit, docker 테스트 DB). CI 의 봉인 재검은 --skip-requires local-services 로 이 검사를 건너뛴다.
-// 이 검사들은 S7 의 CI 매트릭스에서 서비스를 띄워 다시 돈다.
+// mailpit, docker 테스트 DB). CI 의 봉인 재검(gate.yml)은 --skip-requires local-services 로 이 검사를 건너뛰고,
+// CI 매트릭스(ci.yml, S7.T1)가 단계마다 서비스를 띄운 잡에서 node scripts/gate.mjs S<n> 으로 다시 돈다.
 
 const nodeTest = (file, tc) => `node --test --test-reporter=tap --test-name-pattern="${tc}" ${file}`;
 
@@ -223,10 +223,13 @@ export const GATES = {
       { id: "G-S6.30", how: "grep", desc: "OmniRoute 비공개 안내 (20128·/api 비공개, Workers 는 Tunnel·Access 로만)", pattern: "OmniRoute 20128 포트와 /api/\\* 는 공개로 열지 않는다|Workers 조합은 Cloudflare Tunnel·Access 로만 연결한다", in: ["deploy/README.md"], op: "==", limit: 2 },
     ],
   },
+  // S7 의 CI 매트릭스(.github/workflows/ci.yml)가 S2~S6 게이트를 서비스를 띄운 잡에서 그대로 돈다 (requires 로 건너뛰지 않는다).
   S7: {
     needs: ["S6"],
     waivable: false,
-    outputs: [".github/workflows/ci.yml", "scripts/check-ci-matrix.mjs"],
-    checks: [],
+    outputs: [".github/workflows/ci.yml", "scripts/check-ci-matrix.mjs", "test/fixtures/ci-5combos.yml"],
+    checks: [
+      { id: "G-S7.1", how: "cmd", desc: "TC-S7.T1.a·b CI 매트릭스 여섯 조합 (음성 대조 포함)", cmd: "node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-5combos.yml --expect 6 --expect-fail" },
+    ],
   },
 };
