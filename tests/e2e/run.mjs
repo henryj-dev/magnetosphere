@@ -5,7 +5,7 @@
 //   workers-d1 · workers-mysql · workers-pg       apps/server/wrangler.toml 을 로컬 wrangler dev 로 띄운다
 //                                                 (D1 로컬, Hyperdrive 는 localConnectionString 으로 시험용 MySQL·Postgres 의 새 DB)
 //
-// 조합마다: 띄우기 → 로그에서 설치 토큰 추출 → POST /api/setup 으로 관리자 생성(201, omniroute "connected")
+// 조합마다: 띄우기 → 설치 토큰(Docker 는 로그에서 추출, Workers 는 SETUP_TOKEN 시크릿) → POST /api/setup 으로 관리자 생성(201, omniroute "connected")
 //          → 로그인 → 로그아웃(세션이 사라짐) → 다시 로그인(200, 세션 쿠키). 끝나면 띄운 것을 내린다.
 // Workers 조합의 OmniRoute 는 계약 테스트 환경(tests/contract, 127.0.0.1:20170)에 직접 붙는다. 없으면 띄운다.
 // (Workers 운영의 OmniRoute 연결 방식은 V24·계획서 9장 8단계에서 정한다.)
@@ -108,6 +108,8 @@ async function workersCombo(env) {
     sh(process.execPath, ["deploy/workers-deploy.mjs", "--env", env, "--local", "--persist-to", persistTo], {
       env: { ...process.env, ...(db ? { MIGRATE_DATABASE_URL: db.url } : {}) },
     });
+    // Workers 는 SETUP_TOKEN 시크릿이 필수다 (S6 보안 리뷰 M2). 설치 토큰은 로그가 아니라 이 값이다
+    const setupToken = randomBytes(32).toString("base64url");
     log(`wrangler dev --env ${env} 띄우는 중`);
     dev = await startWranglerDev({
       env,
@@ -118,9 +120,11 @@ async function workersCombo(env) {
         APP_ENCRYPTION_KEY: randomBytes(32).toString("base64"),
         OMNIROUTE_URL: CONTRACT.url,
         OMNIROUTE_INITIAL_PASSWORD: CONTRACT.password,
+        SETUP_TOKEN: setupToken,
       },
     });
-    await installFlow(dev.baseUrl, async () => lastSetupToken(await dev.waitOutput(/최초 설치 토큰: /)));
+    await installFlow(dev.baseUrl, async () => setupToken);
+    check(!dev.output().includes(setupToken) && lastSetupToken(dev.output()) === null, "Workers 로그에 설치 토큰이 나오지 않음");
   } catch (e) {
     if (dev) console.error(`[e2e] wrangler dev 출력 끝부분:\n${dev.output().slice(-3000)}`);
     throw e;

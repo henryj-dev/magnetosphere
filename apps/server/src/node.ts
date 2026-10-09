@@ -46,7 +46,7 @@ export async function startNodeServer(opts: NodeServerOptions = {}) {
     const app = createApp({
       services: async () => services,
       assets: staticAssets(opts.webDir ?? env.WEB_DIR ?? DEFAULT_WEB_DIR),
-      issueSetupTokenOnStatus: false,
+      setupTokenFromSecret: false,
       log,
       carryRequest: (from, to) => runtime.carryPeer(from, to),
     });

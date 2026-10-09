@@ -995,7 +995,8 @@ TC-S6.T2.g  설치가 끝났는데 OmniRoute 비밀번호가 남아 있으면 �
 
 【작업】
 1. 환경별 바인딩: D1, Hyperdrive(MySQL), Hyperdrive(Postgres), Cron Trigger, 정적 자산(`apps/web/build`, `run_worker_first: true` — 정적 파일에도 보안 헤더, TC-S4.T3.f). `nodejs_compat`. 요청 수 제한은 KV 가 아니라 DB `rate_limit`이다 (계획서 v5.5 3.2). 커밋.
-2. 설치 토큰 (S4 보안 리뷰 M2): `SETUP_TOKEN` 시크릿이 있으면 그 값을 쓴다(해시만 저장). 없으면 지금처럼 GET `/api/setup` 때 만들되, 저장한 토큰이 15분보다 오래됐으면 다시 만들어 출력한다 — 아무도 로그를 못 본 채 사라진 토큰을 되살릴 길이 없기 때문이다. 처음 GET 이 동시에 둘 와도 500 이 나지 않게 조건부 쓰기. 커밋.
+2. 설치 토큰 (S4 보안 리뷰 M2): `SETUP_TOKEN` 시크릿이 있으면 그 값을 쓴다(해시만 저장). 처음 GET 이 동시에 둘 와도 500 이 나지 않게 조건부 쓰기. 커밋.
+   (S6 보안 리뷰 M2 로 바꿈) 처음에는 시크릿이 없으면 GET 때 만들고 15분이 지나면 다시 만들었으나, 인증 없는 GET 으로 15분마다 토큰을 갈아 설치를 방해할 수 있다. Workers 는 `SETUP_TOKEN` 을 필수로 하고, 없으면 관리자가 생기기 전 `/api/setup` 이 503 `setup_token_required` 다. Node 는 시작할 때마다 새 토큰을 출력하므로(출력을 잃으면 다시 띄운다) 15분 재발급 경로가 쓰일 곳이 없어 지웠다.
 3. DB 시간대 (S4 리뷰): Hyperdrive 가 세션 시간대 설정(Postgres `TimeZone` 시작 파라미터, MySQL `SET time_zone`)을 지키는지 로컬에서 확인할 수 없다. 기본 방법은 `created_at`·`updated_at` 기본값을 DB `now()` 대신 앱 쪽 `$defaultFn(() => new Date())`로 옮겨 DB 시간대에 기대지 않는 것이다 (`packages/db` 공통 정의·세 벌 생성·마이그레이션 갱신). 실제 Hyperdrive 로 TC-S4.T1.d 를 돌릴 수 있게 되면 그것도 함께 둔다. 커밋.
 4. 배포 스크립트에 `wrangler d1 migrations apply`(D1)와 Hyperdrive 대상 DB 마이그레이션 단계를 넣는다. 커밋.
 
@@ -1004,11 +1005,12 @@ TC-S6.T2.g  설치가 끝났는데 OmniRoute 비밀번호가 남아 있으면 �
 TC-S6.T3.a  세 환경 모두 번들이 만들어진다
   단언:  wrangler deploy --dry-run --env d1|mysql|pg → 셋 다 종료코드 0
   검출:  Node 전용 모듈(nodemailer 등)이 Workers 번들에 섞여 배포가 실패하는 것
-TC-S6.T3.b  Workers 설치 토큰을 잃어도 되살릴 수 있다 (S4 보안 리뷰 M2)
+TC-S6.T3.b  Workers 설치 토큰은 SETUP_TOKEN 시크릿으로만 정한다 (S4 보안 리뷰 M2, S6 보안 리뷰 M2)
   단언:  SETUP_TOKEN 시크릿을 준 wrangler dev → 그 값으로 /setup 201, 로그에 토큰 출력 없음.
-         시크릿 없이 저장 토큰의 시각을 16분 전으로 바꾼 뒤 GET /api/setup → 새 토큰 1줄 출력, 옛 토큰 401, 새 토큰 201.
-         15분 안이면 다시 만들지 않음. 관리자 없는 빈 DB 에 처음 GET 두 개 동시 → 둘 다 200, 저장된 토큰 행 1개
-  검출:  첫 GET 의 로그를 아무도 못 봐 설치 토큰을 영영 알 수 없는 것. 동시 첫 GET 이 고유 키 충돌로 500 이 되는 것
+         시크릿 없음 → GET·POST /api/setup 503 {error:"setup_token_required"}, 토큰 출력 0, 저장 토큰 행 0.
+         관리자 없는 빈 DB 에 처음 GET 두 개 동시(시크릿 있음) → 둘 다 200, 저장된 토큰 행 1개
+  검출:  첫 GET 의 로그를 아무도 못 봐 설치 토큰을 영영 알 수 없는 것. 인증 없는 GET 으로 토큰을 만들거나 갈아 설치를 방해하는 것.
+         동시 첫 GET 이 고유 키 충돌로 500 이 되는 것
   실측(S6): 로컬 wrangler dev 는 동시 요청을 사실상 차례로 처리해, 조건부 쓰기를 빼도 동시 첫 GET 이 깨지지 않는다(음성 대조가 안 걸림).
          실제로 겹치는 경쟁은 MySQL·Postgres 연결 풀에서 같은 함수를 10건 동시에 불러 본다 (pnpm -C apps/server test:db -t "TC-S6.T3.b").
 TC-S6.T3.c  DB 시간대와 무관하게 created_at 이 맞다 (Hyperdrive 시간대)
@@ -1038,7 +1040,7 @@ TC-S6.T3.f  설치 시도 횟수 제한 (S6 보안 리뷰 M1)
 선행 S6.T2, S6.T3 · 산출 `tests/e2e/`, `package.json`의 `e2e` 스크립트 · 되돌리기 커밋 1개
 
 【작업】
-1. `pnpm e2e --combo <이름>`: 띄우기 → 로그에서 설치 토큰 추출 → `/setup`으로 관리자 생성 → OmniRoute 부트스트랩 확인 → 로그아웃 → 로그인. (실제: 설치는 세션을 만들지 않아 로그인 → 로그아웃 → 다시 로그인 순서로 확인한다. Workers 조합의 "로컬 OmniRoute"는 계약 환경 `127.0.0.1:20170` 이다.) 조합 여섯: `docker-sqlite`, `docker-mysql`, `docker-pg`, `workers-d1`, `workers-mysql`, `workers-pg`. Workers 조합은 `wrangler dev`(D1 로컬, Hyperdrive `localConnectionString`)로 돌리고 OmniRoute는 로컬 주소로 직접 연결한다 (Workers 운영 연결 방식은 V24, 계획서 9장 8단계). 커밋.
+1. `pnpm e2e --combo <이름>`: 띄우기 → 로그에서 설치 토큰 추출 → `/setup`으로 관리자 생성 → OmniRoute 부트스트랩 확인 → 로그아웃 → 로그인. (실제: 설치는 세션을 만들지 않아 로그인 → 로그아웃 → 다시 로그인 순서로 확인한다. Workers 조합의 "로컬 OmniRoute"는 계약 환경 `127.0.0.1:20170` 이다. S6 보안 리뷰 M2 뒤로 Workers 조합의 설치 토큰은 로그가 아니라 `SETUP_TOKEN` 시크릿 값이다.) 조합 여섯: `docker-sqlite`, `docker-mysql`, `docker-pg`, `workers-d1`, `workers-mysql`, `workers-pg`. Workers 조합은 `wrangler dev`(D1 로컬, Hyperdrive `localConnectionString`)로 돌리고 OmniRoute는 로컬 주소로 직접 연결한다 (Workers 운영 연결 방식은 V24, 계획서 9장 8단계). 커밋.
 
 【테스트】
 ```

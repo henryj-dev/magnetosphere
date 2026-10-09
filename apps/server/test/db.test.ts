@@ -26,16 +26,16 @@ async function envFor(kind: DbKind): Promise<TestEnv> {
 }
 
 describe.each(enabledDbs())("%s", (kind: DbKind) => {
-  describe("TC-S6.T3.b 처음 설치 상태 요청이 동시에 와도 토큰은 하나다 (Workers GET /api/setup 경로)", () => {
-    it(`${LABEL[kind]}: 빈 DB 에 ensureSetupToken(rotate: false) 10건 동시 → 예외 없음, 만든 토큰 1개, 출력 1줄, 행 1개`, async () => {
+  describe("TC-S6.T3.b 처음 설치 상태 요청이 동시에 와도 토큰 행은 하나다 (Workers GET /api/setup 경로)", () => {
+    it(`${LABEL[kind]}: 빈 DB 에 SETUP_TOKEN 으로 ensureSetupToken 10건 동시 → 예외 없음, 둔 것 1건, 출력 0줄, 행 1개`, async () => {
       const db = await createTestDb(kind);
       // 연결 풀(최대 10)이라 질의가 실제로 겹친다
       const h = await connectNode(db.url);
       try {
         const lines: string[] = [];
-        const issued = await Promise.all(Array.from({ length: 10 }, () => ensureSetupToken(h, { rotate: false, log: (l) => lines.push(l) })));
+        const issued = await Promise.all(Array.from({ length: 10 }, () => ensureSetupToken(h, { rotate: false, fixedToken: "operator-chosen-setup-token-0123456789", log: (l) => lines.push(l) })));
         expect(issued.filter(Boolean)).toHaveLength(1);
-        expect(lines).toHaveLength(1);
+        expect(lines).toHaveLength(0);
         const rows = await h.db.select().from(h.schema.appSettings);
         expect(rows.filter((r: { key: string }) => r.key === "setup_token_hash")).toHaveLength(1);
       } finally {

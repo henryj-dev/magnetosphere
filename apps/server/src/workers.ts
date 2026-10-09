@@ -40,8 +40,9 @@ export default {
         const res = await env.ASSETS.fetch(c.req.raw);
         return new Response(res.body, res);
       },
-      // Workers 에는 시작 시점이 없어 설치 화면이 처음 상태를 물을 때 토큰을 만든다 (wrangler tail 로그에 한 번 나온다)
-      issueSetupTokenOnStatus: true,
+      // Workers 에는 시작 시점이 없고, 인증 없는 GET 이 토큰을 만들거나 갈게 두면 설치를 방해할 수 있다.
+      // 그래서 설치 토큰은 SETUP_TOKEN 시크릿만 쓴다. 없으면 /api/setup 이 503 이다 (S6 보안 리뷰 M2)
+      setupTokenFromSecret: true,
       log,
     });
     try {

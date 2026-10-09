@@ -39,8 +39,11 @@ export interface AppDeps {
   services(): Promise<Services>;
   /** SPA 정적 파일. 없는 경로는 index.html 을 돌려준다 (Node 는 파일, Workers 는 정적 자산 바인딩) */
   assets: MiddlewareHandler;
-  /** GET /api/setup 에서 설치 토큰이 없으면 만든다. Node 는 시작할 때 만들므로 false, Workers 는 true */
-  issueSetupTokenOnStatus: boolean;
+  /**
+   * 설치 토큰을 SETUP_TOKEN 시크릿에서만 받는다 (Workers, S6 보안 리뷰 M2). 시크릿이 없으면 관리자가 생기기 전 /api/setup 이 503
+   * setup_token_required 다. 있으면 GET /api/setup 때 그 해시를 둔다. Node 는 false: 시작할 때 토큰을 만들어 출력한다
+   */
+  setupTokenFromSecret: boolean;
   log: (line: string) => void;
   /**
    * 본문 상한 검사가 요청을 새 Request 로 바꿨을 때 부른다 (Content-Length 없는 chunked 본문을 읽어 다시 담는다).
@@ -96,7 +99,7 @@ export function createApp(deps: AppDeps) {
     await next();
   });
   app.all("/api/auth/*", async (c) => (await deps.services()).auth.handler(c.req.raw));
-  app.route("/api/setup", setupRoutes(deps.services, { issueTokenOnStatus: deps.issueSetupTokenOnStatus, log: deps.log }));
+  app.route("/api/setup", setupRoutes(deps.services, { setupTokenFromSecret: deps.setupTokenFromSecret, log: deps.log }));
   app.all("/api/*", (c) => c.json({ error: "not_found" }, 404));
   app.get("*", deps.assets);
   app.onError((e, c) => {

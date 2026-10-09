@@ -46,7 +46,7 @@ afterEach(async () => {
   for (const c of cleanups.splice(0).reverse()) await c();
 });
 
-describe("TC-S6.T3.b Workers 설치 토큰을 잃어도 되살릴 수 있다", () => {
+describe("TC-S6.T3.b Workers 설치 토큰은 SETUP_TOKEN 시크릿으로만 정한다", () => {
   it("SETUP_TOKEN 시크릿이 있으면 그 값으로 /setup 201, 로그에 토큰 출력 없음", async () => {
     const persist = freshD1();
     migrateLocal(persist);
@@ -59,42 +59,32 @@ describe("TC-S6.T3.b Workers 설치 토큰을 잃어도 되살릴 수 있다", (
     expect(d.output()).not.toContain(secret);
   });
 
-  it("시크릿 없이 저장 토큰이 16분 지났으면 GET 이 새 토큰을 1줄 출력한다. 옛 토큰 401, 새 토큰 201. 15분 안이면 다시 만들지 않는다", async () => {
-    const persist = freshD1();
-    migrateLocal(persist);
-    let d = await dev(persist);
-    expect((await fetch(`${d.baseUrl}/api/setup`)).status).toBe(200);
-    const first = lastSetupToken(await d.waitOutput(TOKEN_LINE));
-    expect(first).toBeTruthy();
-    // 15분 안: 다시 물어도 새로 만들지 않는다 (늦게 오는 로그까지 기다려 본다)
-    expect((await fetch(`${d.baseUrl}/api/setup`)).status).toBe(200);
-    expect(count(await d.waitOutput(TOKEN_LINE, 2, 1500), TOKEN_LINE)).toBe(1);
-    await d.close();
-
-    // 저장 시각을 16분 전으로 (timestamp_ms)
-    d1Query(persist, `UPDATE app_settings SET updated_at = ${Date.now() - 16 * 60_000} WHERE key = 'setup_token_hash'`);
-    d = await dev(persist);
-    expect((await fetch(`${d.baseUrl}/api/setup`)).status).toBe(200);
-    const after16 = await d.waitOutput(TOKEN_LINE);
-    expect(count(after16, TOKEN_LINE)).toBe(1);
-    const second = lastSetupToken(after16);
-    expect(second).toBeTruthy();
-    expect(second).not.toBe(first);
-    expect(await setup(d.baseUrl, first!)).toBe(401);
-    expect(await setup(d.baseUrl, second!)).toBe(201);
-  });
-
-  it("관리자 없는 빈 DB 에 처음 GET 두 개가 동시에 오면 둘 다 200, 저장 토큰 행 1개, 출력 1줄", async () => {
+  it("SETUP_TOKEN 시크릿이 없으면 GET·POST /api/setup 이 503 setup_token_required, 토큰을 만들지도 출력하지도 않는다", async () => {
     const persist = freshD1();
     migrateLocal(persist);
     const d = await dev(persist);
+    for (let i = 0; i < 3; i++) {
+      const res = await fetch(`${d.baseUrl}/api/setup`);
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ error: "setup_token_required" });
+    }
+    expect(await setup(d.baseUrl, "anything-anything-anything-anything")).toBe(503);
+    expect(count(await d.waitOutput(TOKEN_LINE, 1, 1500), TOKEN_LINE)).toBe(0);
+    await d.close();
+    expect(d1Query(persist, "SELECT count(*) AS n FROM app_settings WHERE key = 'setup_token_hash'")[0].n).toBe(0);
+  });
+
+  it("관리자 없는 빈 DB 에 처음 GET 두 개가 동시에 오면 둘 다 200, 저장 토큰 행 1개, 출력 0줄", async () => {
+    const persist = freshD1();
+    migrateLocal(persist);
+    const d = await dev(persist, { SETUP_TOKEN: "operator-chosen-setup-token-0123456789" });
     const statuses = await Promise.all([fetch(`${d.baseUrl}/api/setup`), fetch(`${d.baseUrl}/api/setup`)].map(async (p) => (await p).status));
     expect(statuses).toEqual([200, 200]);
-    await d.waitOutput(TOKEN_LINE, 2, 1500);
+    await d.waitOutput(TOKEN_LINE, 1, 1500);
     await d.close();
     const rows = d1Query(persist, "SELECT count(*) AS n FROM app_settings WHERE key = 'setup_token_hash'");
     expect(rows[0].n).toBe(1);
-    expect(count(d.output(), TOKEN_LINE)).toBe(1);
+    expect(count(d.output(), TOKEN_LINE)).toBe(0);
 
     // 실제로 겹치는 경쟁(연결 풀 여러 개)은 pnpm test:db -t "TC-S6.T3.b" --db mysql,pg 가 본다 (test/db.test.ts)
   });
@@ -143,7 +133,7 @@ describe("TC-S6.T3.d Workers 배포 전에 마이그레이션이 적용된다", 
     const persist = freshD1();
     const out = migrateLocal(persist);
     expect(out).toContain("migrations apply DB --local");
-    const d = await dev(persist);
+    const d = await dev(persist, { SETUP_TOKEN: "operator-chosen-setup-token-0123456789" });
     const res = await fetch(`${d.baseUrl}/api/setup`);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ needed: true });
