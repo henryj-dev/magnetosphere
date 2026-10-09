@@ -1,0 +1,124 @@
+{
+  "phase": "S3",
+  "sealed": true,
+  "head": "150b5b0d86e2a1f6d05d7eaae0aee1ecde8e6636",
+  "at": "2026-10-09T12:07:20.480Z",
+  "waived": false,
+  "reason": null,
+  "checks": [
+    {
+      "id": "G-S3.1",
+      "ok": true,
+      "measured": "통과 8",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S3.2",
+      "ok": true,
+      "measured": "통과 4",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S3.3",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S3.4",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-S3.5",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S3.6",
+      "ok": true,
+      "measured": "통과 3",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S3.7",
+      "ok": true,
+      "measured": "통과 5",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S3.8",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S3.9",
+      "ok": true,
+      "measured": "통과 4",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S3.10",
+      "ok": true,
+      "measured": "통과 5",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S3.11",
+      "ok": true,
+      "measured": "통과 5",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S3.12",
+      "ok": true,
+      "measured": "파일 1개 일치",
+      "limit": "dependencies.better-auth == \"1.7.7\""
+    },
+    {
+      "id": "G-S3.13",
+      "ok": true,
+      "measured": 5,
+      "limit": "== 5"
+    },
+    {
+      "id": "G-S3.14",
+      "ok": true,
+      "measured": "통과 4",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S3.15",
+      "ok": true,
+      "measured": "통과 3",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S3.16",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S3.17",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S3.18",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    },
+    {
+      "id": "G-S3.19",
+      "ok": true,
+      "measured": "통과 1",
+      "limit": "종료코드 0, 통과 ≥ 1"
+    }
+  ]
+}
