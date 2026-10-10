@@ -299,6 +299,28 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/gate.mjs K4 --explain
 
+  p2-k5:
+    name: 완료 기준 (K5 게이트, 키 시나리오는 e2e 잡)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # G-K5.1 은 docker-sqlite 묶음(Caddy·가짜 상위 서버)을 띄우고 Claude Code(tests/e2e/claude-code, 고정 버전)를 그 폴더에 설치해 돈다.
+    # 키 시나리오 여섯(G-K5.3~8)은 e2e 매트릭스 잡이 같은 명령으로 돈다. G-K5.10 은 K4 봉인 뒤 Red 커밋을 꺼내 돈다 (fetch-depth 0).
+    # G-K5.12 는 gh api 로 main 규칙을 읽는다.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: K5 게이트 (G-K5.3~8 은 e2e 매트릭스가 같은 명령으로 돈다)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/gate.mjs K5 --explain --skip-ids G-K5.3,G-K5.4,G-K5.5,G-K5.6,G-K5.7,G-K5.8
+
   s1-seal:
     name: 확인 항목 (S1 게이트, 봉인 커밋에서)
     runs-on: ubuntu-latest
