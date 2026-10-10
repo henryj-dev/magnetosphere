@@ -668,13 +668,14 @@ export const GATES = {
       { id: "G-M0.4", how: "cmd", desc: "막았던 결과는 현재 계획서 버전을 가리킴", cmd: "node scripts/check-verify.mjs resolved --set phase3" },
       // M0.T2~T5 확인 항목 (better-auth 1.7.7). Node DB 넷은 packages/auth, D1 은 apps/server test:workers (wrangler dev 시험 Worker).
       // 통과 수는 TC 수 × DB 수 (실행기 확인 전 값, 실행판 「코드 미확인」)
-      { id: "G-M0.5", how: "test", requires: ["local-services"], desc: "TC-M0.T2.a~d V29 가입 거부 자리·훅 데이터·ALS (Node DB 넷)", cmd: 'pnpm -C packages/auth test -t "TC-M0.T2"', expectPassed: 16 },
+      { id: "G-M0.5", how: "test", requires: ["local-services"], desc: "TC-M0.T2.a~d V29 가입 거부 자리·훅 데이터·ALS(hooks.before·생성 훅)·create.after (Node DB 넷)", cmd: 'pnpm -C packages/auth test -t "TC-M0.T2"', expectPassed: 16 },
       { id: "G-M0.15", how: "test", requires: ["local-services"], desc: "TC-M0.T2.a~d V29 (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M0.T2"', expectPassed: 4 },
       { id: "G-M0.6", how: "test", requires: ["local-services"], desc: "TC-M0.T3.a·b V30 세션 삭제 즉시성·비밀번호 변경·재설정 (Node DB 넷)", cmd: 'pnpm -C packages/auth test -t "TC-M0.T3"', expectPassed: 8 },
       { id: "G-M0.16", how: "test", requires: ["local-services"], desc: "TC-M0.T3.a·b V30 (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M0.T3"', expectPassed: 2 },
       { id: "G-M0.7", how: "test", requires: ["local-services"], desc: "TC-M0.T4.a·b V31 로그인 거부 훅·after 훅 (Node DB 넷)", cmd: 'pnpm -C packages/auth test -t "TC-M0.T4"', expectPassed: 8 },
       { id: "G-M0.17", how: "test", requires: ["local-services"], desc: "TC-M0.T4.a·b V31 (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M0.T4"', expectPassed: 2 },
-      { id: "G-M0.8", how: "test", requires: ["local-services"], desc: "TC-M0.T5.a V32 기본으로 열린 회원 변경 경로", cmd: 'pnpm -C packages/auth test -t "TC-M0.T5"', expectPassed: 4 },
+      { id: "G-M0.8", how: "test", requires: ["local-services"], desc: "TC-M0.T5.a V32 기본으로 열린 회원 변경 경로 (Node DB 넷)", cmd: 'pnpm -C packages/auth test -t "TC-M0.T5"', expectPassed: 4 },
+      { id: "G-M0.18", how: "test", requires: ["local-services"], desc: "TC-M0.T5.a V32 (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M0.T5"', expectPassed: 1 },
       // M0.T6 계획서 개정 (질문 Q1~Q20)
       { id: "G-M0.9", how: "grep", desc: "TC-M0.T6.a 계획서 v5.8 변경 이력이 질문 Q1~Q20 을 닫음", pattern: "^- v5\\.8: .*Q1\\b.*Q20\\b", in: ["docs/design/omniroute-member-layer.md"], op: "==", limit: 1 },
       { id: "G-M0.10", how: "grep", desc: "계획서 상태 줄이 v5.8 이상", pattern: "^상태: 초안 v5\\.([8-9]|[1-9][0-9])", in: ["docs/design/omniroute-member-layer.md"], op: "==", limit: 1 },

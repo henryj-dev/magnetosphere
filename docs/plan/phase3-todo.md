@@ -110,7 +110,7 @@
 
 ### Q13 — 하루 가입 상한: 무엇을 세나
 UTC 날짜로 센다. 초대 수락은 세지 않는다. 넘으면 그날 남은 자기 가입을 403 `signup_cap`으로 막고, `audit_log` `alert.signup_cap`을 하루 한 번 쓴다. `null`이면 상한이 없고, `0`이면 자기 가입을 모두 막는다. 남은 선택은 무엇을 세느냐다.
-- (가) **회원 행이 실제로 생긴 가입만 센다 (추천)**. 세기는 `user.create.before` 안에서 `consume`(D1 안전)으로 한다. 공개 가입의 앞 판정(M2.T1)은 "오늘 수 < 상한"을 읽기만 한다. 이미 있는 이메일·검사 실패는 세지 않는다. 그래도 남용은 막힌다: 공격자는 서로 다른 이메일로 실제 회원 행을 만들어야 하고, `/sign-up/*` IP 당 1분 5회(`rate-limit.ts`)에 걸리며, 만든 회원은 `pending`(Q6)이라 키를 못 받는다. 상한을 채우면 그날 정상 가입도 막히지만, 그것이 4.2 가 정한 동작이다("넘으면 그날 가입을 막고 운영자에게 알린다").
+- (가) **회원 행이 실제로 생긴 가입만 센다 (추천)**. 세기는 `user.create.after`에서 `consume`(D1 안전)으로 한다. 이 훅은 가입 트랜잭션이 커밋된 뒤에만 돈다 (`with-hooks.mjs:34` `queueAfterTransactionHook`). 공개 가입의 앞 판정(M2.T1)은 "오늘 수 < 상한"을 읽기만 한다. 득실은 M2.T3 에 적었다: 되돌린 가입은 세지 않고 SQLite 쓰기 잠금도 피하지만, 동시에 앞 판정을 지난 가입은 상한을 조금 넘을 수 있다. 이미 있는 이메일·검사 실패는 세지 않는다. 그래도 남용은 막힌다: 공격자는 서로 다른 이메일로 실제 회원 행을 만들어야 하고, `/sign-up/*` IP 당 1분 5회(`rate-limit.ts`)에 걸리며, 만든 회원은 `pending`(Q6)이라 키를 못 받는다. 상한을 채우면 그날 정상 가입도 막히지만, 그것이 4.2 가 정한 동작이다("넘으면 그날 가입을 막고 운영자에게 알린다").
 - (나) 가입 **시도**를 센다. 앞 판정에서 바로 한 칸을 쓴다. 이미 있는 이메일로 같은 요청을 되풀이하기만 해도 상한이 찬다. IP 하나로 하루 상한 20 을 4분 만에 채워 그날 정상 가입을 모두 막을 수 있다.
 - 영향: TC-M2.T3.a·b·d.
 - 결정: 미정
@@ -167,6 +167,7 @@ IdP 는 5단계에 생긴다. 지금 `sso_only`를 고르면 로컬 가입이 �
 ### Q19 — 공개 가입을 정책이 거부할 때의 응답
 정책·도메인·메일·상한 판정은 Better Auth 가 이메일을 찾기 **전**(`hooks.before` `/sign-up/email`)에 한다 (M2.T1). 그래서 어느 쪽이든 응답이 이메일 존재와 무관하다.
 - (가) **명시적 403 과 사유 코드(`signup_closed`·`domain_not_allowed`·`mail_required`·`signup_cap`)를 낸다 (추천)**. 정책은 비밀이 아니고, 가입하려는 사람이 왜 안 되는지 알아야 한다. 같은 정책·같은 도메인이면 있는 이메일·없는 이메일 모두 같은 403 이다.
+  - 예외 하나: 하루 상한의 경쟁. 앞 판정은 오늘 수를 읽기만 하므로, 동시에 앞 판정을 지난 가입은 403 을 받지 않고 상한을 조금 넘겨 만들어진다 (M2.T3, Q13 (가)). 세기를 생성 훅 안(`user.create.before`)에 두는 쪽이었다면, 그 경쟁에서 진 요청은 거부가 Better Auth 의 가짜 200 으로 숨겨졌을 것이다.
 - (나) 늘 일반 200(Better Auth 가짜 user 응답과 같은 모양)을 낸다. 정책과 허용 도메인 목록을 숨긴다. 가입한 사람은 메일이 안 오는 이유를 모른다.
 - 영향: TC-M2.T1.a·e, TC-M2.T2.b, TC-M2.T3.a, TC-M5.T1.b·c.
 - 결정: 미정
@@ -342,8 +343,8 @@ TC-M0.T1.c  phase1·phase2 묶음은 그대로다
    - (나) `databaseHooks.user.create.before`가 403 을 던질 때 (가짜 200 이 나오는지, 행 0 인지).
    - (다) 같은 훅이 400 을 던질 때. 가짜 200 으로 바뀌지 않으면 "이미 있는 이메일 200 / 없는 이메일 400"으로 계정 존재가 드러난다.
    - (라) `user.create.before`가 `{ data: { emailVerified: true, status, monthlyLimitUsd } }`를 돌려줄 때 저장되는 값과, 메일 발송기에 넘어오는 `user.emailVerified`.
-   - (마) 앱 쪽 `AsyncLocalStorage`(`node:async_hooks`, Workers 는 `nodejs_compat`)에 넣은 값이 서버 호출 `auth.api.signUpEmail` 안의 훅에서 보이는지. 공개 HTTP 요청에서는 보이지 않는지.
-   - `answer = { beforeHook: { status, sameForExisting, rowsLeft, mailSent }, createHook403: {...}, createHook400: {...}, hookDataOverrides: {...}, mailerSeesVerified, alsVisible: { node, workers, publicRequest } }`. 커밋.
+   - (마) 앱 쪽 `AsyncLocalStorage`(`node:async_hooks`, Workers 는 `nodejs_compat`)에 넣은 값이 서버 호출 `auth.api.signUpEmail` 안에서 보이는지. 볼 자리는 **`hooks.before`(`signUpGate`)와 `user.create.before` 둘 다**다. 1.7.7 은 서버 호출에도 `hooks.before`를 돌린다 (`api/dispatch.mjs:141·210` `runBeforeHooks`). 공개 HTTP 요청에서는 두 자리 모두 보이지 않는지, 요청 본문·헤더로 그 값을 만들 수 없는지도 본다. `user.create.after`가 커밋 뒤에 도는지(상한 세기 자리, M2.T3)도 적는다.
+   - `answer = { beforeHook: { status, sameForExisting, rowsLeft, mailSent }, createHook403: {...}, createHook400: {...}, hookDataOverrides: {...}, mailerSeesVerified, alsVisible: { beforeHook: { node, workers }, createHook: { node, workers }, publicRequest, forgeable }, createAfterRunsAfterCommit }`. 커밋.
 2. 결과에 따라 막는 경우가 넷이다. 앞 판정(가)이 행이나 메일을 남김, 뒷받침 훅(나)이 행을 남김, 훅 데이터(라)를 덮어쓰지 못함, ALS(마)가 Workers 에서 보이지 않음. 하나라도 해당하면 `blocking: true`로 두고 계획서를 개정한다. 개정 내용은 각각 이렇다.
    - (라)가 안 되면: 수락 뒤 `UPDATE`로 인증 처리하고, 메일은 발송기에서 초대 문맥으로 건너뛴다.
    - (마)가 안 되면: 초대 수락이 Better Auth 를 거치지 않고 `$context.internalAdapter`로 회원을 만든다.
@@ -359,9 +360,9 @@ TC-M0.T2.b  뒷받침 훅 거부는 행을 남기지 않고 응답을 숨긴다 
 TC-M0.T2.c  훅 데이터가 가입 기본값을 덮고 발송기가 그 값을 본다 (V29 의존)
   단언:  훅이 emailVerified true·status pending·monthlyLimitUsd 5 반환 → DB 값 == answer.hookDataOverrides, sendVerificationEmail 에 넘어온 user.emailVerified == answer.mailerSeesVerified
   검출:  sign-up.mjs 가 emailVerified: false 를 훅 뒤에 다시 넣어 이메일 지정 초대 회원(Q5)이 인증되지 않거나, 인증된 회원에게도 인증 메일이 나가는 것 (:241 은 emailVerified 를 보지 않는다)
-TC-M0.T2.d  앱 ALS 의 초대 문맥은 서버 호출 훅에서만 보인다 (V29 의존)
-  단언:  als.run({ inviteId }, () => auth.api.signUpEmail(...)) → 훅에서 inviteId 보임 (Node·Workers). 같은 시각 다른 공개 HTTP 가입 → 훅에서 undefined
-  검출:  초대 문맥을 요청 본문·헤더로 넘겨 공개 요청이 같은 필드를 넣어 invite_only 를 비켜 가는 것, Workers 에서 ALS 가 끊겨 초대 수락이 늘 공개 가입으로 판정되는 것
+TC-M0.T2.d  앱 ALS 의 초대 문맥은 서버 호출의 두 훅에서만 보이고 위조할 수 없다 (V29 의존)
+  단언:  als.run({ inviteId }, () => auth.api.signUpEmail(...)) → hooks.before 와 user.create.before 둘 다에서 inviteId 보임 (Node·Workers). 같은 시각 다른 공개 HTTP 가입 → 두 자리 모두 undefined. 공개 요청 본문·헤더에 inviteId·x-invite·__invite 를 넣어도 두 자리 모두 undefined. user.create.after 는 가입 트랜잭션 커밋 뒤에 돈다 == answer.createAfterRunsAfterCommit
+  검출:  hooks.before 가 서버 호출에도 도는 것(dispatch.mjs:210)을 몰라 signUpGate 가 초대 수락의 signUpEmail 까지 403 으로 막는 것, 초대 문맥을 요청 본문·헤더로 넘겨 공개 요청이 같은 필드로 invite_only 를 비켜 가는 것, Workers 에서 ALS 가 끊겨 초대 수락이 늘 공개 가입으로 판정되는 것
 ```
 
 【통과】
@@ -417,7 +418,7 @@ TC-M0.T4.b  세션을 만드는 다른 경로도 같은 훅을 지나고, after 
 - [ ] G-M0.7 · G-M0.17 통과
 
 ### ☐ M0.T5 — V32 기본으로 열린 회원 변경 경로 (Q14 의존)
-선행 M0.T1 · 산출 `docs/verify/V32.json`, `packages/auth/test/verify-p3/v32.test.ts` · 되돌리기 커밋 1개
+선행 M0.T1 · 산출 `docs/verify/V32.json`, `packages/auth/test/verify-p3/v32.test.ts`, `apps/server/test/verify-p3/v32.workers.test.ts` · 되돌리기 커밋 1개
 
 【작업】
 1. 지금 구성에서 로그인한 회원이 부를 수 있는 Better Auth 경로를 하나씩 부른다. 경로는 1.7.7 `auth.api`의 키에서 뽑는다.
@@ -433,7 +434,7 @@ TC-M0.T5.a  회원 변경·생성 경로의 기본 상태가 V32 와 같다 (V32
 ```
 
 【통과】
-- [ ] G-M0.8 통과
+- [ ] G-M0.8 · G-M0.18 통과
 
 ### ☐ M0.T6 — 계획서 개정 v5.8 (질문 Q1~Q20 과 V29~V32)
 선행 M0.T2 ~ M0.T5 · 산출 `docs/design/omniroute-member-layer.md`, 이 문서 · 되돌리기 커밋 1개
@@ -487,7 +488,8 @@ TC-M0.T7.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-M0.16 | TC-M0.T3.a·b V30 (D1) | [L] `pnpm -C apps/server test:workers -t "TC-M0.T3"` | 통과 = 2 |
 | G-M0.7 | TC-M0.T4.a·b V31 (Node DB 넷) | [L] `pnpm -C packages/auth test -t "TC-M0.T4"` | 통과 = 8 |
 | G-M0.17 | TC-M0.T4.a·b V31 (D1) | [L] `pnpm -C apps/server test:workers -t "TC-M0.T4"` | 통과 = 2 |
-| G-M0.8 | TC-M0.T5.a V32 | [L] `pnpm -C packages/auth test -t "TC-M0.T5"` | 통과 = 4 |
+| G-M0.8 | TC-M0.T5.a V32 (Node DB 넷) | [L] `pnpm -C packages/auth test -t "TC-M0.T5"` | 통과 = 4 |
+| G-M0.18 | TC-M0.T5.a V32 (D1) | [L] `pnpm -C apps/server test:workers -t "TC-M0.T5"` | 통과 = 1 |
 | G-M0.9 | TC-M0.T6.a 질문 Q1~Q20 닫음 | grep `^- v5\.8: .*Q1\b.*Q20\b` 계획서 | == 1 |
 | G-M0.10 | 계획서 v5.8 이상 | grep `^상태: 초안 v5\.([8-9]\|[1-9][0-9])` 계획서 | == 1 |
 | G-M0.11 | 이 문서에 미정 질문 0 | grep `^- 결정: 미정$` in `docs/plan/phase3-todo.md` | == 0 |
@@ -667,17 +669,18 @@ TC-M1.T5.b  ruleset 필수 검사가 이 잡을 포함한다
 설계 (V29 의존). #13 의 자리 셋을 그대로 쓰고 판정만 넓힌다.
 - **판정 한 곳**: `packages/db/src/signup.ts`. #13 의 `publicSignupClosed`를 `decideSignup`으로 넓힌다. `PUBLIC_SIGNUP_MODES`에 `open`·`domain_allowlist`를 넣고 도메인·메일·상한을 더한다. 서버와 `packages/auth`가 같이 쓴다 (`packages/auth`가 서버 코드에 기대지 않게 하려고 판정은 `packages/db`에 둔다 — #13 과 같은 이유).
 - **앞 판정**: #13 의 두 자리(`app.ts` `/api/auth/*` 미들웨어, Better Auth `hooks.before` `signUpGate`)가 정책·도메인·메일·하루 상한(읽기만)을 본다. Better Auth 가 이메일을 찾기(`findUserByEmail`) 전이라, 같은 정책·같은 도메인이면 있는 이메일·없는 이메일에 같은 응답을 낸다 (Q19 (가) 403·사유 코드).
+  - **`signUpGate`는 서버 호출에도 돈다.** 1.7.7 은 `auth.api.signUpEmail`을 서버에서 불러도 `hooks.before`를 돌린다 (`api/dispatch.mjs:141·210`). 그래서 `signUpGate`도 `runAsInvite` 문맥이 있으면 공개 줄이 아니라 초대 줄로 판정한다. 그러지 않으면 `invite_only`에서 초대 수락이 403 을 받는다. `app.ts` 미들웨어는 HTTP `/api/auth/*`만 지나므로 초대 수락(`/api/invites/accept` → 서버 호출)에는 걸리지 않는다.
 - **뒷받침 훅**: `databaseHooks.user.create.before`는 경로와 관계없이 모든 회원 생성에서 돈다.
   - 공개 가입이면 앞 판정을 다시 돌린다 (정책이 그사이 바뀐 경우).
   - 초대 문맥이 있으면 초대 줄로 판정한다.
   - 둘 다 아니면(SSO 등 다른 경로) 거부한다. #13 처럼 400 `SIGNUP_CLOSED`로 던진다. `/sign-up/*`는 앞 판정이 먼저 막으므로 이 400 이 이메일 존재를 드러내는 경로는 없다. 시험은 응답보다 행 수로 본다.
   - 통과하면 `{ data: { status, monthlyLimitUsd, role?, emailVerified? } }`를 돌려준다.
-  - 하루 상한 세기(Q13 (가))도 여기서 한다.
+  - 하루 상한은 여기서 세지 않는다. 세기는 `user.create.after`(커밋 뒤)에서 한다 (M2.T3).
 - **#13 리뷰에서 넘어온 메모 셋**
   - 첫 관리자는 한도가 없다. `runSetup`이 Better Auth 를 거치지 않고 user 행을 넣어(`monthly_limit_usd` NULL) 생성 훅의 기본값 복사를 지나지 않는다. 운영자 본인이라 의도로 보고 바꾸지 않는다. 운영 문서에 적는다 (M6.T3).
   - SSO JIT 는 3단계 동안 막혀 있다. #13 의 생성 훅이 관리자가 있으면 초대 문맥 밖의 모든 회원 생성을 거부하기 때문이다. 이것은 의도다. 5단계는 `decideSignup`에 IdP 줄(`via: "sso"`, `sso_provider_settings.jit_enabled`·도메인)을 더해 연다. TC-M2.T1.b 의 "다른 생성 경로 거부"가 그때 바뀐다.
   - 가입 경로가 설정을 두 번 읽는다. `app.ts`와 `signUpGate`가 각각 `hasAdmin`·`signup_mode`를 select 하고, 생성 훅이 한 번 더 읽는다. M2.T1 은 요청 하나 안에서만 판정 입력을 한 번 읽어 두고 쓴다 (요청 문맥 메모). 인스턴스 캐시는 쓰지 않는다 — 정책을 닫아도 다른 인스턴스가 가입을 받게 된다 (TC-M2.T5.a).
-- **초대 문맥 통로**: `packages/auth/src/invite-context.ts`의 `AsyncLocalStorage`다. 생성 훅이 `packages/auth` 안에 있어서 통로도 그 패키지에 둔다. `runAsInvite({ inviteId, role, email, verified }, fn)` 안에서 부른 `auth.api.signUpEmail`만 훅이 초대 가입으로 본다. 요청 본문·헤더는 쓰지 않는다. 공개 요청은 이 값을 넣을 길이 없다 (V29 TC-M0.T2.d). 초대 단계(M3)는 이 함수를 부르기만 한다.
+- **초대 문맥 통로**: `packages/auth/src/invite-context.ts`의 `AsyncLocalStorage`다. 생성 훅이 `packages/auth` 안에 있어서 통로도 그 패키지에 둔다. `runAsInvite({ inviteId, role, email, verified }, fn)` 안에서 부른 `auth.api.signUpEmail`만 두 자리(`signUpGate`·생성 훅)가 초대 가입으로 본다. 요청 본문·헤더는 쓰지 않는다. 공개 요청은 이 값을 넣을 길이 없다 (V29 TC-M0.T2.d). 초대 단계(M3)는 이 함수를 부르기만 한다.
 
 ### ☐ M2.T1 — 정책 판정·앞 판정·뒷받침 훅·초대 문맥 🛡 보안 리뷰 (V29·Q1·Q3·Q15·Q19 의존)
 선행 없음 · 산출 `packages/db/src/signup.ts`(#13 의 판정을 넓힌다), `packages/auth/src/{index,invite-context}.ts`, `apps/server/src/app.ts`, `apps/server/src/signup/request-memo.ts` · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-M2.T1.a`
@@ -692,7 +695,7 @@ TC-M1.T5.b  ruleset 필수 검사가 이 잡을 포함한다
      - `open`(메일 필요) · `domain_allowlist`(메일·도메인 일치 필요)만 통과한다.
      - `invite_only`·`closed`·`sso_only` → `signup_closed`.
    - 초대 가입: `invite_only`·`open`·`domain_allowlist`는 통과, `closed`·`sso_only`는 거부 (Q3).
-   - `app.ts` 미들웨어·`signUpGate`·`userCreateGuard`가 `publicSignupClosed` 대신 `decideSignup`을 부른다. 위 「설계」대로 생성 훅에 초대 문맥 통과와 `data`(상태·역할·인증)를 더한다.
+   - `app.ts` 미들웨어·`signUpGate`·`userCreateGuard`가 `publicSignupClosed` 대신 `decideSignup`을 부른다. `signUpGate`와 `userCreateGuard`는 `runAsInvite` 문맥이 있으면 `via: "invite"`로 판정한다 (서버 호출에도 `hooks.before`가 돈다, `dispatch.mjs:210`). 위 「설계」대로 생성 훅에 초대 문맥 통과와 `data`(상태·역할·인증)를 더한다.
    - 판정 입력(관리자 있음·설정·메일)은 요청 하나에 한 번만 읽는다 (#13 리뷰 메모, `request-memo.ts`).
    - 설치 전 403 `setup_required`(app.ts)는 그대로 앞에 둔다.
    - V32 에서 열려 있던 이메일 변경·회원 삭제 경로를 `disabledPaths`에 더한다.
@@ -717,10 +720,13 @@ TC-M2.T1.e  정책 거부 응답은 이메일 존재와 무관하다 (Q19 의존
 TC-M2.T1.f  공개 요청은 초대 문맥을 흉내 낼 수 없다 (V29 의존)
   단언:  invite_only, 공개 가입 본문·헤더에 inviteId·invite·x-invite 등 어떤 필드를 넣어도 → 행 증가 0. runAsInvite 안의 서버 호출만 +1. 다른 요청이 동시에 runAsInvite 안에 있어도 공개 요청은 0
   검출:  초대 여부를 요청 본문·헤더로 넘겨 공개 요청이 같은 필드로 invite_only 를 통과하는 것, ALS 값이 동시 요청 사이에 새는 것
+TC-M2.T1.g  초대 문맥의 서버 호출은 signUpGate 를 지난다 (V29 의존, 다섯 DB)
+  단언:  invite_only, runAsInvite(가짜 초대) 안에서 auth.api.signUpEmail → signUpGate 통과·user +1. 같은 호출을 문맥 없이 → APIError 403 SIGNUP_CLOSED·행 0. closed 에서는 문맥이 있어도 403·행 0 (Q3) (Node DB 넷, D1 은 G-M2.29)
+  검출:  signUpGate 가 path 만 보고 문맥을 보지 않아, 서버 호출에도 도는 hooks.before(dispatch.mjs:210)가 invite_only 의 초대 수락까지 403 으로 막는 것. 반대로 문맥 판정을 요청 본문·헤더(위조 가능)에서 읽어 공개 요청이 같은 값을 넣어 통과하는 것은 TC-M2.T1.f 가 본다
 ```
 
 【통과】
-- [ ] G-M2.1 ~ G-M2.6 · G-M2.17 · G-M2.18 통과
+- [ ] G-M2.1 ~ G-M2.6 · G-M2.17 · G-M2.18 · G-M2.28 · G-M2.29 통과
 - [ ] G-M2.21 통과 (Red 커밋에서 TC-M2.T1.a 실패)
 
 ### ☐ M2.T2 — 허용 도메인·승인 대기·기본값 (Q6·Q14·Q16 의존)
@@ -756,7 +762,12 @@ TC-M2.T2.c  새 회원에게 기본 월 한도가 걸린다 (Q16 의존)
 【작업】
 1. 하루 가입 상한을 건다. 커밋.
    - 키는 `signup-day|<UTC 날짜>`다. 세는 방식은 `routes/guard.ts` `consume`과 같은 세 문장의 고정 창 세기다 (D1 안전, 여러 인스턴스 공유). 생성 훅(`packages/auth`)이 부르므로 함수는 판정과 같은 `packages/db/src/signup.ts`에 둔다.
-   - Q13 (가)는 앞 판정에서 오늘 수만 읽고, 뒷받침 훅(공개 가입일 때만)에서 `consume` 한다. 훅에서 넘치면 403 이 되고 Better Auth 가 가짜 200 으로 숨긴다. 앞 판정과 훅 사이 경쟁에서 진 요청뿐이다. 행은 생기지 않는다.
+   - Q13 (가)는 앞 판정에서 오늘 수만 읽고, **`user.create.after`**(공개 가입일 때만)에서 `consume` 한다. 넘쳐도 거부하지 않는다 (이미 만들어진 회원이다). 세기만 하고, 오늘 수가 상한에 닿으면 다음 앞 판정부터 403 이다.
+   - 생성 훅 안(`user.create.before`)에서 세지 않는 이유 둘:
+     - SQLite(libSQL)는 가입 트랜잭션이 쓰기 잠금을 쥔다 (`drizzle-orm/libsql/session.js` `transaction` → `client.transaction()`). 훅이 다른 연결로 `rate_limit`에 쓰면 그 잠금을 기다리다 busy 가 난다. 같은 트랜잭션 연결을 훅에 넘길 길도 없다 (#13 의 읽기는 트랜잭션 밖 연결이라 문제가 없었다).
+     - 훅 뒤에 가입이 되돌려지면(account 연결 실패 등) 센 값만 남는다. 그만큼 그날 정상 가입 자리가 줄어든다.
+   - `user.create.after`는 커밋 뒤에만 돌아(`with-hooks.mjs:34`, V29) 둘 다 피한다. 잃는 것: 동시에 앞 판정을 지난 가입은 모두 만들어진다. 상한을 넘는 폭은 "그 순간 동시에 앞 판정을 지난 공개 가입 수"이고, `/sign-up/*` IP 당 1분 5회가 그 폭을 IP 수 × 5 로 묶는다. 4.2 의 상한은 남용을 알리고 멈추는 장치라 몇 건의 초과는 받아들인다. 생성 훅 안에서 세는 쪽은 초과가 0 이지만 SQLite busy 를 V29 측정으로 따로 보여야 하고, 되돌린 가입의 칸을 돌려줄 길이 없다. 그래서 after 를 고른다.
+   - 세기가 실패하면(DB 오류) 가입은 그대로 두고 경고만 남긴다. 다음 가입의 세기가 이어 간다.
    - Q13 (나)면 앞 판정에서 곧바로 `consume` 한다.
    - 넘으면 앞 판정이 403 `signup_cap`을 낸다. 그날 처음 넘을 때 `alert.signup_cap` 1행을 쓴다 (`keys/alerts.ts` `alertOnce`와 같은 하루 한 번).
    - 초대 수락은 세지 않는다.
@@ -764,8 +775,8 @@ TC-M2.T2.c  새 회원에게 기본 월 한도가 걸린다 (Q16 의존)
 【테스트】
 ```
 TC-M2.T3.a  상한을 넘으면 그날 남은 공개 가입을 막는다 (Q13 의존, 다섯 DB)
-  단언:  상한 3, 인스턴스 둘이 같은 DB 로 동시 공개 가입 10건(다른 이메일) → user 증가 정확히 3, alert.signup_cap 1행. 그 뒤 공개 가입 → 403 signup_cap·행 0. UTC 날이 바뀌면(가짜 시계) 다시 +1. 초대 문맥은 상한 뒤에도 +1 (sqlite·mysql·mariadb·pg, D1 은 G-M2.12)
-  검출:  인스턴스 메모리나 "세기 → 가입" 두 단계로 세어 동시 가입이 상한을 넘는 것, 알림이 가입 시도마다 쌓이는 것
+  단언:  상한 3. (1) 차례로 공개 가입 4건 → user +3, 4번째 403 signup_cap·행 0, alert.signup_cap 1행. (2) 새 날, 인스턴스 둘이 같은 DB 로 동시 공개 가입 10건(다른 이메일) → 오늘 센 값 == 실제로 생긴 공개 가입 user 수, 그 뒤 공개 가입 → 403·행 0, alert 는 그날 1행. (3) 가입 트랜잭션을 account 연결에서 실패시킴 → user 0·센 값 0. (4) SQLite 에서 동시 10건 중 SQLITE_BUSY 로 실패한 응답 0. 초대 문맥은 상한 뒤에도 +1 (sqlite·mysql·mariadb·pg, D1 은 G-M2.12)
+  검출:  인스턴스 메모리로 세어 인스턴스 수만큼 상한이 늘어나는 것, 센 값과 실제 회원 수가 어긋나 상한이 영원히 안 닿거나 일찍 닿는 것, 되돌린 가입이 칸을 쓰는 것, 생성 훅 안에서 다른 연결로 써서 libSQL 가입 트랜잭션 잠금에 막혀 동시 가입이 busy 로 500 이 나는 것, 알림이 가입마다 쌓이는 것
 TC-M2.T3.b  실패한 시도는 상한을 쓰지 않는다 (Q13 의존)
   단언:  상한 3, 이미 있는 이메일로 공개 가입 20번 → 오늘 수 0, 그 뒤 새 이메일 3건 +3
   검출:  시도를 세어 공격자가 같은 요청을 되풀이하기만 해서 몇 분 만에 하루 상한을 채워 그날 정상 가입을 모두 막는 것 (Q13 (나)를 고르면 이 TC 는 반대 단언으로 바뀐다)
@@ -861,9 +872,11 @@ TC-M2.T6.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-M2.2 | TC-M2.T1.b 다른 생성 경로 (Node DB 넷) | [L] `pnpm -C packages/auth test -t "TC-M2.T1.b"` | 통과 = 4 |
 | G-M2.18 | TC-M2.T1.b 다른 생성 경로 (D1) | [L] `pnpm -C apps/server test:workers -t "TC-M2.T1.b"` | 통과 = 1 |
 | G-M2.3 ~ 6 | TC-M2.T1.c ~ f | `pnpm -C apps/server test -t "TC-M2.T1.<x>"` | 각 통과 = 1 |
+| G-M2.28 | TC-M2.T1.g 초대 문맥이 signUpGate 를 지남 (Node DB 넷) | [L] `pnpm -C packages/auth test -t "TC-M2.T1.g"` | 통과 = 4 |
+| G-M2.29 | TC-M2.T1.g (D1) | [L] `pnpm -C apps/server test:workers -t "TC-M2.T1.g"` | 통과 = 1 |
 | G-M2.7 ~ 9 | TC-M2.T2.a ~ c | `pnpm -C apps/server test -t "TC-M2.T2.<x>"` | 각 통과 = 1 |
-| G-M2.10 | TC-M2.T3.a 상한 동시 (Node DB 넷) | [L] `pnpm -C apps/server test:db -t "TC-M2.T3.a" --db sqlite,mysql,mariadb,pg` | 통과 = 4, 증가 == 3 |
-| G-M2.12 | TC-M2.T3.a 상한 동시 (D1) | [L] `pnpm -C apps/server test:workers -t "TC-M2.T3.a"` | 통과 = 1, 증가 == 3 |
+| G-M2.10 | TC-M2.T3.a 상한 차례·동시 (Node DB 넷) | [L] `pnpm -C apps/server test:db -t "TC-M2.T3.a" --db sqlite,mysql,mariadb,pg` | 통과 = 4, 차례 증가 == 3, 동시는 센 값 == 실제 행 |
+| G-M2.12 | TC-M2.T3.a 상한 차례·동시 (D1) | [L] `pnpm -C apps/server test:workers -t "TC-M2.T3.a"` | 통과 = 1, 같은 기준 |
 | G-M2.11 · 19 | TC-M2.T3.b · c | `pnpm -C apps/server test -t "TC-M2.T3.<x>"` | 각 통과 = 1 |
 | G-M2.13 | TC-M2.T4.a 가입 응답 시간 | [L] `pnpm -C packages/auth test -t "TC-M2.T4.a"` | 통과 = 1, 차이 < 30ms |
 | G-M2.14 | TC-M2.T4.b 메일 몫 150ms | [L] `pnpm -C packages/auth test -t "TC-S3.T2.e"` | 통과 = 1 |
@@ -1529,7 +1542,7 @@ TC-M6.T4.c  ruleset 필수 검사가 이 잡을 포함한다
 | 거부한 가입이 남기는 행·메일 | 0 (다섯 DB) | G-M0.5 · G-M0.15, G-M2.1 · G-M2.17 |
 | 정책 거부 응답의 이메일 존재 의존 | 0 (있는·없는 이메일 같은 응답) | G-M2.5 (TC-M2.T1.e) |
 | 초대 하나로 생기는 회원 | 정확히 1 (다섯 DB, 동시 10건) | G-M3.7 · G-M3.8 |
-| 하루 가입 상한 초과 | 0 (다섯 DB, 동시 10건) | G-M2.10 · G-M2.12 |
+| 하루 가입 상한 | 차례 가입 초과 0, 동시 가입은 센 값 == 실제 행 (초과 폭 ≤ 동시에 앞 판정을 지난 수, Q13 (가)) | G-M2.10 · G-M2.12 |
 | 활성 관리자 0명이 되는 동작 | 0 (다섯 DB, 동시 강등·정지) | G-M4.4 · G-M4.27 |
 | 정지 뒤 첫 키 요청·옛 세션·로그인 경쟁 세션 | 거부 (403 · 401 · 0행) | G-M4.10, G-M4.32 · G-M4.29, G-M4.18, G-M5.1 ~ 6 |
 | 새 회원 기본 월 한도 | $5 (설정값 복사, Q16) | G-M2.9, TC-M5.T1.b |
@@ -1580,7 +1593,7 @@ TC-M6.T4.c  ruleset 필수 검사가 이 잡을 포함한다
 | TC-M4.T4.a | Q10 자기 탈퇴 | M4.T4 `(폐기)` |
 | TC-M4.T1.e | Q11 역할 둘 (계획서 4.5) | 결정됨 |
 | TC-M1.T2.b, TC-M4.T1.d | Q12 관리자 보호 셋 | 표 |
-| TC-M2.T3.a·b·c, TC-M5.T1.b | Q13 성공 가입만 세기·UTC·null/0 | (나)면 TC-M2.T3.b 단언이 반대로 |
+| TC-M2.T3.a·b·c, TC-M5.T1.b, TC-M0.T2.d | Q13 성공 가입만 세기(`user.create.after`, 커밋 뒤)·UTC·null/0 | (나)면 TC-M2.T3.b 단언이 반대로, 세기는 앞 판정으로 |
 | TC-M1.T1.a, TC-M2.T2.b, TC-M2.T1.d, TC-M5.T1.c | Q14 정확히 일치·이메일 변경 막음 | 비교 함수 |
 | TC-M1.T1.b, TC-M2.T1.c, TC-M2.T5.b | Q15 메일 = `mail_settings` 행, fail-closed | 판정 |
 | TC-M2.T2.c, TC-M3.T2.d, TC-M5.T1.b, TC-M1.T1.a | Q16 기본 한도 복사(#13 구현), null 기본값 거부, max_keys NULL 유지 | (나)면 `defaultMonthlyLimit`이 null 을 돌려줌 |
@@ -1594,13 +1607,13 @@ TC-M6.T4.c  ruleset 필수 검사가 이 잡을 포함한다
 열어 보고 검출줄에 그 사실을 적은 코드는 아래와 같다.
 - 보안 고침 #13: `packages/db/src/signup.ts`, `packages/auth/src/index.ts`(`signUpGate`·`userCreateGuard`), `apps/server/src/app.ts`, `apps/server/test/signup-closed.test.ts`, `packages/auth/test/signup-closed.test.ts`
 - 1·2단계 코드: `packages/auth/src/index.ts`·`rate-limit.ts`, `packages/db/src/schema/common.ts`·`seed.ts`·`auth-options.ts`·`users.ts`, `apps/server/src/app.ts`·`config.ts`·`setup/*`·`routes/{guard,keys,issue,admin-limits}.ts`·`keys/{target,apply,reconcile,alerts}.ts`·`queue/index.ts`, `tests/e2e/keys/env.mjs`, `packages/auth/test/*`
-- better-auth 1.7.7: `api/routes/sign-up.mjs`, `api/routes/password.mjs`, `db/internal-adapter.mjs`, `db/with-hooks.mjs`
+- better-auth 1.7.7: `api/routes/sign-up.mjs`, `api/routes/password.mjs`, `api/dispatch.mjs`, `db/internal-adapter.mjs`, `db/with-hooks.mjs`. drizzle-orm `libsql/session.js`
 
 아래는 기대는 코드나 동작이 아직 없어 열어 보지 못한 것이다.
 
 | TC | 열어 보지 못한 것 | 처음 확인되는 곳 |
 |---|---|---|
-| TC-M0.T2.d, TC-M2.T1.f | `AsyncLocalStorage` 값이 Better Auth 엔드포인트 안의 훅까지 이어지는지 (Workers `nodejs_compat` 포함) | M0.T2 |
+| TC-M0.T2.d, TC-M2.T1.f·g | `AsyncLocalStorage` 값이 Better Auth 엔드포인트 안의 두 훅(`hooks.before`·`user.create.before`)까지 이어지는지 (Workers `nodejs_compat` 포함) | M0.T2 |
 | TC-M0.T4.b, TC-M4.T3.g | `session.create.after`에서 방금 만든 세션을 지울 수 있는지, 1.7.7 `autoSignInAfterVerification` 기본값 | M0.T4 |
 | TC-M0.T5.a, TC-M2.T1.b | 1.7.7 `auth.api`의 user 생성·변경 경로 목록 | M0.T5 |
 | G-M0.5 ~ 8 | `packages/auth` 시험 실행기(`scripts/test.mjs`)가 `-t` 하나를 DB 넷에 도는지와 그 통과 수 | M0.T2 (다르면 `expectPassed`만 고친다) |
