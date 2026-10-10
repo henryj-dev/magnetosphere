@@ -10,6 +10,7 @@
 // 공통
 //   - 회원 세션 필요 (401). 역할·상태는 DB 에서 읽는다. 탈퇴(deleted) 회원은 모두 403.
 //   - 키는 id 와 세션 회원 id 로 함께 찾는다. 남의 키·삭제한 키·없는 키는 모두 404 이고 OmniRoute 를 부르지 않는다.
+//   - 발급 중인 자리 행(issue.ts)은 목록에 state issuing 으로 보이고(개수에 든다), 바꾸는 요청은 모두 409 issuing 이다.
 //   - 변경 요청은 같은 출처만 (guard.ts sameOrigin, app.ts 에서 건다). 발급·재발급은 요청 수 제한 (Q4, 429).
 //   - OmniRoute 연결(주소·관리 토큰)이 없으면 OmniRoute 를 부르는 요청은 503 omniroute_unavailable.
 import { and, asc, eq, ne } from "drizzle-orm";
@@ -19,12 +20,15 @@ import { readTarget } from "../keys/target.ts";
 import type { ClientFor } from "../limits/daily.ts";
 import type { Services } from "../app.ts";
 import { consumeIssue, sessionMember, type Member } from "./guard.ts";
-import { IssueError, issueKey, maxKeysOf, type KeysClient } from "./issue.ts";
+import { IssueError, issueKey, maxKeysOf, PENDING_PREFIX, type KeysClient } from "./issue.ts";
 
 /** 이름 최대 길이 */
 export const LABEL_MAX = 64;
 
 const k = (s: Services) => s.db.schema.apiKeys;
+
+/** 발급 중인 자리 행인가 (issue.ts). 회원은 이 행을 바꾸지 못하고, 목록에는 state issuing 으로 보인다 */
+const issuing = (r: { omnirouteKeyId: string }) => r.omnirouteKeyId.startsWith(PENDING_PREFIX);
 
 /** 회원에게 보내는 키 필드 (허용 목록). OmniRoute id·예산 값은 보내지 않는다 */
 function view(r: any) {
@@ -32,7 +36,7 @@ function view(r: any) {
     id: r.id as string,
     label: (r.label ?? null) as string | null,
     preview: r.keyPreview as string,
-    state: r.state as string,
+    state: (issuing(r) ? "issuing" : r.state) as string,
     disabledReason: (r.disabledReason ?? null) as string | null,
     syncState: r.syncState as string,
     createdAt: new Date(r.createdAt).toISOString(),
@@ -55,6 +59,14 @@ async function jsonBody(c: Context): Promise<Record<string, unknown> | null> {
   if (!/^application\/json\b/i.test(ct)) return null;
   const b = await c.req.json().catch(() => null);
   return b && typeof b === "object" && !Array.isArray(b) ? (b as Record<string, unknown>) : null;
+}
+
+/** 바꿀 수 있는 내 키 행. 없으면 404, 발급 중이면 409 issuing 응답 (K4 보안 리뷰 M1) */
+async function changeable(c: Context, s: Services, m: Member, id: string): Promise<any | Response> {
+  const row = await myKey(s, m, id);
+  if (!row) return c.json({ error: "not_found" }, 404);
+  if (issuing(row)) return c.json({ error: "issuing" }, 409);
+  return row;
 }
 
 /** 내 키 행 (삭제한 키 제외). 없으면 null */
@@ -141,7 +153,8 @@ export function keyRoutes(services: () => Promise<Services>) {
     const label = parseLabel(body?.label);
     if (!body || !label.ok || label.label === undefined) return c.json({ error: "invalid_body" }, 400);
     const t = k(s);
-    if (!(await myKey(s, m, c.req.param("id")))) return c.json({ error: "not_found" }, 404);
+    const row = await changeable(c, s, m, c.req.param("id"));
+    if (row instanceof Response) return row;
     await s.db.db
       .update(t)
       .set({ label: label.label })
@@ -153,8 +166,8 @@ export function keyRoutes(services: () => Promise<Services>) {
     const s = c.get("s");
     const m = c.get("m");
     const id = c.req.param("id");
-    const row = await myKey(s, m, id);
-    if (!row) return c.json({ error: "not_found" }, 404);
+    const row = await changeable(c, s, m, id);
+    if (row instanceof Response) return row;
     const client = await clientOf(c, s);
     if (client instanceof Response) return client;
     // 관리자·회원이 이미 끈 키는 이유를 바꾸지 않는다 (관리자가 끈 키를 member 로 바꾸면 회원이 다시 켤 수 있다)
@@ -173,8 +186,8 @@ export function keyRoutes(services: () => Promise<Services>) {
     const s = c.get("s");
     const m = c.get("m");
     const id = c.req.param("id");
-    const row = await myKey(s, m, id);
-    if (!row) return c.json({ error: "not_found" }, 404);
+    const row = await changeable(c, s, m, id);
+    if (row instanceof Response) return row;
     if (row.state === "disabled" && row.disabledReason === "admin") return c.json({ error: "disabled_by_admin" }, 403);
     if (row.state === "disabled" && row.disabledReason === "limit") return c.json({ error: "limit_exhausted" }, 409);
     if (m.status !== "active") return c.json({ error: "member_inactive" }, 403);
@@ -197,8 +210,8 @@ export function keyRoutes(services: () => Promise<Services>) {
     const s = c.get("s");
     const m = c.get("m");
     const id = c.req.param("id");
-    const old = await myKey(s, m, id);
-    if (!old) return c.json({ error: "not_found" }, 404);
+    const old = await changeable(c, s, m, id);
+    if (old instanceof Response) return old;
     // 관리자가 끈 키를 재발급으로 켜진 새 키로 바꾸지 못한다
     if (old.state === "disabled" && old.disabledReason === "admin") return c.json({ error: "disabled_by_admin" }, 403);
     const issued = await issue(c, s, m, old.label ?? null, id);
@@ -214,7 +227,8 @@ export function keyRoutes(services: () => Promise<Services>) {
     const s = c.get("s");
     const m = c.get("m");
     const id = c.req.param("id");
-    if (!(await myKey(s, m, id))) return c.json({ error: "not_found" }, 404);
+    const row = await changeable(c, s, m, id);
+    if (row instanceof Response) return row;
     const client = await clientOf(c, s);
     if (client instanceof Response) return client;
     await deleteKeyRow(s, m, id);

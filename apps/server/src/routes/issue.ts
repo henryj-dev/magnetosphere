@@ -22,7 +22,9 @@
 //   key.rollback 작업을 넣고, 행은 state deleted 로 남긴다 — 정합성 점검이 목표 "삭제됨"으로 끄고 지운다 (원문이 회원에게 가기 전이라
 //   5.2 의 60초 규칙이 필요 없다). 1(createKey) 이 실패하면 자리 행만 지운다.
 import { and, count, eq, ne, sql } from "drizzle-orm";
+import { updatedRows } from "@magnetosphere/runtime/lease";
 import type { DbHandle } from "@magnetosphere/runtime/types";
+import { PENDING_KEY_PREFIX } from "../keys/apply.ts";
 import { readTarget } from "../keys/target.ts";
 import { computeBudgets } from "../limits/compute.ts";
 import { costsOf, coveredUntil, storedSpent, type ClientFor } from "../limits/daily.ts";
@@ -44,7 +46,7 @@ export const FALLBACK_MAX_KEYS = 2;
 /** 예산·켜기 분배를 다시 해 보는 횟수 (같은 회원의 동시 발급이 겹칠 때) */
 export const ISSUE_ROUNDS = 5;
 /** 자리 행의 OmniRoute id 접두사. 어댑터 id 규칙(영숫자·_·-)을 지킨다 */
-export const PENDING_PREFIX = "pending-";
+export const PENDING_PREFIX = PENDING_KEY_PREFIX;
 
 /** 확인에 걸렸거나 OmniRoute 가 실패했다 */
 export class IssueError extends Error {
@@ -201,10 +203,15 @@ export async function issueKey(h: DbHandle, m: Member, opts: IssueOptions): Prom
   }
   const preview = created.key.slice(-4);
   try {
-    await h.db.update(k).set({ omnirouteKeyId: created.id, keyPreview: preview }).where(eq(k.id, id));
+    // 자리 행이 그대로일 때만 바꾼다. 그사이 누가 행을 바꿨으면(지움·상태 변경) 되돌린다 (K4 보안 리뷰 M1)
+    const slot = and(eq(k.id, id), eq(k.state, "disabled"), eq(k.disabledReason, "member"));
+    if ((await updatedRows(h, h.db.update(k).set({ omnirouteKeyId: created.id, keyPreview: preview }).where(and(slot, eq(k.omnirouteKeyId, PENDING_PREFIX + id))), k.id)) !== 1) {
+      throw new IssueError(409, "conflict", "발급 중인 자리 행이 바뀌었다");
+    }
     await opts.client().setKeyActive(created.id, false);
     // 예산을 먼저 걸고 켜게 limit 으로 꺼진 키로 둔다. 분배가 예산 → 켜기를 한다 (위 3번)
-    await h.db.update(k).set({ disabledReason: "limit", budgetAt: null, budgetUsd: null, budgetMonth: null }).where(eq(k.id, id));
+    const limited = h.db.update(k).set({ disabledReason: "limit", budgetAt: null, budgetUsd: null, budgetMonth: null }).where(and(slot, eq(k.omnirouteKeyId, created.id)));
+    if ((await updatedRows(h, limited, k.id)) !== 1) throw new IssueError(409, "conflict", "발급 중인 키 행이 바뀌었다");
     await budgetThenEnable(h, m.id, id, now, opts.client);
   } catch (e) {
     await rollback(h, opts.client, { id, omnirouteKeyId: created.id }, now, log);
