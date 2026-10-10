@@ -1,5 +1,6 @@
 // TC 공용: DB 하나에 Better Auth 를 올리고, user 행을 읽고 고치는 도구.
 import { eq } from "drizzle-orm";
+import { DEFAULT_SETTINGS } from "@magnetosphere/db/src/seed.ts";
 import { createAuth, type AuthConfig, type MailMessage, type Mailer } from "../src/index.ts";
 import { BASE } from "./client.ts";
 import type { TestDb } from "./db.ts";
@@ -57,7 +58,8 @@ export async function markVerified(h: TestDb, email: string) {
   await h.db.update(user(h)).set({ emailVerified: true }).where(eq(user(h).email, email.toLowerCase()));
 }
 
-export const PRIVILEGE_DEFAULTS = { role: "member", status: "active", monthlyLimitUsd: null, maxKeys: null, isBootstrapAdmin: false };
+// monthlyLimitUsd: 가입 때 default_limit_usd 를 복사한다. 테스트 DB 에는 설정 행이 없어 시드 기본값이다 (TC-SEC.1.c)
+export const PRIVILEGE_DEFAULTS = { role: "member", status: "active", monthlyLimitUsd: DEFAULT_SETTINGS.default_limit_usd, maxKeys: null, isBootstrapAdmin: false };
 
 /** user 행의 권한 칼럼 다섯. DB 마다 다른 표현(0/1, "12.000000")을 맞춘다 */
 export function privileges(row: any) {

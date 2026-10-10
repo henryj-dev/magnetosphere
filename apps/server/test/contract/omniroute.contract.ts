@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
+import { hashPassword } from "better-auth/crypto";
 import { createAccessToken, createClient } from "@magnetosphere/omniroute";
 import { connectNode } from "@magnetosphere/runtime/node";
 import { createCipher, type Cipher } from "@magnetosphere/runtime/crypto";
@@ -121,10 +122,11 @@ describe("TC-S5.T3.d 붙여 넣기 입력은 관리자 세션만, write 범위 �
     expect((await putToken(r, null, { token: write.token })).status).toBe(401);
     expect((await fetch(`${r.base}/api/setup/omniroute`)).status).toBe(401);
 
-    // 일반 회원 세션은 403 (관리자 화면이 아니다)
+    // 일반 회원 세션은 403 (관리자 화면이 아니다). 설치 뒤 공개 가입은 닫혀 있어(TC-SEC.1.a) 회원 행을 DB 에 직접 넣는다
     const member = { email: "member@example.com", password: "member-password-123", name: "member" };
-    expect((await post(r, "/api/auth/sign-up/email", member)).status).toBe(200);
-    await sql(r.t, "UPDATE user SET email_verified = 1 WHERE email = 'member@example.com'");
+    const now = Date.now();
+    await sql(r.t, `INSERT INTO user (id, name, email, email_verified, created_at, updated_at) VALUES ('member', 'member', '${member.email}', 1, ${now}, ${now})`);
+    await sql(r.t, `INSERT INTO account (id, account_id, provider_id, user_id, password, created_at, updated_at) VALUES ('member-cred', 'member', 'credential', 'member', '${await hashPassword(member.password)}', ${now}, ${now})`);
     const memberCookie = await signIn(r, member.email, member.password);
     expect((await putToken(r, memberCookie, { token: write.token })).status).toBe(403);
 

@@ -4,8 +4,9 @@
 // 이 파일은 Workers 에서도 import 된다. Node 전용 모듈(nodemailer 등)을 여기서 부르지 않는다.
 import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { createAuthMiddleware } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { AUTH_SCHEMA_OPTIONS } from "@magnetosphere/db/src/auth-options.ts";
+import { defaultMonthlyLimit, hasAdmin, publicSignupClosed } from "@magnetosphere/db/src/signup.ts";
 import { resetPasswordMessage, verifyEmailMessage } from "./mail/messages.ts";
 import type { MailMessage, Mailer } from "./mail/types.ts";
 import { ipAddressOptions, rateLimitOptions, withClientIp, type ClientIp } from "./rate-limit.ts";
@@ -59,12 +60,12 @@ export interface AuthConfig {
 
 /** 가입·로그인 요청의 이메일을 다듬는다. Better Auth 도 소문자로 바꾸지만 앞뒤 공백까지 우리가 먼저 정리한다 (V26). */
 const EMAIL_PATHS = new Set(["/sign-up/email", "/sign-in/email"]);
-const normalizeEmailBody = createAuthMiddleware(async (ctx) => {
+function normalizeEmailBody(ctx: { path: string; body?: any }) {
   if (!EMAIL_PATHS.has(ctx.path)) return;
   const email = ctx.body?.email;
   if (typeof email !== "string") return;
   return { context: { body: { ...ctx.body, email: email.trim().toLowerCase() } } };
-});
+}
 
 /**
  * 메일을 응답과 떼어 보낸다. Better Auth 는 sendVerificationEmail·sendResetPassword 를 기다리므로(runInBackgroundOrAwait),
@@ -75,6 +76,43 @@ function deliverer(cfg: AuthConfig) {
   return async (msg: MailMessage) => {
     const sending = cfg.mailer.send(msg).catch((e) => cfg.onMailError(e, { to: msg.to, subject: msg.subject }));
     cfg.waitUntil(sending);
+  };
+}
+
+/**
+ * Better Auth 가 만드는 모든 사용자 행의 문지기 (보안 고침, TC-SEC.1.b·c). 이메일 가입, auth.api.signUpEmail, OAuth·SSO 콜백의 JIT 생성
+ * (handleOAuthUserInfo → createOAuthUser·createUser)이 모두 databaseHooks.user.create.before 를 거친다. 서버의 /sign-up 경로 검사(app.ts)가
+ * 놓친 새 엔드포인트·플러그인도 여기서 막힌다.
+ *   - 관리자가 있으면(설치 뒤) 공개 가입이 닫혀 있는 동안 거부한다. 3단계 전에는 늘 닫혀 있다 (packages/db/src/signup.ts).
+ *     /sign-up/* 는 그 전에 signUpGate 가 일괄 403 으로 막으므로, 이 훅은 그 밖의 경로를 막는 뒷받침이다.
+ *     403 을 던지면 Better Auth 가입이 "이미 있는 이메일"용 가짜 200 으로 바꾸므로(requireEmailVerification) 400 SIGNUP_CLOSED 로 던진다
+ *     (Better Auth 자체의 disableSignUp 과 같은 상태 코드).
+ *   - 관리자가 없으면(설치 전) 막지 않는다. 그 구간의 /sign-up 은 서버가 setup_required 로 막고, 첫 관리자는 /api/setup 이 DB 에 직접 만든다.
+ *   - monthly_limit_usd 가 비어 있으면 default_limit_usd 를 넣는다. 비워 두면 무제한이다 (계획서 5.3).
+ * 관리자 확인과 설정 읽기는 가입 트랜잭션 밖의 연결로 한다 (쓰기 전 읽기뿐이라 잠금을 기다리지 않는다).
+ */
+/**
+ * 설치 뒤 /sign-up/* 를 이메일과 관계없이 한 응답(403 SIGNUP_CLOSED)으로 막는다. 사용자 생성 훅만으로 막으면 이미 있는 이메일은
+ * 훅에 닿기 전에 가짜 200 을, 새 이메일은 거부를 받아 계정 존재가 드러난다. 서버(app.ts)도 같은 경로를 403 signup_closed 로 먼저 막는다.
+ */
+function signUpGate(database: AuthDatabase) {
+  const { db, schema } = database as { db: any; schema: any };
+  return async (path: string) => {
+    if (!path.startsWith("/sign-up")) return;
+    if ((await hasAdmin(db, schema)) && (await publicSignupClosed(db, schema))) {
+      throw new APIError("FORBIDDEN", { code: "SIGNUP_CLOSED", message: "signup_closed" });
+    }
+  };
+}
+
+function userCreateGuard(database: AuthDatabase) {
+  const { db, schema } = database as { db: any; schema: any };
+  return async (user: Record<string, unknown>) => {
+    if ((await hasAdmin(db, schema)) && (await publicSignupClosed(db, schema))) {
+      throw new APIError("BAD_REQUEST", { code: "SIGNUP_CLOSED", message: "signup_closed" });
+    }
+    if (user.monthlyLimitUsd != null) return;
+    return { data: { ...user, monthlyLimitUsd: await defaultMonthlyLimit(db, schema) } };
   };
 }
 
@@ -110,7 +148,13 @@ export function authOptions(cfg: AuthConfig) {
     // AUTH_SCHEMA_OPTIONS 는 as const 라 plugins 가 읽기 전용 튜플이다. BetterAuthOptions 는 바꿀 수 있는 배열을 받으므로 복사한다 (같은 플러그인 객체)
     plugins: [...AUTH_SCHEMA_OPTIONS.plugins],
     disabledPaths: SSO_DISABLED_PATHS,
-    hooks: { before: normalizeEmailBody },
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        await signUpGate(cfg.database)(ctx.path);
+        return normalizeEmailBody(ctx);
+      }),
+    },
+    databaseHooks: { user: { create: { before: userCreateGuard(cfg.database) } } },
     advanced: {
       ipAddress: ipAddressOptions,
       backgroundTasks: { handler: cfg.waitUntil },
