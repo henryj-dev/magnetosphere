@@ -1,6 +1,7 @@
 // 한도 분배 계약 시험 공용 (K2.T6·T7). 계약 환경(tests/contract, 127.0.0.1:20170)의 OmniRoute 에 실제로 붙는다.
 // 관리 호출은 어댑터로 한다. 여기서 직접 부르는 것은 회원 도구가 쓰는 추론(/v1)과 시험 정리(접근 토큰 회수)뿐이다.
 // 회원 앱 DB 는 마이그레이션을 적용한 SQLite 파일이다 (test/helpers.ts).
+import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createAccessToken, createClient, type OmniRouteClient } from "@magnetosphere/omniroute";
 import { connectNode } from "@magnetosphere/runtime/node";
@@ -162,4 +163,28 @@ async function revokeToken(id: string) {
   const cookie = res.headers.getSetCookie().map((s) => s.split(";")[0]).find((s) => s.startsWith("auth_token="));
   if (!cookie) return;
   await fetch(`${OMNI_URL}/api/cli/tokens/${id}`, { method: "DELETE", headers: { cookie, origin: OMNI_URL } });
+}
+
+/**
+ * 계약 OmniRoute 의 usage_history 에 그 키의 OpenAI 기록(0.00221) 하나를 본떠 시각만 바꿔 넣는다 (TC-K2.T7.d).
+ * 분석 API 는 usage_history 를 읽고 비용을 조회 시점 가격표로 계산한다 (tests/bench/analytics.mjs 와 같은 방법).
+ * 실제 요청으로는 어제·자정 정각 기록을 만들 수 없어서다. 넣은 줄 수를 돌려준다
+ */
+export function insertUsageCopies(keyId: string, timestamps: string[]): number {
+  const script = `
+const Database = require("/app/node_modules/better-sqlite3");
+const db = new Database("/app/data/storage.sqlite");
+db.pragma("busy_timeout = 10000");
+const t = db.prepare("SELECT * FROM usage_history WHERE api_key_id = ? AND model LIKE '%gpt%' ORDER BY id LIMIT 1").get(process.env.K2_KEY);
+if (!t) throw new Error("본보기 기록이 없다");
+const cols = Object.keys(t).filter((c) => c !== "id");
+const ins = db.prepare("INSERT INTO usage_history (" + cols.join(",") + ") VALUES (" + cols.map((c) => "@" + c).join(",") + ")");
+let n = 0;
+for (const ts of JSON.parse(process.env.K2_TS)) { ins.run({ ...Object.fromEntries(cols.map((c) => [c, t[c]])), timestamp: ts }); n++; }
+console.log(n);
+`;
+  const compose = new URL("../../../../../tests/contract/docker-compose.yml", import.meta.url).pathname;
+  const r = spawnSync("docker", ["compose", "-f", compose, "exec", "-T", "-e", `K2_KEY=${keyId}`, "-e", `K2_TS=${JSON.stringify(timestamps)}`, "omniroute", "node", "-"], { encoding: "utf8", input: script });
+  if (r.status !== 0) throw new Error(`usage_history 넣기 실패 (${r.status}): ${r.stderr}`);
+  return Number(r.stdout.trim());
 }
