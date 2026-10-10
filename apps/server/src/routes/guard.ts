@@ -1,4 +1,4 @@
-// 회원 API 공용 검사 (계획서 v5.7 4.5·4.6).
+// 회원·관리자 API 공용 검사 (계획서 v5.7 4.5·4.6).
 //   - 세션: Better Auth get-session 으로 회원 id 만 얻고, 역할·상태·한도는 DB 에서 읽는다 (세션 응답의 값을 믿지 않는다).
 import { eq } from "drizzle-orm";
 import type { Context } from "hono";
@@ -42,4 +42,12 @@ export async function readMember(h: DbHandle, userId: string): Promise<Member | 
     monthlyLimitUsd: row.monthlyLimitUsd == null ? null : Number(row.monthlyLimitUsd),
     maxKeys: row.maxKeys == null ? null : Number(row.maxKeys),
   };
+}
+
+/** 관리자 세션. 역할은 DB 에서 읽는다. 세션 없음 401, 관리자가 아니거나 활성 상태가 아니면 403 응답 */
+export async function sessionAdmin(c: Context, s: Services): Promise<Member | Response> {
+  const m = await sessionMember(c, s);
+  if (m instanceof Response) return m;
+  if (m.role !== "admin" || m.status !== "active") return c.json({ error: "forbidden" }, 403);
+  return m;
 }

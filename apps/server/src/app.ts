@@ -3,7 +3,7 @@
 //   /api/auth/*    packages/auth 의 감싼 handler (clientIp 를 런타임 어댑터에서 받는다, S3 보안 리뷰 M2)
 //                  관리자가 없는 동안(설치 전)은 가입을 403 으로 막는다 (TC-S4.T4.e). 기본 가입 정책이 invite_only 다 (계획서 4.2)
 //   /api/setup     최초 설치 (setup/). /api/setup/omniroute 는 OmniRoute 토큰 상태·붙여 넣기 (관리자 세션)
-//   /api/me/keys   회원 키 API (routes/keys.ts)
+//   /api/me/keys   회원 키 API (routes/keys.ts). /api/admin/users/:id 는 관리자 한도·최대 개수 (routes/admin-limits.ts)
 //   /api/*         그 밖은 JSON 404. 모르는 API 경로가 index.html 200 이 되면 클라이언트가 오류를 성공으로 오인한다
 //   나머지         SPA 정적 파일 (apps/web 빌드). 없는 경로는 index.html (TC-S4.T3.a)
 // 모든 응답(SPA·API)에 보안 헤더를 단다 (TC-S4.T3.f). 스크립트·스타일 출처는 SPA 빌드가 <meta> CSP 로 건다
@@ -16,6 +16,7 @@ import { secureHeaders } from "hono/secure-headers";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import type { ClientFor } from "./limits/daily.ts";
+import { adminLimitRoutes } from "./routes/admin-limits.ts";
 import type { KeysClient } from "./routes/issue.ts";
 import { keyRoutes } from "./routes/keys.ts";
 import { adminExists } from "./setup/index.ts";
@@ -109,6 +110,7 @@ export function createApp(deps: AppDeps) {
   app.all("/api/auth/*", async (c) => (await deps.services()).auth.handler(c.req.raw));
   app.route("/api/setup", setupRoutes(deps.services, { setupTokenFromSecret: deps.setupTokenFromSecret, log: deps.log }));
   app.route("/api/me/keys", keyRoutes(deps.services));
+  app.route("/api/admin", adminLimitRoutes(deps.services));
   app.all("/api/*", (c) => c.json({ error: "not_found" }, 404));
   app.get("*", deps.assets);
   app.onError((e, c) => {
