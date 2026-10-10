@@ -149,8 +149,10 @@ export const omnirouteJobs = mysqlTable("omniroute_jobs", {
   nextRunAt: datetime("next_run_at", { fsp: 3 }).notNull(),
   doneAt: datetime("done_at", { fsp: 3 }),
   failedAt: datetime("failed_at", { fsp: 3 }),
+  keyId: varchar("key_id", { length: 36 }),
 }, (table) => [
   index("idx_omniroute_jobs_due").on(table.doneAt, table.nextRunAt),
+  index("idx_omniroute_jobs_key").on(table.keyId, table.doneAt),
 ]);
 
 // 여러 인스턴스에서 주기 작업 중복 실행 방지 (임대 잠금)
@@ -159,6 +161,7 @@ export const jobLeases = mysqlTable("job_leases", {
   holder: varcharBin("holder", { length: 255 }).notNull(),
   lockedUntil: datetime("locked_until", { fsp: 3 }).notNull(),
   fence: int("fence").default(0).notNull(),
+  lastSlot: bigint("last_slot", { mode: "number" }),
 });
 
 // 감사 기록

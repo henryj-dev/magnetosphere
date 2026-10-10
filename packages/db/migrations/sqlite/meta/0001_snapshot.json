@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "0bd36ef7-128f-4154-9858-2faa8d1fc2ce",
+  "id": "1eb624d9-9e06-4128-9cc5-22ee8b83d30e",
   "prevId": "f5e85cdd-9c4d-494c-894c-4ddb417b0fea",
   "tables": {
     "account": {
@@ -448,6 +448,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": 0
+        },
+        "last_slot": {
+          "name": "last_slot",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {},
@@ -515,6 +522,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "key_id": {
+          "name": "key_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -523,6 +537,14 @@
           "columns": [
             "done_at",
             "next_run_at"
+          ],
+          "isUnique": false
+        },
+        "idx_omniroute_jobs_key": {
+          "name": "idx_omniroute_jobs_key",
+          "columns": [
+            "key_id",
+            "done_at"
           ],
           "isUnique": false
         }

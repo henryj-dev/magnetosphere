@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "6c83eb90-7f9e-453c-afc8-f8e0d1dc9d6b",
+  "id": "a105443d-9495-4d9f-a066-c3368daae848",
   "prevId": "47c81143-92a2-48d1-b1bb-8166fab0a2f9",
   "tables": {
     "account": {
@@ -482,6 +482,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": 0
+        },
+        "last_slot": {
+          "name": "last_slot",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {},
@@ -556,6 +563,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "key_id": {
+          "name": "key_id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -564,6 +578,14 @@
           "columns": [
             "done_at",
             "next_run_at"
+          ],
+          "isUnique": false
+        },
+        "idx_omniroute_jobs_key": {
+          "name": "idx_omniroute_jobs_key",
+          "columns": [
+            "key_id",
+            "done_at"
           ],
           "isUnique": false
         }

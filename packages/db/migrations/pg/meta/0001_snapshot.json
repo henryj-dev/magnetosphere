@@ -1,5 +1,5 @@
 {
-  "id": "167fe13a-708c-4c3f-88cb-f89726153b7d",
+  "id": "11117b5e-036f-440c-a08f-98cbe0e391bc",
   "prevId": "3c57a806-7634-4a7b-ab9a-21f612767e5c",
   "version": "7",
   "dialect": "postgresql",
@@ -443,6 +443,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": 0
+        },
+        "last_slot": {
+          "name": "last_slot",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {},
@@ -505,6 +511,12 @@
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
+        },
+        "key_id": {
+          "name": "key_id",
+          "type": "varchar(36)",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -519,6 +531,27 @@
             },
             {
               "expression": "next_run_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_omniroute_jobs_key": {
+          "name": "idx_omniroute_jobs_key",
+          "columns": [
+            {
+              "expression": "key_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "done_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

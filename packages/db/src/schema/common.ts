@@ -242,9 +242,13 @@ export const TABLES: Record<string, Table> = {
       nextRunAt: { name: "next_run_at", kind: "timestamp", notNull: true },
       doneAt: { name: "done_at", kind: "timestamp" },
       failedAt: { name: "failed_at", kind: "timestamp", doc: "4번째 재시도 실패 시각 (계획서 v5.6 Q3). 지금 − failed_at > 30분이면 오래 실패" },
+      keyId: { name: "key_id", kind: "id", doc: "대상 api_keys.id (없으면 NULL). 같은 키의 미완료 key.apply_state 합치기·key.delete 우선·실패 표시에 쓴다 (K1 리뷰 #1)" },
     },
-    // 실행할 작업 찾기: done_at IS NULL AND failed_at IS NULL AND next_run_at <= now
-    indexes: [{ name: "idx_omniroute_jobs_due", columns: ["doneAt", "nextRunAt"] }],
+    // 실행할 작업 찾기: done_at IS NULL AND failed_at IS NULL AND next_run_at <= now. 키별 미완료 작업 찾기: key_id, done_at
+    indexes: [
+      { name: "idx_omniroute_jobs_due", columns: ["doneAt", "nextRunAt"] },
+      { name: "idx_omniroute_jobs_key", columns: ["keyId", "doneAt"] },
+    ],
   },
   jobLeases: {
     name: "job_leases",
@@ -255,6 +259,7 @@ export const TABLES: Record<string, Table> = {
       holder: { name: "holder", kind: "string", length: 255, exact: true, notNull: true },
       lockedUntil: { name: "locked_until", kind: "timestamp", notNull: true },
       fence: { name: "fence", kind: "integer", notNull: true, default: 0, doc: "펜싱 토큰. 잡을 때마다 1 씩 는다. 쓰기는 이 값이 그대로일 때만 한다 (K1.T2)" },
+      lastSlot: { name: "last_slot", kind: "bigint", doc: "마지막으로 돈 주기 경계 번호 (경계 시각 / 주기). 같은 경계는 다시 잡지 않는다 (K1 리뷰 #6)" },
     },
   },
   auditLog: {
