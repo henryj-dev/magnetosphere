@@ -1,0 +1,25 @@
+{
+  "item": "V19",
+  "question": "POST /api/keys/{id}/regenerate 가 같은 id 와 누적 지출·예산을 유지하는가, 옛 원문 키는 바로 막히는가",
+  "answer": {
+    "sameId": true,
+    "spendKept": true,
+    "budgetKept": true,
+    "oldKeyStatus": 200,
+    "newKeyStatus": 429,
+    "newKeyBlocked": true,
+    "oldKeyRequestsAttributed": false,
+    "oldKeyGraceMs": 60000,
+    "designImpact": "regenerate 직후 최대 60초 동안 옛 원문 키가 통과하고, 그 요청은 키 id 없이 기록돼 예산 차단 중인 키로도 쓸 수 있다 (끈 키도 regenerate 하면 옛 원문 키가 다시 200). 계획서 v5.6 은 재발급에 regenerate 를 쓰지 않고 '새 키 발급 + 옛 키 삭제(끄고 60초 뒤 DELETE)'로 바꾼다"
+  },
+  "evidence": [
+    "소스(chunks/27730.js regenerateApiKey): UPDATE api_keys SET key, key_hash, key_prefix WHERE id — id 그대로, 예산·비용 기록 그대로. 응답 {message, key, id}",
+    "계약 환경 실측 (2026-10-10): 월 예산 0.01 · 요청 3건 · 429 BUDGET_EXCEEDED → regenerate 200 {id 같음} → 옛 원문 키 200 (예산 차단 중인데 통과), 새 원문 키 429 BUDGET_EXCEEDED, 예산 조회 monthlyLimitUsd 0.01, 분석 totalCost 0.014633",
+    "실측: regenerate 뒤 옛 원문 키 0·2·5·15·35초 모두 200, 65초 401 AUTH_002. 그 사이 옛 키 요청은 그 키 id 분석에 잡히지 않았다 (13건 중 7건만)",
+    "실측: 끄기(403) → regenerate → 옛 원문 키 200, 새 원문 키(꺼진 상태) 401",
+    "packages/omniroute/test/contract/verify/v19.contract.ts (TC-K0.T9.a)"
+  ],
+  "blocking": true,
+  "was_blocking": true,
+  "resolved_in": null
+}
