@@ -10,7 +10,10 @@
 //   - 작업 중에는 ttl / 3 마다 renewLease 로 늘린다. 같은 holder·fence 일 때만 늘어난다. 늘리지 못하면 작업 신호를 끊는다.
 //   - 임대를 잃은 뒤에도 깨어나 쓰는 인스턴스(GC·절전)를 막으려고 DB 쓰기에 fenced() 조건을 붙인다. 다른 쪽이 잡아
 //     fence 가 바뀌었으면 그 쓰기는 0행이다.
-import { and, eq, exists, gt, lt, or, sql, type SQL } from "drizzle-orm";
+// 경계 번호 (K1 리뷰 #6)
+//   - 주기 작업은 경계 번호 slot(경계 시각 / 주기)을 넘긴다. 잡을 때 last_slot < slot 이어야 하고, 잡으면 last_slot = slot.
+//     같은 경계는 같은 holder 라도, 만료 뒤 다른 holder 라도 다시 돌지 않는다. K2 분배가 "경계마다 한 번"에 기댄다.
+import { and, eq, exists, gt, isNull, lt, or, sql, type SQL } from "drizzle-orm";
 import type { DbHandle } from "./types.ts";
 
 /** 잡은 임대. fence 는 이 이름에서 잡을 때마다 엄격히 는다 */
@@ -41,28 +44,33 @@ export async function updatedRows(h: DbHandle, update: any, key: any): Promise<n
   return (await update.returning({ k: key })).length;
 }
 
-/** name 임대를 holder 가 ttlMs 동안 잡는다. 잡았으면(새로 잡았거나 내 임대를 다시 잡았으면) 새 fence 를 담은 임대, 아니면 null */
-export async function acquireLease(h: DbHandle, name: string, holder: string, ttlMs: number, now: Date = new Date()): Promise<Lease | null> {
+/**
+ * name 임대를 holder 가 ttlMs 동안 잡는다. 잡았으면(새로 잡았거나 내 임대를 다시 잡았으면) 새 fence 를 담은 임대, 아니면 null.
+ * slot(경계 번호)을 주면 그 경계를 이미 돈 임대(last_slot ≥ slot)는 잡지 않는다.
+ */
+export async function acquireLease(h: DbHandle, name: string, holder: string, ttlMs: number, now: Date = new Date(), slot?: number): Promise<Lease | null> {
   const t = h.schema.jobLeases;
   const lockedUntil = new Date(now.getTime() + ttlMs);
-  const takeable = and(eq(t.name, name), or(lt(t.lockedUntil, now), eq(t.holder, holder)));
+  const fresh = slot === undefined ? undefined : or(isNull(t.lastSlot), lt(t.lastSlot, slot));
+  const takeable = and(eq(t.name, name), or(lt(t.lockedUntil, now), eq(t.holder, holder)), fresh);
+  const lastSlot = slot === undefined ? {} : { lastSlot: slot };
   if (h.provider === "mysql") {
     // MySQL 은 RETURNING 이 없다. INSERT IGNORE·UPDATE 의 영향 행 수로 판정한다.
     // 새 fence 는 LAST_INSERT_ID(expr) 로 같은 문장의 OK 패킷(insertId)에 실어 받는다. 다시 읽으면 그 사이에 다른 쪽이
     // 잡을 수 있고, 연결 풀에서는 다음 질의가 다른 연결로 가 LAST_INSERT_ID() 를 읽을 수도 없다
-    const [ins] = await h.db.insert(t).ignore().values({ name, holder, lockedUntil, fence: 1 });
+    const [ins] = await h.db.insert(t).ignore().values({ name, holder, lockedUntil, fence: 1, ...lastSlot });
     if (ins.affectedRows === 1) return { name, holder, fence: 1 };
     const [upd] = await h.db
       .update(t)
-      .set({ holder, lockedUntil, fence: sql`LAST_INSERT_ID(${t.fence} + 1)` })
+      .set({ holder, lockedUntil, fence: sql`LAST_INSERT_ID(${t.fence} + 1)`, ...lastSlot })
       .where(takeable);
     return upd.affectedRows === 1 ? { name, holder, fence: Number(upd.insertId) } : null;
   }
-  const ins = await h.db.insert(t).values({ name, holder, lockedUntil, fence: 1 }).onConflictDoNothing().returning({ fence: t.fence });
+  const ins = await h.db.insert(t).values({ name, holder, lockedUntil, fence: 1, ...lastSlot }).onConflictDoNothing().returning({ fence: t.fence });
   if (ins.length === 1) return { name, holder, fence: Number(ins[0].fence) };
   const upd = await h.db
     .update(t)
-    .set({ holder, lockedUntil, fence: sql`${t.fence} + 1` })
+    .set({ holder, lockedUntil, fence: sql`${t.fence} + 1`, ...lastSlot })
     .where(takeable)
     .returning({ fence: t.fence });
   return upd.length === 1 ? { name, holder, fence: Number(upd[0].fence) } : null;
@@ -151,7 +159,7 @@ export async function holdLease(
 }
 
 /**
- * name 임대를 잡으면 fn 을 하트비트 아래에서 돌린다. 못 잡으면 fn 을 부르지 않고 false.
+ * name 임대를 잡으면 fn 을 하트비트 아래에서 돌린다. 못 잡으면(또는 slot 경계를 이미 돌았으면) fn 을 부르지 않고 false.
  * 끝나면 임대 만료를 "처음 잡을 때의 만료"로 되돌린다 (이미 지났으면 지금). 하트비트가 늘린 만료가 다음 주기 경계를
  * 넘으면 이 인스턴스가 죽었을 때 다음 경계를 아무도 못 돈다. 같은 경계 안에서는 여전히 잠겨 있어 두 번 돌지 않는다.
  */
@@ -162,9 +170,10 @@ export async function runLeased(
   ttlMs: number,
   fn: (signal: AbortSignal, lease: Lease) => Promise<void>,
   now: () => number = Date.now,
+  slot?: number,
 ): Promise<boolean> {
   const startedAt = now();
-  const lease = await acquireLease(h, name, holder, ttlMs, new Date(startedAt));
+  const lease = await acquireLease(h, name, holder, ttlMs, new Date(startedAt), slot);
   if (!lease) return false;
   try {
     await holdLease(() => renewLease(h, lease, ttlMs, new Date(now())), ttlMs, (signal) => fn(signal, lease), () => new LeaseLostError(lease));

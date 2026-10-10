@@ -76,7 +76,7 @@ export interface WorkersRuntimeOptions {
 
 export function createWorkersRuntime(env: WorkersEnv, opts: WorkersRuntimeOptions = {}): WorkersRuntime {
   const connect = opts.connect ?? connectWorkers;
-  const jobs = new Map<string, { name: string; fn: Job; ttl: number }[]>();
+  const jobs = new Map<string, { name: string; fn: Job; ttl: number; period: number }[]>();
   // Cron 호출(런타임) 하나가 holder 하나다
   const holder = `workers-${crypto.randomUUID()}`;
   let handle: Promise<DbHandle> | undefined;
@@ -86,7 +86,7 @@ export function createWorkersRuntime(env: WorkersEnv, opts: WorkersRuntimeOption
     schedule(name, cron, fn) {
       // Node 와 같은 모양만 받는다. 임대는 Node 와 같이 다음 경계 직전까지
       const ttl = cronIntervalMinutes(cron) * 60_000 - 5_000;
-      jobs.set(cron, [...(jobs.get(cron) ?? []), { name, fn, ttl }]);
+      jobs.set(cron, [...(jobs.get(cron) ?? []), { name, fn, ttl, period: ttl + 5_000 }]);
     },
     async runScheduled(cron) {
       // 한 작업이 실패해도 나머지는 돈다. 실패는 모아서 Cron 호출 실패로 드러낸다.
@@ -95,7 +95,9 @@ export function createWorkersRuntime(env: WorkersEnv, opts: WorkersRuntimeOption
       for (const job of jobs.get(cron) ?? []) {
         await (async () => {
           const h = await db();
-          await runLeased(h, job.name, holder, job.ttl, (signal, lease) => job.fn({ db: h, lease, signal }));
+          // 경계 번호. Cron 은 경계 근처에 부르므로 가장 가까운 경계로 반올림한다. 같은 경계의 두 번째 호출은 건너뛴다
+          const slot = Math.round(Date.now() / job.period);
+          await runLeased(h, job.name, holder, job.ttl, (signal, lease) => job.fn({ db: h, lease, signal }), Date.now, slot);
         })().catch((e) => errors.push(new Error(`주기 작업 ${job.name} 실패`, { cause: e })));
       }
       if (errors.length) throw new AggregateError(errors, `cron "${cron}" 작업 ${errors.length}개 실패`);

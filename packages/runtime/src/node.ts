@@ -131,7 +131,9 @@ export function createNodeRuntime(opts: NodeRuntimeOptions = {}): NodeRuntime {
         running = true;
         try {
           const h = await db();
-          await runLeased(h, name, holder, ttl, (signal, lease) => fn({ db: h, lease, signal }), clock.now);
+          // 경계 번호. 타이머는 경계에 깨므로 가장 가까운 경계로 반올림한다 (몇 ms 일찍 깨도 앞 경계로 보지 않게)
+          const slot = Math.round(clock.now() / period);
+          await runLeased(h, name, holder, ttl, (signal, lease) => fn({ db: h, lease, signal }), clock.now, slot);
         } catch (e) {
           onJobError(name, e);
         } finally {
