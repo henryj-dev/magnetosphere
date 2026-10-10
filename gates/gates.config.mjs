@@ -589,7 +589,24 @@ export const GATES = {
     waivable: false,
     strictTests: true,
     outputs: ["tests/e2e/keys/**", "tests/e2e/claude-code/**"],
-    checks: [],
+    checks: [
+      // K5.T1 Claude Code 가 발급 키로 동작한다
+      { id: "G-K5.1", how: "cmd", requires: ["local-services"], desc: "TC-K5.T1.a Claude Code 가 회원 앱이 발급한 키로 응답을 받는다", cmd: "pnpm e2e --combo docker-sqlite --scenario claude-code" },
+      { id: "G-K5.2", how: "grep", desc: "Claude Code 버전 고정", pattern: '"@anthropic-ai/claude-code": "[0-9]+\\.[0-9]+\\.[0-9]+"', in: ["tests/e2e/claude-code/package.json"], op: "==", limit: 1 },
+      // K5.T2 여섯 조합 키 시나리오 (TC-K5.T2.a~d). CI 는 e2e 매트릭스 잡이 같은 명령으로 돈다 (K5 잡은 --skip-ids 로 뺀다)
+      { id: "G-K5.3", how: "cmd", requires: ["local-services"], desc: "TC-K5.T2.a~d 키 시나리오: docker-sqlite", cmd: "pnpm e2e --combo docker-sqlite --scenario keys" },
+      { id: "G-K5.4", how: "cmd", requires: ["local-services"], desc: "TC-K5.T2.a~d 키 시나리오: docker-mysql", cmd: "pnpm e2e --combo docker-mysql --scenario keys" },
+      { id: "G-K5.5", how: "cmd", requires: ["local-services"], desc: "TC-K5.T2.a~d 키 시나리오: docker-pg", cmd: "pnpm e2e --combo docker-pg --scenario keys" },
+      { id: "G-K5.6", how: "cmd", requires: ["local-services"], desc: "TC-K5.T2.a~d 키 시나리오: workers-d1", cmd: "pnpm e2e --combo workers-d1 --scenario keys" },
+      { id: "G-K5.7", how: "cmd", requires: ["local-services"], desc: "TC-K5.T2.a~d 키 시나리오: workers-mysql", cmd: "pnpm e2e --combo workers-mysql --scenario keys" },
+      { id: "G-K5.8", how: "cmd", requires: ["local-services"], desc: "TC-K5.T2.a~d 키 시나리오: workers-pg", cmd: "pnpm e2e --combo workers-pg --scenario keys" },
+      // K5.T3 CI 매트릭스가 키 시나리오를 돈다
+      { id: "G-K5.9", how: "cmd", desc: "TC-K5.T3.a·b 매트릭스가 여섯 조합 키 시나리오를 돈다 (음성 대조 포함)", cmd: "node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-guard/e2e-keys-missing.yml --expect 6 --expect-fail" },
+      { id: "G-K5.10", how: "cmd", desc: "재현 빨강: TC-K5.T3.a 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K5.9 --since seal:K4" },
+      // K5.T4 CI 단계 잡과 ruleset 필수 검사
+      { id: "G-K5.11", how: "grep", desc: "TC-K5.T4.a CI 단계 잡 (K5)", pattern: "^\\s+run: node scripts/gate\\.mjs K5\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
+      { id: "G-K5.12", how: "cmd", desc: "TC-K5.T4.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
+    ],
   },
   K6: {
     needs: ["K5"],

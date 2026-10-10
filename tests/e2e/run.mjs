@@ -11,6 +11,10 @@
 // (Workers 운영의 OmniRoute 연결 방식은 V24·계획서 9장 8단계에서 정한다.)
 // 시험용 MySQL·Postgres 는 저장소 최상위 docker-compose.test.yml 의 컨테이너를 쓴다 (없으면 띄운다).
 // 이 컴퓨터의 localhost:20128(사람이 쓰는 OmniRoute)·80·443 은 쓰지 않는다.
+//
+// --scenario <이름> (2단계 K5): 위 흐름 뒤에 시나리오 하나를 더 돈다. Docker 묶음에는 가짜 상위 서버를 붙인다 (tests/e2e/keys/compose.mock.yml).
+//   keys         회원 키 끄기·여러 키 회원 한도·삭제·재발급 (tests/e2e/keys/scenario.mjs, TC-K5.T2.a~d). 여섯 조합
+//   claude-code  Claude Code 가 발급 키로 응답을 받는다 (tests/e2e/claude-code/scenario.mjs, TC-K5.T1.a). docker-sqlite 만
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import fs from "node:fs";
@@ -18,16 +22,23 @@ import os from "node:os";
 import path from "node:path";
 import { buildAppImage, createStack, dockerAvailable, ROOT } from "../deploy/stack.mjs";
 import { lastSetupToken, startWranglerDev } from "../../apps/server/test/wrangler-dev.mjs";
+import { composeUp } from "../../scripts/compose-up.mjs";
 
 const COMBOS = ["docker-sqlite", "docker-mysql", "docker-pg", "workers-d1", "workers-mysql", "workers-pg"];
 const CONTRACT = { url: "http://127.0.0.1:20170", password: "contract-initial-password-5c1e9a", compose: "tests/contract/docker-compose.yml" };
 const TEST_DB = "docker-compose.test.yml";
+const SCENARIOS = ["keys", "claude-code"];
 const ADMIN = { email: "e2e-admin@example.com", password: "e2e-admin-password-1234" };
 
 const log = (msg) => console.log(`[e2e] ${msg}`);
 function check(cond, msg) {
   if (!cond) throw new Error(msg);
   log(`ok  ${msg}`);
+}
+/** docker compose up -d --wait (레지스트리 5xx 는 5초·15초 쉬고 세 번까지, scripts/compose-up.mjs) */
+function up(file, services) {
+  const r = composeUp(path.join(ROOT, file), services);
+  if (r.status !== 0) throw new Error(`docker compose -f ${file} up ${services.join(" ")} 실패 (${r.status})`);
 }
 function sh(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", ...opts });
@@ -67,13 +78,21 @@ async function installFlow(baseUrl, readToken) {
   check((await session(again.cookie))?.user?.email === ADMIN.email, "새 세션 사용자 = 관리자");
 }
 
-async function dockerCombo(db) {
+/** 시나리오 모듈의 실행 함수 */
+async function scenarioRunner(scenario) {
+  if (scenario === "keys") return (await import("./keys/scenario.mjs")).runKeys;
+  return (await import("./claude-code/scenario.mjs")).runClaudeCode;
+}
+
+async function dockerCombo(db, scenario) {
   buildAppImage();
   const stack = createStack({ db, httpPort: 28580, label: "e2e" });
   try {
     log(`Compose 묶음 ${stack.project} (${db}) 띄우는 중`);
-    stack.up();
+    if (scenario) (await import("./keys/env.mjs")).upWithMock(stack);
+    else stack.up();
     await installFlow(stack.baseUrl, async () => stack.setupToken());
+    if (scenario) await (await scenarioRunner(scenario))({ combo, stack, baseUrl: stack.baseUrl });
   } catch (e) {
     console.error(`[e2e] app 로그 끝부분:\n${stack.logs("app").slice(-3000)}`);
     throw e;
@@ -86,7 +105,7 @@ async function dockerCombo(db) {
 function freshDatabase(kind) {
   const name = `mg_e2e_${randomBytes(4).toString("hex")}`;
   const service = kind === "mysql" ? "mysql" : "postgres";
-  sh("docker", ["compose", "-f", TEST_DB, "up", "-d", "--wait", service]);
+  up(TEST_DB, [service]);
   const run = (sql) =>
     kind === "mysql"
       ? sh("docker", ["compose", "-f", TEST_DB, "exec", "-T", "mysql", "mysql", "-uroot", "-pmgroot", "-e", sql])
@@ -96,9 +115,10 @@ function freshDatabase(kind) {
   return { url, drop: () => run(kind === "mysql" ? `DROP DATABASE IF EXISTS ${name}` : `DROP DATABASE IF EXISTS ${name} WITH (FORCE)`) };
 }
 
-async function workersCombo(env) {
-  // 계약 환경 OmniRoute (이미 떠 있으면 그대로)
-  sh("docker", ["compose", "-f", CONTRACT.compose, "up", "-d", "--wait", "omniroute"]);
+async function workersCombo(env, scenario) {
+  // 계약 환경 OmniRoute (이미 떠 있으면 그대로). 시나리오는 가짜 상위 서버 제공자·가격이 필요하다 (멱등)
+  up(CONTRACT.compose, ["omniroute"]);
+  if (scenario) sh(process.execPath, ["tests/contract/setup.mjs"]);
   sh("pnpm", ["-C", "apps/web", "build"]);
   const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), "mg-e2e-workers-"));
   const db = env === "d1" ? null : freshDatabase(env === "mysql" ? "mysql" : "pg");
@@ -122,9 +142,12 @@ async function workersCombo(env) {
         OMNIROUTE_INITIAL_PASSWORD: CONTRACT.password,
         SETUP_TOKEN: setupToken,
       },
+      // 시나리오는 Cron 을 /__scheduled 로 부른다 (wrangler dev 는 Cron 을 스스로 돌리지 않는다)
+      testScheduled: !!scenario,
     });
     await installFlow(dev.baseUrl, async () => setupToken);
     check(!dev.output().includes(setupToken) && lastSetupToken(dev.output()) === null, "Workers 로그에 설치 토큰이 나오지 않음");
+    if (scenario) await (await scenarioRunner(scenario))({ combo, dev, baseUrl: dev.baseUrl, persistTo, dbUrl: db?.url ?? null, contract: CONTRACT });
   } catch (e) {
     if (dev) console.error(`[e2e] wrangler dev 출력 끝부분:\n${dev.output().slice(-3000)}`);
     throw e;
@@ -137,8 +160,9 @@ async function workersCombo(env) {
 
 const args = process.argv.slice(2);
 const combo = args[args.indexOf("--combo") + 1];
-if (!args.includes("--combo") || !COMBOS.includes(combo)) {
-  console.error(`사용법: pnpm e2e --combo <${COMBOS.join("|")}>`);
+const scenario = args.includes("--scenario") ? args[args.indexOf("--scenario") + 1] : null;
+if (!args.includes("--combo") || !COMBOS.includes(combo) || (scenario !== null && !SCENARIOS.includes(scenario)) || (scenario === "claude-code" && combo !== "docker-sqlite")) {
+  console.error(`사용법: pnpm e2e --combo <${COMBOS.join("|")}> [--scenario <${SCENARIOS.join("|")}>] (claude-code 는 docker-sqlite 만)`);
   process.exit(2);
 }
 if (!dockerAvailable()) {
@@ -148,10 +172,10 @@ if (!dockerAvailable()) {
 const started = Date.now();
 try {
   const [runtime, db] = combo.split("-");
-  if (runtime === "docker") await dockerCombo({ sqlite: "sqlite", mysql: "mysql", pg: "postgres" }[db]);
-  else await workersCombo(db);
-  log(`${combo} 통과 (${Math.round((Date.now() - started) / 1000)}초)`);
+  if (runtime === "docker") await dockerCombo({ sqlite: "sqlite", mysql: "mysql", pg: "postgres" }[db], scenario);
+  else await workersCombo(db, scenario);
+  log(`${combo}${scenario ? ` --scenario ${scenario}` : ""} 통과 (${Math.round((Date.now() - started) / 1000)}초)`);
 } catch (e) {
-  console.error(`[e2e] ${combo} 실패: ${e.message}`);
+  console.error(`[e2e] ${combo}${scenario ? ` --scenario ${scenario}` : ""} 실패: ${e.message}`);
   process.exit(1);
 }

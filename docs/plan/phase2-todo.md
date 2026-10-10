@@ -1429,11 +1429,14 @@ TC-K5.T2.a  끈 키는 거부된다 (여섯 조합)
   단언:  발급 → 요청 200 → POST /api/me/keys/:id/disable → 다음 요청 403 permission_denied
   검출:  조합마다 다른 DB 경로에서 disabled_reason 저장이 실패해 끄기 API 가 500 이거나 반영이 큐로만 가는 것
 TC-K5.T2.b  여러 키로 나눠 써도 회원 한도에서 막힌다 (여섯 조합)
-  단언:  키 둘로 번갈아 요청 → 회원 총 사용액이 한도($0.02)에 닿은 시각부터 125,000ms 안에 두 키 모두 거부 (isBudgetBlocked 또는 limit 끄기의 403, v5.6 Q1),
-         그때 총 사용액 ≤ 0.02 × 2 + 0.004878
-  검출:  한 조합의 분배 작업이 돌지 않는 것 (Workers crons 에 "* * * * *" 누락, MySQL 임대 판정 오류 등) — 그 조합에서만 한도가 안 걸린다
+  단언:  키 둘로 번갈아 요청해 회원 총 사용액이 한도($0.02)에 닿으면 곧바로 두 키로 몰아 쓴다 (키마다 연달아, 거부될 때까지) →
+         두 키 모두 거부 (isBudgetBlocked 또는 limit 끄기의 403), 몰아 쓴 뒤 총 사용액 ≤ 0.02 × 2 + 0.004878.
+         한도에 닿은 시각부터 125,000ms 안에 분배가 두 키를 limit 으로 끈다 (비용 없는 탐침이 403 permission_denied, v5.6 Q1)
+  검출:  한 조합의 분배 작업이 돌지 않는 것 (Workers crons 에 "* * * * *" 누락, MySQL 임대 판정 오류 등) — 그 조합에서만 한도가 안 걸린다.
+         분배가 키 예산을 "그 키 사용액 + 남은 한도"가 아니라 "그 키 사용액 + 한도 전체"로 거는 것 — 몰아 쓰면 한도 × 2 를 넘는다 (K5 리뷰 M1)
 TC-K5.T2.c  삭제·재발급으로 한도가 초기화되지 않는다 (여섯 조합)
-  단언:  b 뒤 두 키 삭제 → 새 발급 409 limit_exhausted. 한도 $0.04 로 올린 뒤 발급 → 그 키 예산 == 0.04 − 총 사용액 (오차 1e-6)
+  단언:  b 뒤 두 키 삭제 → 새 발급 409 limit_exhausted. 한도 $0.06 으로 올린 뒤 발급 → 그 키 예산 == 0.06 − 총 사용액 (오차 1e-6).
+         올린 한도는 b 의 몰아 쓴 뒤 총 사용액 상한(0.044878)보다 커야 한다 (K5 리뷰 M1 뒤 $0.04 는 총 사용액보다 작을 수 있다)
   검출:  삭제 키 사용액이 회원 합계에서 빠지는 조합(매핑 행 삭제, 분석 apiKeyIds 누락)
 TC-K5.T2.d  재발급으로 한도가 초기화되지 않는다 (여섯 조합, V19 의존)
   단언:  한도 도달 뒤 남은 키 재발급 → 409 limit_exhausted, 옛 원문의 다음 요청 403. 한도를 올린 뒤 재발급 → 새 원문 200·옛 원문 바로 403·그 키 예산 == 한도 − 총 사용액 (옛 id 사용액 포함, 오차 1e-6)
@@ -1490,7 +1493,7 @@ TC-K5.T4.b  ruleset 필수 검사가 이 잡을 포함한다
 |---|---|---|---|
 | G-K5.1 | TC-K5.T1.a Claude Code | [L] `pnpm e2e --combo docker-sqlite --scenario claude-code` | 종료코드 0, 출력 "hello from mock" |
 | G-K5.2 | Claude Code 버전 고정 | grep `"@anthropic-ai/claude-code": "[0-9]+\.[0-9]+\.[0-9]+"` in `tests/e2e/claude-code/package.json` | == 1 |
-| G-K5.3 | TC-K5.T2.a~d docker-sqlite | [L] `pnpm e2e --combo docker-sqlite --scenario keys` | 종료코드 0 — 끈 뒤 첫 요청 403, 한도 반영 ≤ 125,000ms (지출 기록 60초 + 분배 1분 + 5초), 초과 폭 ≤ 0.02 × 2 + 0.004878, 삭제 뒤 발급 409 |
+| G-K5.3 | TC-K5.T2.a~d docker-sqlite | [L] `pnpm e2e --combo docker-sqlite --scenario keys` | 종료코드 0 — 끈 뒤 첫 요청 403, 분배가 키를 끄기까지 ≤ 125,000ms (지출 기록 60초 + 분배 1분 + 5초), 몰아 쓴 뒤 초과 폭 ≤ 0.02 × 2 + 0.004878, 삭제 뒤 발급 409 |
 | G-K5.4 | 같음 docker-mysql | [L] `pnpm e2e --combo docker-mysql --scenario keys` | G-K5.3 과 같은 기준 |
 | G-K5.5 | 같음 docker-pg | [L] `pnpm e2e --combo docker-pg --scenario keys` | G-K5.3 과 같은 기준 |
 | G-K5.6 | 같음 workers-d1 | [L] `pnpm e2e --combo workers-d1 --scenario keys` | G-K5.3 과 같은 기준 |
@@ -1513,6 +1516,8 @@ E2E 시나리오의 숫자: 한도 반영 ≤ 125,000ms = 지출 기록 60초 + 
 
 **브랜치** `p2/k6`.
 **outputs** 없음 (검사와 문서만).
+
+**K5 리뷰에서 넘김 (L4·L5·L6)** K5 리뷰의 낮은 등급 지적 셋은 K5 에서 고치지 않고 이 단계에서 검토한다. L6 의 근거가 되는 조합별 한도 반영 시간(reactMs)은 K5 PR(#10) 본문 표에 남겼다.
 
 **백로그 (K1 리뷰 #9)** 끝난 작업(`omniroute_jobs.done_at`) 정리: 기본 30일이 지난 완료 작업을 지우는 주기 정리를 둘지, 감사 로그(`audit_log`)로 대신할 수 있는지(완료 작업에 남는 정보가 감사 로그에 이미 있는가) 검토하고 정한다. 실패 작업(`failed_at`)은 정리하지 않는다 (오래 실패 화면, 7단계).
 
