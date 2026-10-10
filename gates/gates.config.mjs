@@ -254,8 +254,10 @@ export const GATES = {
 
   // ---------- 2단계 "키·한도" (실행판 docs/plan/phase2-todo.md) ----------
   // K0~K6 은 직렬이다. strictTests: test 검사마다 expectPassed(통과 수 ==)가 있어야 한다 (K0.T1 이 gate 에 넣는다).
-  // outputs 는 그 단계가 처음 만드는 경로만 둔다. 여러 단계가 고치는 공용 파일(app.ts·ci.yml 이후 수정 등)은 가장 이른 단계에만 두거나 넣지 않는다.
-  // 앞 단계 산출을 뒤 단계 outputs 에 넣으면 앞 단계 작업이 막힌다 (--assert-order 는 잠긴 단계 outputs 변경을 거부한다).
+  // outputs 는 그 단계가 새로 만드는, 이력에서 한 번도 바뀐 적 없는 경로만 둔다. --assert-order 를 처음 커밋부터 도는 검사
+  // (ci.yml order 잡, G-S7.5, 새 브랜치 push 의 gate.yml)는 지금 설정의 잠긴 단계 outputs 로 이력 전체를 본다. 1단계가 고친 파일
+  // (lease.ts·schema·migrations·omniroute/src 등)을 잠긴 단계 outputs 에 넣으면 그 단계가 열릴 때까지 CI 가 빨갛다.
+  // 고칠 기존 파일은 어느 단계 outputs 에도 넣지 않는다 (앞 단계 봉인이 R1 으로 순서를 지킨다).
   // K1~K6 의 checks 는 그 단계를 시작할 때 실행판 GATE 표대로 채운다 (빈 단계는 gate 가 실행·봉인을 거부한다).
   K0: {
     needs: ["S7"],
@@ -323,18 +325,14 @@ export const GATES = {
     needs: ["K0"],
     waivable: false,
     strictTests: true,
-    outputs: [
-      "packages/runtime/src/lease.ts", "packages/runtime/src/node.ts", "packages/runtime/src/workers.ts", "packages/runtime/src/types.ts",
-      "packages/runtime/test/**", "packages/db/src/schema/**", "packages/db/migrations/**", "packages/db/test/**",
-      "apps/server/src/jobs.ts", "apps/server/src/queue/**", "apps/server/test/queue/**", "apps/server/wrangler.toml",
-    ],
+    outputs: ["packages/db/migrations/*/0001_*", "packages/runtime/test/lease-fence/**", "apps/server/src/queue/**", "apps/server/test/queue/**"],
     checks: [],
   },
   K2: {
     needs: ["K1"],
     waivable: false,
     strictTests: true,
-    outputs: ["packages/omniroute/src/**", "apps/server/src/limits/**", "apps/server/test/limits/**", "apps/server/test/contract/limits/**"],
+    outputs: ["apps/server/src/limits/**", "apps/server/test/limits/**", "apps/server/test/contract/limits/**"],
     checks: [],
   },
   K3: {

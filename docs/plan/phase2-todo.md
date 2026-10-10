@@ -36,7 +36,7 @@
 - 명령: `gate <단계>` 실행 · `--seal` 봉인 · `--explain` 실패 측정값 · `--seal --waived "<사유>"` 면제 · `--status` 상태 표 · `--assert-order` 순서 위반 검사 · `--verify-seals --rerun` 봉인 커밋 재검 · `--skip-requires <태그>`·`--skip-ids <id,…>` 건너뛰기(건너뛴 실행으로는 봉인 안 됨).
 - 규칙 R1 순서: 선행 봉인이 없으면 그 단계 검사 실행을 거부한다. R2 최신성: 봉인의 `head`가 기준 브랜치(`origin/main`, 없으면 `main`)의 조상이 아니면 ⚠ 무효다. R3 재검: `--seal`은 이전 결과를 읽지 않고 검사를 다시 돌린다.
 - 검사가 하나도 없는 단계는 실행·봉인을 거부한다. `K1`~`K6`의 검사는 그 단계를 시작할 때 이 문서 GATE 표대로 `gates.config.mjs`에 채운다.
-- `--assert-order`는 기준 시점에 잠겨 있던 단계의 `needs`·`outputs`·`waivable` 변경, 단계 삭제, 잠긴 단계 `outputs`에 걸리는 파일 변경을 거부한다. pre-push 훅(`.githooks/pre-push`)과 CI(`gate.yml`, `ci.yml`의 `order` 잡)가 이것을 돈다. 그래서 2단계 단계의 `outputs`는 **그 단계가 처음 만드는 경로만** 둔다. 앞 단계가 고칠 파일을 뒤 단계 `outputs`에 넣으면 앞 단계 작업이 막힌다. 여러 단계가 고치는 공용 파일(`apps/server/src/app.ts` 등)은 어느 단계 `outputs`에도 넣지 않는다.
+- `--assert-order`는 기준 시점에 잠겨 있던 단계의 `needs`·`outputs`·`waivable` 변경, 단계 삭제, 잠긴 단계 `outputs`에 걸리는 파일 변경을 거부한다. pre-push 훅(`.githooks/pre-push`)과 CI(`gate.yml`, `ci.yml`의 `order` 잡)가 이것을 돈다. 그래서 2단계 단계의 `outputs`는 **그 단계가 새로 만드는, 이력에서 한 번도 바뀐 적 없는 경로만** 둔다. 이유 둘: (1) 앞 단계가 고칠 파일을 뒤 단계 `outputs`에 넣으면 앞 단계 작업이 막힌다. (2) `--assert-order`를 처음 커밋부터 도는 검사(ci.yml `order` 잡, 1단계 `G-S7.5`, 새 브랜치 첫 push 의 `gate.yml`)는 **지금 설정**의 잠긴 단계 `outputs`로 이력 전체를 본다. 1단계가 고친 파일(`packages/runtime/src/lease.ts`, `packages/db/src/schema/**`, `packages/db/migrations/**`, `packages/omniroute/src/**` 등)을 잠긴 2단계 단계 `outputs`에 넣으면 그 단계가 열릴 때까지 CI 가 빨갛다 (이 문서의 첫 push 에서 실제로 그랬다). 2단계가 고칠 기존 파일은 어느 단계 `outputs`에도 넣지 않고, 순서는 선행 봉인(R1)이 지킨다.
 - `test` 검사 판정: 종료코드 0 이고, 검사에 `expectPassed`가 있으면 통과한 테스트 수가 **그 수와 같아야** 한다 (K0.T1 이후). 2단계 단계는 `strictTests: true`라 `expectPassed`가 없는 `test` 검사는 실패다. GATE 표의 `통과 = n`은 `expectPassed: n`이다. `TC 수 × DB 수`로 적은 것은 TC 하나가 DB마다 테스트 하나씩 도는 경우다.
 - `[L]`이 붙은 명령은 `requires: ["local-services"]` 검사다. 이 컴퓨터에 띄운 계약 환경 OmniRoute(`127.0.0.1:20170`, `pnpm test:contract`가 멱등 기동), 시험 DB(MySQL `33306`·MariaDB `33307`·Postgres `35432`), mailpit 이 필요하다. CI 봉인 재검(`gate.yml`)은 이 검사를 건너뛰고, CI 단계 잡이 서비스를 띄워 그대로 돈다. `localhost:20128`(사람이 쓰는 OmniRoute)은 어떤 검사도 쓰지 않는다.
 - 1단계 `G-S5.9`(CI `contract` 잡이 매 push 돈다)는 `apps`·`packages`(어댑터 `packages/omniroute` 제외)에서 문자열 `/api/keys`·`/api/usage`가 0 이기를 요구한다. 그래서 회원 키 API 경로는 `/api/me/keys`이고, 시험 코드의 OmniRoute 호출 기록은 경로가 아니라 어댑터 함수 이름(`createKey`, `setKeyActive(false)`, `setBudget`, `deleteKey` 등)으로 적는다. 대시보드 쿠키로 OmniRoute 상태를 바꾸는 시험도 어댑터(`createClient({ credential: { cookie } })`)를 거친다.
@@ -226,7 +226,7 @@ TC-K0.T4.e  --set 없이 부르면 1단계 일곱 항목을 본다
 
 【작업】
 1. OmniRoute 3.8.51 이미지 안의 OpenAPI 와 소스에서 키 묶음(그룹·풀·combo 예산 등) 경로를 찾는다. 있으면 계약 환경에서 키 둘을 한 묶음에 넣고 공동 예산을 걸어 본다. `V12.json`: `answer = { exists: bool, mechanism, api, sharedBlocking: bool|null }`. 커밋.
-2. 결과가 `exists: true` 이고 둘 이상의 키 지출을 합쳐 막으면 `blocking: true`. 계획서 5.3 을 공동 예산 방식으로 개정(K0.T12 의 같은 개정 버전)하고, 이 문서의 K2 작업을 `(폐기)` + 새 번호로 개정한다. K2 `outputs`(`apps/server/src/limits/**`, `packages/omniroute/src/**`)는 두 방식 모두를 덮는다. 결과가 `false`면 5.3 그대로 간다. 두 갈래를 미리 적지 않는다.
+2. 결과가 `exists: true` 이고 둘 이상의 키 지출을 합쳐 막으면 `blocking: true`. 계획서 5.3 을 공동 예산 방식으로 개정(K0.T12 의 같은 개정 버전)하고, 이 문서의 K2 작업을 `(폐기)` + 새 번호로 개정한다. K2 `outputs`(`apps/server/src/limits/**` 등 새 경로)는 두 방식 모두를 덮는다. 결과가 `false`면 5.3 그대로 간다. 두 갈래를 미리 적지 않는다.
 
 【테스트】
 ```
@@ -293,7 +293,7 @@ TC-K0.T8.a  삭제한 키의 비용이 그 키 id 분석에 그대로 잡힌다 
 선행 K0.T4 · 산출 `docs/verify/V19.json`, `packages/omniroute/test/contract/verify/v19.contract.ts` · 되돌리기 커밋 1개
 
 【작업】
-1. 키 생성 → 월 예산 0.01 → 요청 3건 → 429 확인 → `POST /api/keys/{id}/regenerate`. `answer = { sameId, spendKept, budgetKept, oldKeyStatus, newKeyStatus, newKeyBlocked }`. `sameId: false` 또는 `spendKept: false`면 K4 재발급이 매핑을 새 id 로 바꾸고 옛 id 사용액을 회원 합계에 계속 넣어야 하므로 `blocking: true`로 계획서 5.2·5.9 를 개정한다 (`api_keys` 칼럼 변경은 K1 `outputs`의 `packages/db/src/schema/**`가 덮는다). 커밋.
+1. 키 생성 → 월 예산 0.01 → 요청 3건 → 429 확인 → `POST /api/keys/{id}/regenerate`. `answer = { sameId, spendKept, budgetKept, oldKeyStatus, newKeyStatus, newKeyBlocked }`. `sameId: false` 또는 `spendKept: false`면 K4 재발급이 매핑을 새 id 로 바꾸고 옛 id 사용액을 회원 합계에 계속 넣어야 하므로 `blocking: true`로 계획서 5.2·5.9 를 개정한다 (`api_keys` 칼럼 변경은 K1.T1 이 같은 마이그레이션에 넣는다). 커밋.
 
 【테스트】
 ```
@@ -486,7 +486,7 @@ TC-K0.T15.b  ruleset 필수 검사가 이 잡을 포함한다
 # K1 — 작업 기반: 임대·작업 큐·주기 등록 🔒 (K0 필요)
 
 **브랜치** `p2/k1`.
-**outputs** `packages/runtime/src/{lease,node,workers,types}.ts`, `packages/runtime/test/**`, `packages/db/src/schema/**`, `packages/db/migrations/**`, `packages/db/test/**`, `apps/server/src/jobs.ts`, `apps/server/src/queue/**`, `apps/server/test/queue/**`, `apps/server/wrangler.toml`. 스키마 변경(V19 결과의 `api_keys` 칼럼 포함)은 모두 이 단계가 한다.
+**outputs** `packages/db/migrations/*/0001_*`, `packages/runtime/test/lease-fence/**`, `apps/server/src/queue/**`, `apps/server/test/queue/**` (새 경로만, 0절). 이 단계가 고치는 기존 파일(`lease.ts`·`node.ts`·`workers.ts`·`types.ts`, `packages/db/src/schema/**`, `apps/server/src/jobs.ts`, `apps/server/wrangler.toml`)은 `outputs`에 없다. 스키마 변경(V19 결과의 `api_keys` 칼럼 포함)은 모두 이 단계가 한다.
 
 ### ☐ K1.T1 — `job_leases` 펜싱 토큰 칼럼
 선행 없음 · 산출 `packages/db/src/schema/**`, `packages/db/migrations/{sqlite,mysql,pg}/0001_*` · 되돌리기 커밋 1개
@@ -508,7 +508,7 @@ TC-K1.T1.b  마이그레이션과 생성 스키마가 같다
 - [ ] G-K1.1 · G-K1.2 통과
 
 ### ☐ K1.T2 — 임대 하트비트·펜싱 (S4 보안 리뷰 L4)
-선행 K1.T1 · 산출 `packages/runtime/src/lease.ts`, `packages/runtime/src/node.ts`, `packages/runtime/src/workers.ts`, `packages/runtime/test/**` · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-K1.T2.a`
+선행 K1.T1 · 산출 `packages/runtime/src/lease.ts`, `packages/runtime/src/node.ts`, `packages/runtime/src/workers.ts`, `packages/runtime/test/lease-fence/**` · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-K1.T2.a`
 
 【작업】
 1. TC-K1.T2.a 를 넣는다 (지금 `acquireLease`는 한 번 잡고 늘리지 않으므로 빨강). 꼬리줄 `Red: TC-K1.T2.a`. 커밋.
@@ -643,7 +643,7 @@ TC-K1.T5.b  ruleset 필수 검사가 이 잡을 포함한다
 # K2 — 회원 단위 한도 분배 🔒 (K1 필요)
 
 **브랜치** `p2/k2`.
-**outputs** `packages/omniroute/src/**`, `apps/server/src/limits/**`, `apps/server/test/limits/**`, `apps/server/test/contract/limits/**`. V12 결과로 공동 예산 방식이 되어도 이 경로 안에서 끝난다.
+**outputs** `apps/server/src/limits/**`, `apps/server/test/limits/**`, `apps/server/test/contract/limits/**` (새 경로만). 어댑터(`packages/omniroute/src`)를 고쳐야 하면 고치되 `outputs`에는 넣지 않는다 (0절). V12 결과로 공동 예산 방식이 되어도 이 경로와 어댑터 안에서 끝난다.
 
 ### ☐ K2.T1 — 남은 한도 계산 (순수 함수)
 선행 없음 · 산출 `apps/server/src/limits/compute.ts`, `apps/server/test/limits/**` · 되돌리기 커밋 1개
@@ -973,7 +973,7 @@ TC-K4.T1.i  목록은 남은 발급 가능 개수를 준다
 선행 K4.T1 · 산출 `apps/server/src/routes/keys.ts` · 되돌리기 커밋 1개
 
 【작업】
-1. `PATCH /api/me/keys/:id {label}`(DB 만), `POST /api/me/keys/:id/disable`·`enable`(K3 `applyKey`, `disabled_reason member`), `POST /api/me/keys/:id/regenerate`(V19 결과대로 매핑 유지 또는 갱신, 새 원문 1회, `rebalanceMember`), `DELETE /api/me/keys/:id`(`deleteKey`, `state deleted`, `deleted_at`, 행 유지). 남의 키는 모두 404. 어댑터에 `regenerateKey`가 없으므로 K2 가 연 `packages/omniroute/src`에 더한다 (K2 봉인 뒤라 열려 있다). 커밋.
+1. `PATCH /api/me/keys/:id {label}`(DB 만), `POST /api/me/keys/:id/disable`·`enable`(K3 `applyKey`, `disabled_reason member`), `POST /api/me/keys/:id/regenerate`(V19 결과대로 매핑 유지 또는 갱신, 새 원문 1회, `rebalanceMember`), `DELETE /api/me/keys/:id`(`deleteKey`, `state deleted`, `deleted_at`, 행 유지). 남의 키는 모두 404. 어댑터에 `regenerateKey`가 없으므로 `packages/omniroute/src`에 더한다 (`G-S5.9`: OmniRoute 경로 문자열은 어댑터에만). 커밋.
 
 【테스트】
 ```
