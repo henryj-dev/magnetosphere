@@ -1536,8 +1536,8 @@ E2E 시나리오의 숫자: 한도 반영 ≤ 125,000ms = 지출 기록 60초 + 
 【테스트】
 ```
 TC-K6.T1.a  운영 코드에 시험 갈림길이 없다
-  단언:  grep "process\.env\.(TEST_|E2E_|FAKE_|MG_TEST)|globalThis\.__test" in apps/server/src packages/*/src → 0
-  검출:  E2E 에서 분배 주기를 줄이려고 넣은 환경 변수가 운영에 남아 누군가 켜면 1초마다 OmniRoute 예산을 두드리는 것
+  단언:  grep `\benv(\.|\?\.|\[|\?\.\[)["']?(CI\b|VITEST|TEST_|E2E_|FAKE_|MG_TEST)|NODE_ENV\s*[!=]==?\s*["']test|import\.meta\.env|secret\(["'](TEST|E2E|FAKE)_|globalThis\.__test` in apps/server/src apps/web/src packages/*/src → 0 (K6 리뷰 M1 로 넓힘)
+  검출:  E2E 에서 분배 주기를 줄이려고 넣은 환경 변수가 운영에 남아 누군가 켜면 1초마다 OmniRoute 예산을 두드리는 것. 이름이 CI·VITEST 이거나, NODE_ENV === "test"·import.meta.env·rt.secret("E2E_…")·Workers env.TEST_…·process.env["TEST_…"]·?.env?.TEST_… 로 읽어 처음 패턴을 비켜 가는 것
 TC-K6.T1.b  건너뛴 테스트와 미구현 표식이 없다 (1단계 TC-S7.T3.a 와 같은 규칙, 2단계 경로 포함)
   단언:  G-S7.3 과 같은 grep in apps packages tests scripts test (빌드 산출·scripts/gate.test.mjs 제외) → 0
   검출:  .skip 으로 꺼진 계약 TC 때문에 K2·K3 GATE 가 expectPassed 를 줄여 맞춘 채 초록으로 보이는 것
@@ -1545,23 +1545,25 @@ TC-K6.T1.b  건너뛴 테스트와 미구현 표식이 없다 (1단계 TC-S7.T3.
 
 【통과】
 - [x] G-K6.1 · G-K6.2 통과
+- K6 리뷰 M1 음성 대조 (커밋 안 함): `packages/runtime/src/types.ts` 끝에 한 줄씩 `process.env.CI` · `process.env.VITEST` · `process.env.NODE_ENV==="test"` · `import.meta.env.VITEST` · `rt.secret("E2E_FAST")` · `env.TEST_MODE` · `process.env["TEST_X"]` · `g.process?.env?.TEST_X` → 여덟 모두 G-K6.1 실패 (1 / == 0). `apps/web/src/app.d.ts` 에 `import.meta.env.DEV` → 실패 (새로 넣은 경로). 넓힌 패턴은 지금 운영 코드에서 0건이다: `apps/web` 은 `import.meta.env` 를 쓰지 않고(SvelteKit 정적 빌드, `$env` 도 안 씀), `packages/auth` 콘솔 메일 어댑터의 `NODE_ENV === "production"` 거부는 운영 안전 장치라 "test" 비교만 건다
 
 ### ☑ K6.T2 — 운영 문서에 5.3 한계
 선행 없음 · 산출 `deploy/README.md` · 되돌리기 커밋 1개
 
 【작업】
 1. 계획서 5.3 "한계 (문서에 적는다)" 두 줄을 운영 문서에 옮긴다: 짧은 시간에 몰아 쓰면 대략 "남은 한도 × 동시에 쓰는 키 수"까지 넘을 수 있다(지출 기록 60초, 분배 1분), 비용은 OmniRoute 가격표 추정치다. 커밋.
+2. (K6 리뷰 L3) 5.3 한계의 나머지 둘도 옮긴다: 키 하나여도 "동시 요청 수 × 요청 비용" 만큼 넘을 수 있다, 분석 호출이 실패하는 동안 분배는 예산을 고치지 않아(fail-closed) 반영이 늦고 10분 넘으면 `alert.rebalance_stalled`. 커밋.
 
 【테스트】
 ```
 TC-K6.T2.a  운영 문서에 한계 두 줄이 있다
-  단언:  grep "남은 한도 × 동시에 쓰는 키 수" deploy/README.md → 1, grep "추정" deploy/README.md → ≥ 1
+  단언:  grep "남은 한도 × 동시에 쓰는 키 수" deploy/README.md → 1, grep "OmniRoute 가격표로 계산한 추정치" → 1 (K6 리뷰 L5 로 구절 검사), grep "동시 요청 수 × 요청 비용" → 1, grep "fail-closed" → 1 (K6 리뷰 L3)
   검출:  운영자가 회원 한도를 결제 상한으로 믿고 초과분을 청구하거나 막지 못한 것을 장애로 보는 것
 ```
 
 【통과】
-- [x] G-K6.3 · G-K6.14 통과 (G-K6.14 는 TC 단언의 둘째 줄 "추정 ≥ 1" 이다)
-- 음성 대조 (커밋 안 함): 두 문장을 "남은 한도 곱하기 키 수"·"값" 으로 바꾸면 G-K6.3 (0 / == 1)·G-K6.14 (0 / >= 1) 실패
+- [x] G-K6.3 · G-K6.14 · G-K6.17 · G-K6.18 통과
+- 음성 대조 (커밋 안 함): 두 문장을 "남은 한도 곱하기 키 수"·"값" 으로 바꾸면 G-K6.3 (0 / == 1)·G-K6.14 (0 / == 1) 실패. 새 두 줄을 지우면 G-K6.17·18 실패
 
 ### ◐ K6.T3 — 2단계 전체 봉인·순서·필수 검사
 선행 K6.T1 · K6.T2 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
@@ -1621,17 +1623,21 @@ TC-K6.T4.b  1분 작업 큐 실행기가 정리를 부른다
 TC-K6.T5.a  키 시나리오 누락 음성 대조는 [keys-scenario] 로만 잡힌다
   단언:  check-ci-matrix --expect 6 → 0, check-ci-matrix --fixture test/fixtures/ci-guard/e2e-keys-missing.yml --expect 6 --expect-fail → 0 ([keys-scenario] 잡음)
   검출:  키 시나리오 누락과 S6 조합 불일치가 같은 코드 combo-set 이라, 픽스처의 매트릭스 조합이 어긋나기만 해도 음성 대조가 "잡음" 으로 통과해 키 시나리오 검사가 고장 난 것을 놓치는 것
+TC-K6.T5.b  S6 조합 불일치 음성 대조는 [combo-set] 로 잡힌다 (K6 리뷰 M2)
+  단언:  check-ci-matrix --fixture test/fixtures/ci-s6-combo-missing.yml --expect 6 --expect-fail → 0 (docker-sqlite 대신 docker-mariadb, 개수 6·키 명령 줄 있음 → [combo-set] 잡음)
+  검출:  코드를 나눈 뒤 S6 조합 집합 검사(check-ci-matrix.mjs 의 "게이트 S6 E2E 조합이 빠졌다"·"게이트에 없는 조합")를 잡는 픽스처가 저장소에 하나도 없어, 그 줄이 망가져도 아무 검사도 빨개지지 않는 것. 픽스처는 ci-guard 폴더 밖에 둔다 (G-S7.1 이 ci-guard 폴더 전체를 돈다)
 ```
 
 【통과】
 - [x] G-K6.15 · G-K6.16 통과. 1단계 G-S7.1(픽스처 폴더 21개)·K0 G-K0.10·11·K5 G-K5.9 그대로 초록
+- K6 리뷰 M2 음성 대조 (커밋 안 함): check-ci-matrix 의 S6 조합 집합 두 줄의 코드를 다른 값으로 바꾸면 `ci-s6-combo-missing.yml` 이 "[combo-set] 를 잡지 못했다" 로 실패 → G-K6.15 실패
 - 음성 대조 (커밋 안 함): 키 시나리오 명령 줄은 있고 조합 하나(docker-sqlite)를 뺀 픽스처 → 고치기 전 코드에서 `# expect: combo-set` 은 "게이트 S6 E2E 조합이 빠졌다" 로 잡음(다른 이유로 통과), 고친 코드에서 `[keys-scenario]` 는 "키 시나리오 조합이 매트릭스에 없다" 로 잡음
 
 ## 🚪 GATE K6
 
 | id | 검사 | 명령 | 통과 기준 |
 |---|---|---|---|
-| G-K6.1 | TC-K6.T1.a 시험 갈림길 0 | grep `process\.env\.(TEST_\|E2E_\|FAKE_\|MG_TEST)\|globalThis\.__test` in `apps/server/src packages/auth/src packages/db/src packages/omniroute/src packages/runtime/src` | == 0 |
+| G-K6.1 | TC-K6.T1.a 시험 갈림길 0 | grep `\benv(\.\|\?\.\|\[\|\?\.\[)["']?(CI\b\|VITEST\|TEST_\|E2E_\|FAKE_\|MG_TEST)\|NODE_ENV\s*[!=]==?\s*["']test\|import\.meta\.env\|secret\(["'](TEST\|E2E\|FAKE)_\|globalThis\.__test` in `apps/server/src apps/web/src packages/auth/src packages/db/src packages/omniroute/src packages/runtime/src` | == 0 |
 | G-K6.2 | TC-K6.T1.b 꺼진 테스트·미구현 표식 0 | G-S7.3 의 패턴, in `apps packages tests scripts test`, 같은 제외 | == 0 |
 | G-K6.3 | TC-K6.T2.a 운영 문서 한계 | grep `남은 한도 × 동시에 쓰는 키 수` in `deploy/README.md` | == 1 |
 | G-K6.4 | TC-K6.T3.c 2단계 봉인 모두 유효 | `node scripts/gate.mjs --status --json` 에서 K0~K5 | 모두 ✅ (⚠ 0) |
@@ -1644,9 +1650,11 @@ TC-K6.T5.a  키 시나리오 누락 음성 대조는 [keys-scenario] 로만 잡�
 | G-K6.11 | TC-K6.T4.b 실행기가 정리를 부름 | `pnpm -C apps/server test -t "TC-K6.T4.b"` | 통과 = 1 |
 | G-K6.12 | 재현 빨강 TC-K6.T4.a | `node scripts/check-red.mjs --check G-K6.10 --since seal:K5` | 종료코드 0 |
 | G-K6.13 | 재현 빨강 TC-K6.T4.b | `node scripts/check-red.mjs --check G-K6.11 --since seal:K5` | 종료코드 0 |
-| G-K6.14 | TC-K6.T2.a 운영 문서 추정치 | grep `추정` in `deploy/README.md` | ≥ 1 |
-| G-K6.15 | TC-K6.T5.a 키 시나리오 누락 코드 | `node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-guard/e2e-keys-missing.yml --expect 6 --expect-fail` | 종료코드 0 ([keys-scenario]) |
+| G-K6.14 | TC-K6.T2.a 운영 문서 추정치 | grep `OmniRoute 가격표로 계산한 추정치` in `deploy/README.md` | == 1 |
+| G-K6.15 | TC-K6.T5.a·b 키 시나리오 누락 코드·S6 조합 불일치 코드 | `node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-guard/e2e-keys-missing.yml --expect 6 --expect-fail && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-s6-combo-missing.yml --expect 6 --expect-fail` | 종료코드 0 ([keys-scenario]·[combo-set]) |
 | G-K6.16 | 재현 빨강 TC-K6.T5.a | `node scripts/check-red.mjs --check G-K6.15 --since seal:K5` | 종료코드 0 |
+| G-K6.17 | TC-K6.T2.a 운영 문서 동시 요청 초과 | grep `동시 요청 수 × 요청 비용` in `deploy/README.md` | == 1 |
+| G-K6.18 | TC-K6.T2.a 운영 문서 fail-closed 지연 | grep `fail-closed` in `deploy/README.md` | == 1 |
 
 `node scripts/gate.mjs K6 --seal`
 
@@ -1687,7 +1695,7 @@ TC-K6.T5.a  키 시나리오 누락 음성 대조는 [keys-scenario] 로만 잡�
 - **잠긴 단계의 `outputs`를 아직 병합 안 된 브랜치에서 고쳐야 함**: pre-push 훅은 원격 브랜치 끝을 기준으로 잡아 그 시점에 잠긴 단계 설정 변경을 거부한다 (이 문서의 `p2/plan` 에서 실제로 겪었다). 봉인 파일이 없는 계획 브랜치라면 원격 브랜치를 지우고 다시 올린다 (기준이 `origin/main`이 된다). PR 은 `gh pr reopen`으로 다시 연다. `--no-verify`로 넘기지 않는다 — push 이벤트의 `gate.yml`이 같은 기준으로 다시 막는다.
 - **Docker 메모리(4GB) 부족**: 계약 환경 OmniRoute·mock, 시험 DB 셋, mailpit 이 이미 떠 있다. V15 측정용 OmniRoute(20171)·E2E 묶음은 하나씩 띄우고 끝나면 내린다. `docker compose -f docker-compose.test.yml stop mariadb`로 당장 안 쓰는 DB 를 멈춘다.
 - **amd64·arm64 결과가 다름**: 예산 차단 판정은 K0.T11 도우미만 쓴다. 상태코드가 다르면(429 가 아님) 빌드 차이가 차단 동작까지 번진 것이니 8단계로 미룬 digest 고정 결정을 앞당긴다.
-  - 관찰 (K5, CI amd64): OmniRoute 3.8.51 amd64 빌드는 모델 해석보다 예산 검사를 먼저 한다. 예산을 넘긴 켜진 키로 모르는 모델 탐침을 보내면 amd64 는 429 예산 차단, arm64(로컬)는 400 이다 (커밋 f0d87bd). 또 키 검증 캐시(60초)가 식은 뒤의 꺼진 키는 403 이 아니라 401 `AUTH_002` 로 거부된다 (CI 38073891012, 커밋 a1c01e0. 예산 차단 응답은 캐시를 다시 채우지 않는다). 둘 다 이 항목의 "amd64·arm64 결과가 다름" 이다. 예산 차단 상태 자체는 두 아키텍처 모두 429 다: K0.T11 도우미 `isBudgetBlocked`(`tests/contract/budget-block.mjs`)가 429 만 차단으로 보고, 이 도우미를 쓰는 계약 시험(G-K2.11 등)이 로컬 arm64·CI amd64 둘 다에서 초록이며 K5 E2E 여섯 조합도 CI 에서 초록이다. 그래서 위 규칙("429 가 아니면 앞당긴다")에는 아직 걸리지 않는다. 다만 꺼진 키의 거부 상태(403 → 401)와 검사 순서가 아키텍처마다 달라지는 것이 처음 보였으므로, 8단계로 미룬 아키텍처별 digest 고정 결정은 앞당겨야 할 수 있다. 3단계(정지)·4단계(사용량 화면)가 거부 상태를 회원에게 보여 주기 전에 다시 본다.
+  - 관찰 (K5, CI amd64. K6 리뷰 L4 로 바로잡음): 아키텍처 차이는 하나다 — OmniRoute 3.8.51 amd64 빌드는 모델 해석보다 예산 검사를 먼저 한다. 예산을 넘긴 켜진 키로 모르는 모델 탐침을 보내면 amd64 는 429 예산 차단, arm64(로컬)는 400 이다 (커밋 f0d87bd). 꺼진 키가 403 이 아니라 401 `AUTH_002` 로 거부된 것(CI 38073891012, 커밋 a1c01e0)은 아키텍처 차이가 아니다. 키 검증 캐시(60초)가 식은 뒤의 꺼진 키는 그렇게 거부되고, amd64 에서 먼저 보인 것은 탐침이 예산 차단 429 를 받아 캐시를 다시 채우지 못했기 때문이다 (arm64 도 캐시가 식으면 같은 401 이 나올 수 있다). 예산 차단 상태 자체는 두 아키텍처 모두 429 다: K0.T11 도우미 `isBudgetBlocked`(`tests/contract/budget-block.mjs`)가 429 만 차단으로 보고, 이 도우미를 쓰는 계약 시험(G-K2.11 등)이 로컬 arm64·CI amd64 둘 다에서 초록이며 K5 E2E 여섯 조합도 CI 에서 초록이다. 그래서 위 규칙("429 가 아니면 앞당긴다")에는 걸리지 않는다. 다만 검사 순서처럼 차단 앞뒤의 동작이 아키텍처마다 다르다는 것이 처음 보였으므로, 8단계로 미룬 아키텍처별 digest 고정 결정은 앞당겨야 할 수 있다. 3단계(정지)·4단계(사용량 화면)가 거부 응답을 회원에게 보여 주기 전에 다시 본다.
 - **알려진 흔들림 G-S6.29**: K5 PR CI 38073891012 에서 G-S6.29(TC-S6.T3.f 설치 시도 횟수 제한, Workers 쪽)가 "wrangler dev 가 끝났다 (종료코드 1)" 로 한 번 실패했고, 같은 실행의 E2E workers-d1 도 wrangler dev 를 띄우다 실패했다. 다음 실행(38075448900)에서 코드 변경 없이 통과했다. 시험 실패가 아니라 wrangler dev 기동 실패다. 다시 보이면 `--explain` 의 wrangler dev 출력 끝부분을 남기고, 두 번째부터는 원인(포트·로컬 D1 파일 잠금 등)을 찾는다. 재시도로 덮지 않는다.
 - **분배가 1분 안에 안 끝남**: V15 `decision`과 G-K2.15 를 다시 잰다. 기준을 넘으면 계획서 5.3 실행 시점을 개정한다 (주기를 늘리면 G-K1.16·최종 목표표 "한도 반영 시간"도 같이 바뀐다).
 - **일정 부족**: 단계를 건너뛰지 않는다. 면제 가능한 단계가 없다. 범위를 줄이려면 계획서를 개정하고 해당 작업을 `(폐기)`로 표시한다.

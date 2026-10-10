@@ -615,7 +615,10 @@ export const GATES = {
     outputs: [],
     checks: [
       // K6.T1 임시 코드 회수. 시험 주입점은 함수 인자(now·fetch·signal)만. 환경 변수로 켜는 시험 갈림길·가짜 시계를 운영 코드에 두지 않는다
-      { id: "G-K6.1", how: "grep", desc: "TC-K6.T1.a 운영 코드에 시험 갈림길 0", pattern: "process\\.env\\.(TEST_|E2E_|FAKE_|MG_TEST)|globalThis\\.__test", in: ["apps/server/src", "packages/auth/src", "packages/db/src", "packages/omniroute/src", "packages/runtime/src"], op: "==", limit: 0 },
+      // 갈래: process.env·Workers env 의 시험용 이름(CI·VITEST·TEST_·E2E_·FAKE_·MG_TEST, 점·?.·[ "…" ] 접근), NODE_ENV 를 "test" 와 비교,
+      // import.meta.env (vite·vitest 가 넣는 값. apps/web 은 SvelteKit $env 를 쓰고 import.meta.env 를 쓰지 않는다), 런타임 비밀 값 이름 TEST_·E2E_·FAKE_,
+      // globalThis.__test. NODE_ENV === "production" (packages/auth 콘솔 메일 어댑터 거부)은 운영 안전 장치라 걸지 않는다 (K6 리뷰 M1)
+      { id: "G-K6.1", how: "grep", desc: "TC-K6.T1.a 운영 코드에 시험 갈림길 0", pattern: "\\benv(\\.|\\?\\.|\\[|\\?\\.\\[)[\"']?(CI\\b|VITEST|TEST_|E2E_|FAKE_|MG_TEST)|NODE_ENV\\s*[!=]==?\\s*[\"']test|import\\.meta\\.env|secret\\([\"'](TEST|E2E|FAKE)_|globalThis\\.__test", in: ["apps/server/src", "apps/web/src", "packages/auth/src", "packages/db/src", "packages/omniroute/src", "packages/runtime/src"], op: "==", limit: 0 },
       // G-S7.3 과 같은 패턴·제외. 1단계 경로에 2단계가 더한 test/ 를 함께 본다
       { id: "G-K6.2", how: "grep", desc: "TC-K6.T1.b 꺼진 테스트·미구현 표식 0 (2단계 경로 포함)", pattern: "\\.(only|skip|skipIf|todo)\\(|\\.(skip|only)\\.|runIf\\(|\\b(skip|todo)\\s*:\\s*true|\\b(xit|xdescribe|xtest)\\(|TODO|FIXME|not implemented", in: ["apps", "packages", "tests", "scripts", "test"], exclude: ["apps/web/build/**", "**/.svelte-kit/**", "**/.wrangler/**", "**/dist/**", "scripts/gate.test.mjs"], op: "==", limit: 0 },
       // K6.T2 운영 문서에 계획서 5.3 한계 두 줄
@@ -633,9 +636,12 @@ export const GATES = {
       { id: "G-K6.12", how: "cmd", desc: "재현 빨강: TC-K6.T4.a 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K6.10 --since seal:K5" },
       { id: "G-K6.13", how: "cmd", desc: "재현 빨강: TC-K6.T4.b 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K6.11 --since seal:K5" },
       // K6.T5 키 시나리오 누락은 S6 조합 불일치(combo-set)와 다른 코드 [keys-scenario] (K5 리뷰 L4)
-      { id: "G-K6.15", how: "cmd", desc: "TC-K6.T5.a 키 시나리오 누락 음성 대조는 [keys-scenario] 로만 잡힌다", cmd: "node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-guard/e2e-keys-missing.yml --expect 6 --expect-fail" },
+      { id: "G-K6.15", how: "cmd", desc: "TC-K6.T5.a·b 키 시나리오 누락은 [keys-scenario], S6 조합 불일치는 [combo-set] (음성 대조 둘)", cmd: "node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-guard/e2e-keys-missing.yml --expect 6 --expect-fail && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-s6-combo-missing.yml --expect 6 --expect-fail" },
       { id: "G-K6.16", how: "cmd", desc: "재현 빨강: TC-K6.T5.a 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K6.15 --since seal:K5" },
-      { id: "G-K6.14", how: "grep", desc: "TC-K6.T2.a 운영 문서에 비용은 추정치", pattern: "추정", in: ["deploy/README.md"], op: ">=", limit: 1 },
+      { id: "G-K6.14", how: "grep", desc: "TC-K6.T2.a 운영 문서에 비용은 가격표 추정치", pattern: "OmniRoute 가격표로 계산한 추정치", in: ["deploy/README.md"], op: "==", limit: 1 },
+      // K6 리뷰 L3: 5.3 한계의 나머지 둘
+      { id: "G-K6.17", how: "grep", desc: "TC-K6.T2.a 운영 문서에 동시 요청 초과 폭", pattern: "동시 요청 수 × 요청 비용", in: ["deploy/README.md"], op: "==", limit: 1 },
+      { id: "G-K6.18", how: "grep", desc: "TC-K6.T2.a 운영 문서에 분석 호출 실패 시 fail-closed 지연", pattern: "fail-closed", in: ["deploy/README.md"], op: "==", limit: 1 },
     ],
   },
 };
