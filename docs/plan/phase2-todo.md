@@ -1182,19 +1182,20 @@ TC-K3.T4.b  ruleset 필수 검사가 이 잡을 포함한다
 
 # K4 — 키 수명주기와 회원 키 API 🔒 (K3 필요)
 
-**브랜치** `p2/k4`.
+**브랜치** `k4/keys-api` (실행판을 쓸 때 정한 이름은 `p2/k4`).
 **outputs** `apps/server/src/routes/**`, `apps/server/test/routes/**`, `apps/server/test/contract/routes/**`. 라우터를 거는 `apps/server/src/app.ts`는 공용 파일이라 넣지 않는다.
 
-### ☐ K4.T1 — 발급 `POST /api/me/keys`
+### ☑ K4.T1 — 발급 `POST /api/me/keys`
 선행 없음 · 산출 `apps/server/src/routes/keys.ts` · 되돌리기 커밋 1개
 
 【작업】
 1. 경로는 `/api/me/keys` (0절 G-S5.9 제약). 회원 세션 필요. 확인(계획서 5.2 1번): 회원 status `active`, `emailVerified`, 키 수(활성 + 비활성, 삭제 제외) < `user.max_keys ?? app_settings.default_max_keys`, 남은 한도 > 0 (한도 NULL 이면 통과). 순서: `createKey(이름)` → `setKeyActive(false)` → 예산(K2 계산) → `setKeyActive(true)` → `api_keys` 행 → `rebalanceMember` → 원문을 응답에 한 번. 2~5 중 실패 → `deleteKey`로 되돌리고 502, 되돌리기도 실패 → `key.rollback` 작업. 이름 `m_<회원 id 앞 8자리>_<키 id 앞 8자리>`, DB 에는 `omniroute_key_id`와 끝 4자리만. 최대 개수 경쟁은 DB 한 문장 조건(D1 은 대화형 트랜잭션이 없으므로 조건부 INSERT 또는 batch)으로 막는다. 커밋.
+   구현 (`routes/issue.ts`): 최대 개수 판정을 OmniRoute 호출 앞에 두려고 `api_keys` 행을 createKey 앞에서 자리 행(`omniroute_key_id = pending-<id>`, disabled·member)으로 먼저 넣는다. SQLite·D1 은 조건부 INSERT 한 문장, MySQL·Postgres 는 회원 행 `FOR UPDATE` 트랜잭션 안에서 세고 넣는다. 예산 단계는 행을 disabled·limit 으로 바꾼 뒤 `rebalanceMember` 하나로 한다 (분배가 limit 키에 예산을 건 뒤 켠다 — 예산이 성공한 뒤에만 켠다). 남은 한도 확인은 저장값만으로 0 이면 OmniRoute 를 부르지 않고, 아니면 그 회원 키의 오늘 창 분석(읽기) 한 번을 부른다.
 
 【테스트】
 ```
 TC-K4.T1.a  발급 순서가 계획서 5.2 와 같다
-  단언:  가짜 어댑터 호출 기록 == [createKey, setKeyActive(false), setBudget, setKeyActive(true)], 응답 201 에 원문 1회. 예산 단계(setBudget·rebalanceMember)가 성공한 뒤에만 setKeyActive(true) — rebalanceMember 는 반영 실패면 던진다 (K2 리뷰 M4, TC-K2.T4.c)
+  단언:  가짜 어댑터 호출 기록 == [createKey, setKeyActive(false), setBudget, setKeyActive(true)], 응답 201 에 원문 1회. 예산이 성공한 뒤에만 켠다: 예산 단계(setBudget·rebalanceMember)가 성공한 뒤에만 setKeyActive(true) — rebalanceMember 는 반영 실패면 던진다 (K2 리뷰 M4, TC-K2.T4.c). 대조: setBudget 실패 → setKeyActive(true) 0건
   검출:  createKey 직후 켜진 채로 예산을 거는 순서라, 예산 단계가 실패하면 한도 없는 키가 켜진 채 남는 것
 TC-K4.T1.b  2~5 단계 어디서 실패해도 만든 키를 지운다
   단언:  실패 위치 셋(끄기·예산·켜기) 각각 → deleteKey 1건, api_keys 행 0, 응답 502
@@ -1203,7 +1204,7 @@ TC-K4.T1.c  되돌리기도 실패하면 큐에 넣고 켜진 채 남지 않는�
   단언:  예산 실패 + deleteKey 가 OmniRouteError 503 → key.rollback 작업 1개, 그 키는 isActive=false 상태(끄기 단계까지만 진행)
   검출:  되돌리기 실패를 로그만 남겨 OmniRoute 에 매핑 없는 키가 남고 정합성 점검이 알리기만 해 영원히 남는 것
 TC-K4.T1.d  거부 조건은 OmniRoute 를 부르지 않는다
-  단언:  pending → 403, suspended → 403, emailVerified false → 403, 남은 한도 0 → 409 limit_exhausted, 최대 개수 → 409 max_keys. 각 경우 OmniRoute 호출 0
+  단언:  pending → 403, suspended → 403, emailVerified false → 403, 남은 한도 0 → 409 limit_exhausted, 최대 개수 → 409 max_keys. 각 경우 OmniRoute 호출 0. 남은 한도 0 을 오늘 창으로만 알 수 있으면 분석(읽기) 1건만, 키 쓰기 호출 0
   검출:  확인 전에 createKey 를 불러 거부된 요청마다 OmniRoute 에 키가 생기고 지워지는 것
 TC-K4.T1.e  최대 개수는 기본 2, 비활성 포함, 삭제 제외, 줄여도 기존 키 유지
   단언:  max_keys NULL(시드 default_max_keys 2) → 2 개 201, 3번째 409 · 1개 끄고도 409 · 1개 삭제 → 201 · max_keys 3 → 3번째 201 · 3→1 → 기존 3개 그대로, 새 발급 409
@@ -1223,12 +1224,12 @@ TC-K4.T1.i  목록은 남은 발급 가능 개수를 준다
 ```
 
 【통과】
-- [ ] G-K4.1 ~ G-K4.9 통과
+- [x] G-K4.1 ~ G-K4.9 통과
 
 ### ☐ K4.T2 — 이름 변경·끄기·켜기·재발급·삭제 (폐기)
 v5.6 에서 폐기 (V18·V19). `regenerate`와 바로 `DELETE`는 옛 원문 키를 최대 60초 동안 예산·기록 없이 통과시킨다. 재발급·삭제 방식을 바꾼 K4.T7 이 대신한다. TC-K4.T2.a~e 는 쓰지 않는다.
 
-### ☐ K4.T7 — 이름 변경·끄기·켜기·재발급·삭제 (v5.6)
+### ☑ K4.T7 — 이름 변경·끄기·켜기·재발급·삭제 (v5.6)
 선행 K4.T1 · 산출 `apps/server/src/routes/keys.ts` · 되돌리기 커밋 1개
 
 【작업】
@@ -1257,9 +1258,9 @@ TC-K4.T7.f  재발급도 발급 조건을 본다
 ```
 
 【통과】
-- [ ] G-K4.10 ~ G-K4.14 · G-K4.28 통과
+- [x] G-K4.10 ~ G-K4.14 · G-K4.28 통과
 
-### ☐ K4.T3 — 관리자 한도·최대 개수 API
+### ☑ K4.T3 — 관리자 한도·최대 개수 API
 선행 K4.T1 · 산출 `apps/server/src/routes/admin-limits.ts` · 되돌리기 커밋 1개
 
 【작업】
@@ -1276,9 +1277,9 @@ TC-K4.T3.b  잘못된 값은 400 이다
 ```
 
 【통과】
-- [ ] G-K4.15 · G-K4.16 통과
+- [x] G-K4.15 · G-K4.16 통과
 
-### ☐ K4.T4 — 변경 API 의 CSRF 와 발급 요청 수 제한
+### ☑ K4.T4 — 변경 API 의 CSRF 와 발급 요청 수 제한
 선행 K4.T1 · 산출 `apps/server/src/routes/guard.ts` · 되돌리기 커밋 1개
 
 【작업】
@@ -1295,9 +1296,9 @@ TC-K4.T4.b  발급 요청 수 제한을 넘으면 429 다 (Q4 의존)
 ```
 
 【통과】
-- [ ] G-K4.17 · G-K4.18 통과
+- [x] G-K4.17 · G-K4.18 통과
 
-### ☐ K4.T5 — 실제 OmniRoute 로 수명주기 (계약)
+### ☑ K4.T5 — 실제 OmniRoute 로 수명주기 (계약)
 선행 K4.T1 · K4.T3 · K4.T4 · K4.T7 · 산출 `apps/server/test/contract/routes/**` · 되돌리기 커밋 1개
 
 【작업】
@@ -1314,9 +1315,9 @@ TC-K4.T5.b  남은 한도 0 인 회원은 발급이 막히고 OmniRoute 에 키�
 ```
 
 【통과】
-- [ ] G-K4.19 · G-K4.20 통과
+- [x] G-K4.19 · G-K4.20 통과
 
-### ☐ K4.T6 — K4 CI 잡과 봉인
+### ◐ K4.T6 — K4 CI 잡과 봉인
 선행 K4.T1 · K4.T3 ~ K4.T5 · K4.T7 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
 
 【작업】
@@ -1356,7 +1357,7 @@ TC-K4.T6.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-K4.21 | 발급 순서 (5.2 의 2~5번) 기대값 | grep `"createKey", "setKeyActive\(false\)", "setBudget", "setKeyActive\(true\)"` in `apps/server/test/routes` | == 1 |
 | G-K4.22 | 원문 키 저장 칼럼 없음 | grep `\b(key_raw\|raw_key\|secret_key)\b` in `packages/db/src/schema` | == 0 |
 | G-K4.23 | 어댑터 밖 관리 호출 0 (1단계 G-S5.9 와 같은 규칙) | grep `/api/(keys\|usage)` in `apps packages`, `packages/omniroute/**` 제외 | == 0 |
-| G-K4.24 | 시드 기본값 (최대 키 2, 월 한도 $5) | grep `default_limit_usd: 5,` · `default_max_keys: 2,` in `packages/db/src/seed.ts` | 각 == 1 |
+| G-K4.24 · 29 | 시드 기본값 (최대 키 2, 월 한도 $5) | grep `default_max_keys: 2,` · `default_limit_usd: 5,` in `packages/db/src/seed.ts` | 각 == 1 |
 | G-K4.25 | 타입 검사 | `pnpm -r typecheck` | 종료코드 0 |
 | G-K4.26 | TC-K4.T6.a CI 단계 잡 | grep `^\s+run: node scripts/gate\.mjs K4\b` in ci.yml | == 1 |
 | G-K4.27 | ruleset · TC-K4.T6.b | `node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere` | 종료코드 0 |

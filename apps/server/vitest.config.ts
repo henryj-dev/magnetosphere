@@ -6,6 +6,8 @@ export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
     exclude: ["test/both-runtimes.test.ts", "test/db.test.ts", "test/**/*.db.test.ts", "test/workers.test.ts", "test/**/*.workers.test.ts"],
+    // 같은 컴퓨터에서 게이트 검사가 vitest 를 여러 번 띄운다. 작업자 수를 4 로 묶어 부하를 줄인다
+    maxWorkers: 4,
     testTimeout: 30_000,
     hookTimeout: 60_000,
   },

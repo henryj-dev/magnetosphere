@@ -528,7 +528,44 @@ export const GATES = {
     waivable: false,
     strictTests: true,
     outputs: ["apps/server/src/routes/**", "apps/server/test/routes/**", "apps/server/test/contract/routes/**"],
-    checks: [],
+    checks: [
+      // K4.T1 발급 POST /api/me/keys
+      { id: "G-K4.1", how: "test", desc: "TC-K4.T1.a 발급 순서가 5.2 와 같다 (예산이 성공한 뒤에만 켠다)", cmd: 'pnpm -C apps/server test -t "TC-K4.T1.a"', expectPassed: 1 },
+      { id: "G-K4.2", how: "test", desc: "TC-K4.T1.b 끄기·예산·켜기 어디서 실패해도 만든 키를 지운다", cmd: 'pnpm -C apps/server test -t "TC-K4.T1.b"', expectPassed: 1 },
+      { id: "G-K4.3", how: "test", desc: "TC-K4.T1.c 되돌리기도 실패하면 key.rollback, 켜진 채 남지 않는다", cmd: 'pnpm -C apps/server test -t "TC-K4.T1.c"', expectPassed: 1 },
+      { id: "G-K4.4", how: "test", desc: "TC-K4.T1.d 거부 조건은 OmniRoute 를 부르지 않는다", cmd: 'pnpm -C apps/server test -t "TC-K4.T1.d"', expectPassed: 1 },
+      { id: "G-K4.5", how: "test", desc: "TC-K4.T1.e 최대 개수는 기본 2, 비활성 포함, 삭제 제외, 줄여도 기존 키 유지", cmd: 'pnpm -C apps/server test -t "TC-K4.T1.e"', expectPassed: 1 },
+      { id: "G-K4.6", how: "test", requires: ["local-services"], desc: "TC-K4.T1.f 동시 발급 10건은 최대 개수를 넘지 않는다 (Node 네 DB)", cmd: 'pnpm -C apps/server test:db -t "TC-K4.T1.f" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-K4.7", how: "test", requires: ["local-services"], desc: "TC-K4.T1.f 동시 발급 10건은 최대 개수를 넘지 않는다 (Workers + D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-K4.T1.f"', expectPassed: 1 },
+      { id: "G-K4.8", how: "test", desc: "TC-K4.T1.g · h 원문 미저장·OmniRoute 키 이름 규칙", cmd: 'pnpm -C apps/server test -t "TC-K4.T1.[gh]"', expectPassed: 2 },
+      { id: "G-K4.9", how: "test", desc: "TC-K4.T1.i 목록은 남은 발급 가능 개수를 준다", cmd: 'pnpm -C apps/server test -t "TC-K4.T1.i"', expectPassed: 1 },
+      // K4.T7 이름 변경·끄기·켜기·재발급·삭제 (v5.6)
+      { id: "G-K4.10", how: "test", desc: "TC-K4.T7.a 이름 변경은 OmniRoute 를 부르지 않는다", cmd: 'pnpm -C apps/server test -t "TC-K4.T7.a"', expectPassed: 1 },
+      { id: "G-K4.11", how: "test", desc: "TC-K4.T7.b 삭제는 바로 끄고 행을 남기고 DELETE 는 끈 뒤 120,000ms (V18)", cmd: 'pnpm -C apps/server test -t "TC-K4.T7.b"', expectPassed: 1 },
+      { id: "G-K4.12", how: "test", desc: "TC-K4.T7.c 재발급은 새 키 + 옛 키 삭제, 한도를 초기화하지 않는다 (V19)", cmd: 'pnpm -C apps/server test -t "TC-K4.T7.c"', expectPassed: 1 },
+      { id: "G-K4.13", how: "test", desc: "TC-K4.T7.d 남의 키는 404 이고 OmniRoute 를 부르지 않는다", cmd: 'pnpm -C apps/server test -t "TC-K4.T7.d"', expectPassed: 1 },
+      { id: "G-K4.14", how: "test", desc: "TC-K4.T7.e 회원이 끈 키만 회원이 켠다 (admin 403, limit 409)", cmd: 'pnpm -C apps/server test -t "TC-K4.T7.e"', expectPassed: 1 },
+      { id: "G-K4.28", how: "test", desc: "TC-K4.T7.f 재발급도 발급 조건을 본다", cmd: 'pnpm -C apps/server test -t "TC-K4.T7.f"', expectPassed: 1 },
+      // K4.T3 관리자 한도·최대 개수 API
+      { id: "G-K4.15", how: "test", desc: "TC-K4.T3.a 관리자만 바꾸고, 바꾸면 즉시 분배·audit_log", cmd: 'pnpm -C apps/server test -t "TC-K4.T3.a"', expectPassed: 1 },
+      { id: "G-K4.16", how: "test", desc: "TC-K4.T3.b 잘못된 한도·최대 개수는 400, DB 변화 0", cmd: 'pnpm -C apps/server test -t "TC-K4.T3.b"', expectPassed: 1 },
+      // K4.T4 CSRF 와 발급 요청 수 제한
+      { id: "G-K4.17", how: "test", desc: "TC-K4.T4.a 다른 출처의 변경 요청은 403", cmd: 'pnpm -C apps/server test -t "TC-K4.T4.a"', expectPassed: 1 },
+      { id: "G-K4.18", how: "test", requires: ["local-services"], desc: "TC-K4.T4.b 발급 요청 수 제한 회원 10·IP 30 /시간, 넘으면 429 (Q4, 세 DB)", cmd: 'pnpm -C apps/server test:db -t "TC-K4.T4.b" --db sqlite,mysql,pg', expectPassed: 3 },
+      // K4.T5 실제 OmniRoute 로 수명주기 (계약)
+      { id: "G-K4.19", how: "test", requires: ["local-services"], desc: "TC-K4.T5.a 발급·끄기·켜기·삭제 (계약, V11·V18)", cmd: 'pnpm test:contract -t "TC-K4.T5.a"', expectPassed: 1 },
+      { id: "G-K4.20", how: "test", requires: ["local-services"], desc: "TC-K4.T5.b 남은 한도 0 회원 발급 거부 (계약)", cmd: 'pnpm test:contract -t "TC-K4.T5.b"', expectPassed: 1 },
+      // 공통
+      { id: "G-K4.21", how: "grep", desc: "발급 순서 (5.2 의 2~5번) 기대값", pattern: '"createKey", "setKeyActive\\(false\\)", "setBudget", "setKeyActive\\(true\\)"', in: ["apps/server/test/routes"], op: "==", limit: 1 },
+      { id: "G-K4.22", how: "grep", desc: "원문 키 저장 칼럼 없음", pattern: "\\b(key_raw|raw_key|secret_key)\\b", in: ["packages/db/src/schema"], op: "==", limit: 0 },
+      { id: "G-K4.23", how: "grep", desc: "어댑터 밖 OmniRoute 관리 호출 0 (1단계 G-S5.9 와 같은 규칙)", pattern: "/api/(keys|usage)", in: ["apps", "packages"], exclude: ["packages/omniroute/**"], op: "==", limit: 0 },
+      { id: "G-K4.24", how: "grep", desc: "시드 기본값 최대 키 2", pattern: "default_max_keys: 2,", in: ["packages/db/src/seed.ts"], op: "==", limit: 1 },
+      { id: "G-K4.29", how: "grep", desc: "시드 기본값 월 한도 $5", pattern: "default_limit_usd: 5,", in: ["packages/db/src/seed.ts"], op: "==", limit: 1 },
+      { id: "G-K4.25", how: "cmd", desc: "타입 검사", cmd: "pnpm -r typecheck" },
+      // K4.T6 CI 단계 잡과 ruleset 필수 검사
+      { id: "G-K4.26", how: "grep", desc: "TC-K4.T6.a CI 단계 잡 (K4)", pattern: "^\\s+run: node scripts/gate\\.mjs K4\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
+      { id: "G-K4.27", how: "cmd", desc: "TC-K4.T6.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
+    ],
   },
   K5: {
     needs: ["K4"],
