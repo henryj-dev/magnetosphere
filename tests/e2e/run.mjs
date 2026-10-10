@@ -26,7 +26,7 @@ import { lastSetupToken, startWranglerDev } from "../../apps/server/test/wrangle
 const COMBOS = ["docker-sqlite", "docker-mysql", "docker-pg", "workers-d1", "workers-mysql", "workers-pg"];
 const CONTRACT = { url: "http://127.0.0.1:20170", password: "contract-initial-password-5c1e9a", compose: "tests/contract/docker-compose.yml" };
 const TEST_DB = "docker-compose.test.yml";
-const SCENARIOS = ["claude-code"];
+const SCENARIOS = ["keys", "claude-code"];
 const ADMIN = { email: "e2e-admin@example.com", password: "e2e-admin-password-1234" };
 
 const log = (msg) => console.log(`[e2e] ${msg}`);
