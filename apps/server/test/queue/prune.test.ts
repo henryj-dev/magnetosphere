@@ -41,7 +41,7 @@ describe("TC-K6.T4.b 작업 큐 실행기가 끝난 지 30일 넘은 작업을 �
     // OMNIROUTE_URL 이 없다: 실행기는 OmniRoute 작업을 돌지 않지만 DB 정리는 한다
     const rt = { secret: () => undefined } as unknown as Runtime;
     await queueJob(rt)({ db: h, lease: lease!, signal: new AbortController().signal });
-    const left = (await h.db.select({ id: j.id }).from(j)).map((r) => r.id).sort();
+    const left = (await h.db.select({ id: j.id }).from(j)).map((r: { id: string }) => r.id).sort();
     expect(left).toEqual([recent.id, failed.id].sort());
   });
 });

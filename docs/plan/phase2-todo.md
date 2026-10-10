@@ -1520,6 +1520,7 @@ E2E 시나리오의 숫자: 한도 반영 ≤ 125,000ms = 지출 기록 60초 + 
 **K5 리뷰에서 넘김 (L4·L5·L6)** K5 리뷰의 낮은 등급 지적 셋은 K5 에서 고치지 않고 이 단계에서 검토한다. L6 의 근거가 되는 조합별 한도 반영 시간(reactMs)은 K5 PR(#10) 본문 표에 남겼다.
 
 **백로그 (K1 리뷰 #9)** 끝난 작업(`omniroute_jobs.done_at`) 정리: 기본 30일이 지난 완료 작업을 지우는 주기 정리를 둘지, 감사 로그(`audit_log`)로 대신할 수 있는지(완료 작업에 남는 정보가 감사 로그에 이미 있는가) 검토하고 정한다. 실패 작업(`failed_at`)은 정리하지 않는다 (오래 실패 화면, 7단계).
+- **결정: 주기 정리 (K6.T4)**. 감사 로그로는 대신하지 못한다 — 끝난 작업이 담은 것(action·payload 의 키 id·시도 횟수·끝난 시각)은 `audit_log`에 없다. 큐가 `audit_log`에 쓰는 것은 실패(`alert.job_failed`)뿐이고, 키 API 는 끄기·켜기·삭제를 `audit_log`에 쓰지 않는다. 그래도 끝난 행은 아무도 다시 읽지 않는다: 미완료 작업 찾기(`runDue`·키별 합치기·delete 우선)는 모두 `done_at IS NULL` 이고, 반영 결과는 `api_keys`(state·sync_state)에 남는다. 남겨 둘 값이 없는 행이 키 삭제마다(`key.delete`) 하나씩 끝없이 쌓이므로, 운영자가 최근 반영 이력을 볼 수 있는 30일만 두고 지운다. 정리는 1분 작업 큐 실행기 안에서 같은 임대로 펜싱해 한 문장 `DELETE` 로 한다 (작고, 새 주기·cron 을 더하지 않는다).
 
 ### ☑ K6.T1 — 임시 코드 회수
 선행 없음 · 산출 없음 (검사만) · 되돌리기 해당 없음
@@ -1582,6 +1583,27 @@ TC-K6.T3.c  1·2단계 봉인이 모두 유효하고 처음 커밋부터 순서 
 
 【통과】
 - [ ] G-K6.4 ~ G-K6.8 통과
+
+### ☑ K6.T4 — 끝난 작업 정리 (K1 리뷰 #9)
+선행 없음 · 산출 없음 (기존 `apps/server/src/queue/index.ts`·`runner.ts`) · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-K6.T4.a, TC-K6.T4.b`
+
+【작업】
+1. 재현 시험 `apps/server/test/queue/prune.db.test.ts`(네 DB)·`prune.test.ts`. 꼬리줄 `Red: TC-K6.T4.a, TC-K6.T4.b`. 커밋.
+2. `pruneDone(h, now, { lease })`: `done_at IS NOT NULL AND failed_at IS NULL AND done_at < now − DONE_RETENTION_MS(30일)` 을 지운다. 임대를 주면 `fenced()`. `queueJob`이 OmniRoute 연결 확인보다 먼저 부른다 (정리가 실패하면 경고만 남기고 재시도는 그대로 돈다). 커밋.
+
+【테스트】
+```
+TC-K6.T4.a  done_at 이 30일 넘은 작업만 지운다 (네 DB)
+  단언:  done_at = now − 30일 − 1초 · now − 30일 + 1초 · failed_at 만 90일 전 · 둘 다 60일 전 · 미완료 → pruneDone == 1, 남은 행 = 뒤 넷. 다른 실행기가 임대를 가져간 뒤 옛 임대로 pruneDone → 0, 60일 전 끝난 행 남음
+  검출:  실패 작업까지 지워 오래 실패 화면(7단계)과 alert.job_failed 의 대상이 사라지는 것, 임대를 잃은 실행기가 펜싱 없이 지우는 것, timestamp 비교가 DB 방언마다 달라 30일 안 작업을 지우는 것
+TC-K6.T4.b  1분 작업 큐 실행기가 정리를 부른다
+  단언:  OMNIROUTE_URL 없는 Runtime 으로 queueJob 한 번 → done_at 31일 전 행 0, 1일 전 행·실패 행 남음
+  검출:  pruneDone 은 있는데 어디서도 부르지 않아 omniroute_jobs 가 계속 커지는 것
+```
+
+【통과】
+- [x] G-K6.10 ~ G-K6.13 통과
+- 음성 대조 (커밋 안 함): `failed_at IS NULL` 조건 제거 · 펜싱 제거 · 보존 29일 → TC-K6.T4.a 네 DB 모두 실패. `queueJob` 에서 호출 제거 → TC-K6.T4.b 실패
 
 ## 🚪 GATE K6
 

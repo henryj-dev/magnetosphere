@@ -46,7 +46,7 @@ describe.each(enabledDbs())("%s", (kind: DbKind) => {
     expect(lease).not.toBeNull();
 
     expect(await pruneDone(h, now, { lease: lease! })).toBe(1);
-    const left = (await h.db.select({ id: j.id }).from(j)).map((r) => r.id).sort();
+    const left = (await h.db.select({ id: j.id }).from(j)).map((r: { id: string }) => r.id).sort();
     expect(left).toEqual([recent.id, failed.id, failedAndDone.id, pending.id].sort());
 
     // 임대를 다른 실행기가 가져간 뒤 옛 임대로 정리 → 0행 (펜싱)
@@ -55,6 +55,6 @@ describe.each(enabledDbs())("%s", (kind: DbKind) => {
     const later = new Date(now.getTime() + 60_000);
     expect(await acquireLease(h, "omniroute_jobs", `b-${kind}`, 55_000, later)).not.toBeNull();
     expect(await pruneDone(h, later, { lease: lease! })).toBe(0);
-    expect((await h.db.select({ id: j.id }).from(j)).map((r) => r.id)).toContain(older.id);
+    expect((await h.db.select({ id: j.id }).from(j)).map((r: { id: string }) => r.id)).toContain(older.id);
   });
 });

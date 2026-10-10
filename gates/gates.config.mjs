@@ -620,6 +620,11 @@ export const GATES = {
       { id: "G-K6.2", how: "grep", desc: "TC-K6.T1.b 꺼진 테스트·미구현 표식 0 (2단계 경로 포함)", pattern: "\\.(only|skip|skipIf|todo)\\(|\\.(skip|only)\\.|runIf\\(|\\b(skip|todo)\\s*:\\s*true|\\b(xit|xdescribe|xtest)\\(|TODO|FIXME|not implemented", in: ["apps", "packages", "tests", "scripts", "test"], exclude: ["apps/web/build/**", "**/.svelte-kit/**", "**/.wrangler/**", "**/dist/**", "scripts/gate.test.mjs"], op: "==", limit: 0 },
       // K6.T2 운영 문서에 계획서 5.3 한계 두 줄
       { id: "G-K6.3", how: "grep", desc: "TC-K6.T2.a 운영 문서에 몰아 쓰기 초과 폭", pattern: "남은 한도 × 동시에 쓰는 키 수", in: ["deploy/README.md"], op: "==", limit: 1 },
+      // K6.T4 끝난 작업 정리 (K1 리뷰 #9 백로그 결정: 주기 정리, 30일). 실패 작업은 지우지 않는다
+      { id: "G-K6.10", how: "test", requires: ["local-services"], desc: "TC-K6.T4.a done_at 30일 넘은 작업만 지움·실패 작업 남김·펜싱 (네 DB)", cmd: 'pnpm -C apps/server test:db -t "TC-K6.T4.a" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-K6.11", how: "test", desc: "TC-K6.T4.b 1분 작업 큐 실행기가 정리를 부른다", cmd: 'pnpm -C apps/server test -t "TC-K6.T4.b"', expectPassed: 1 },
+      { id: "G-K6.12", how: "cmd", desc: "재현 빨강: TC-K6.T4.a 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K6.10 --since seal:K5" },
+      { id: "G-K6.13", how: "cmd", desc: "재현 빨강: TC-K6.T4.b 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K6.11 --since seal:K5" },
       { id: "G-K6.14", how: "grep", desc: "TC-K6.T2.a 운영 문서에 비용은 추정치", pattern: "추정", in: ["deploy/README.md"], op: ">=", limit: 1 },
     ],
   },

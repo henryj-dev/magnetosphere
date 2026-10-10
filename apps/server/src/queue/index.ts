@@ -32,7 +32,7 @@
 //     실행기가 핸들러 없이 failed 로 둔다 (끊긴 쪽은 임대를 잃어 펜싱 쓰기를 못 한다, K1 재검토).
 // last_error 에는 OmniRoute 오류 코드·상태만 남긴다. OmniRouteError.message 는 응답 본문 300자를 담아 관리 토큰·원문 키가
 // 섞일 수 있다 (TC-K1.T3.e).
-import { and, asc, eq, exists, isNotNull, isNull, lte, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, exists, isNotNull, isNull, lt, lte, sql, type SQL } from "drizzle-orm";
 import { OmniRouteError, OmniRouteFormatError } from "@magnetosphere/omniroute";
 import { fenced, updatedRows, type Lease } from "@magnetosphere/runtime/lease";
 import type { DbHandle } from "@magnetosphere/runtime/types";
@@ -143,6 +143,21 @@ const redact = (s: string) => s.replace(SECRET, "[비밀 값 지움]");
 
 export function isLongFailed(job: { failedAt: Date | null }, now: Date): boolean {
   return job.failedAt !== null && now.getTime() - job.failedAt.getTime() > LONG_FAILED_MS;
+}
+
+/** done_at 에서 이만큼 지난 작업은 지운다 (K6.T4, K1 리뷰 #9) */
+export const DONE_RETENTION_MS = 30 * 24 * 60 * 60_000;
+
+/**
+ * 끝난 지 DONE_RETENTION_MS 가 넘은 작업(done_at < now − 30일)을 지운다. 지운 행 수를 돌려준다.
+ * 끝난 작업은 아무도 다시 읽지 않는다 (미완료 작업 찾기는 모두 done_at IS NULL). 결과는 api_keys 에 남아 있고, 실패는
+ * audit_log alert.job_failed 가 따로 남긴다. 실패 작업(failed_at)은 지우지 않는다 (오래 실패 화면, 7단계).
+ * 임대를 주면 펜싱한다. 임대를 잃은 실행기의 정리는 0행이다.
+ */
+export async function pruneDone(h: DbHandle, now: Date, opts: { lease?: Lease } = {}): Promise<number> {
+  const t = h.schema.omnirouteJobs;
+  const old = and(isNotNull(t.doneAt), isNull(t.failedAt), lt(t.doneAt, new Date(now.getTime() - DONE_RETENTION_MS)));
+  return updatedRows(h, h.db.delete(t).where(opts.lease ? and(old, fenced(h, opts.lease)) : old), t.id);
 }
 
 export interface RunDueOptions {
