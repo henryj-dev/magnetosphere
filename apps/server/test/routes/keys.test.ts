@@ -307,7 +307,7 @@ describe("TC-K4.T7.d 남의 키는 404 이고 OmniRoute 를 부르지 않는다"
 });
 
 describe("TC-K4.T7.e 회원이 끈 키는 회원이 켤 수 있다", () => {
-  it("disable(member) → enable → 200, setKeyActive(true) 1. admin 이 끈 키 → enable 403, limit 으로 꺼진 키 → enable 409 limit_exhausted", async () => {
+  it("disable(member) → enable → 200, setKeyActive(true) 1. admin 이 끈 키 → enable 403, limit 으로 꺼진 키 → enable 409 limit_exhausted, 이메일 미인증 → 403", async () => {
     const u = await addUser(e.h, { limitUsd: 5 });
     const k = await seedKey(e, u);
     expect((await call(e, "POST", `/api/me/keys/${k.id}/disable`, { user: u })).status).toBe(200);
@@ -329,6 +329,13 @@ describe("TC-K4.T7.e 회원이 끈 키는 회원이 켤 수 있다", () => {
     expect((await call(e, "POST", `/api/me/keys/${admin.id}/disable`, { user: u })).status).toBe(200);
     expect((await call(e, "POST", `/api/me/keys/${admin.id}/enable`, { user: u })).status).toBe(403);
     expect(e.om.of("setKeyActive").filter((c) => c.value === true)).toEqual([]);
+
+    // 이메일을 인증하지 않은 회원은 자기가 끈 키도 켜지 못한다 (K4 보안 리뷰 L2)
+    const nv = await addUser(e.h, { emailVerified: false });
+    const nk = await seedKey(e, nv, { state: "disabled", reason: "member" });
+    const nr = await call(e, "POST", `/api/me/keys/${nk.id}/enable`, { user: nv });
+    expect([nr.status, nr.json?.error]).toEqual([403, "email_unverified"]);
+    expect(e.om.of("setKeyActive").filter((c) => c.id === nk.ork)).toEqual([]);
   });
 });
 
