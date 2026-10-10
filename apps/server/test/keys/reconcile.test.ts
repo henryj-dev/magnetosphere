@@ -96,14 +96,18 @@ describe("TC-K3.T3.g 재시도를 다 쓴 키도 점검이 다시 맞춘다 (Q3 
     expect(om.seq()).toEqual(["listKeys", "setKeyActive(false)"]);
     expect(r).toMatchObject({ applied: 1, failed: 0 });
     expect((await keyOf(keyId)).syncState).toBe("synced");
-    // 이미 맞는 failed 키는 부르지 않고 synced 로만 적는다
+    // 목록으로는 이미 맞아 보이는 failed 키도 목록 값(옛 값일 수 있다)을 믿지 않고 한 번 다시 건다 (리뷰 #4)
     const other = await addMember(h, null, [{ ork: "ork-g2", state: "disabled", reason: "member" }]);
     await h.db.update(k()).set({ syncState: "failed" }).where(eq(k().id, other.keyIds["ork-g2"]));
     om.add("ork-g2", { isActive: false });
     om.calls.length = 0;
     await reconcile({ db: h, client: () => om.client(), now: T0 });
-    expect(om.seq()).toEqual(["listKeys"]);
+    expect(om.seq()).toEqual(["listKeys", "setKeyActive(false)"]);
     expect((await keyOf(other.keyIds["ork-g2"])).syncState).toBe("synced");
+    // synced 가 된 뒤에는 목록이 맞으면 부르지 않는다
+    om.calls.length = 0;
+    await reconcile({ db: h, client: () => om.client(), now: T0 });
+    expect(om.seq()).toEqual(["listKeys"]);
   });
 });
 

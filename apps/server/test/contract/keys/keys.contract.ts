@@ -73,3 +73,19 @@ describe("TC-K3.T3.c scopes 에 manage 가 붙은 m_ 키는 끄고 알린다 (�
     expect(await isActive(c, key.id)).toBe(false);
   });
 });
+
+describe("TC-K3.T3.k listKeys 는 limit 없이 모든 키를 한 번에 받는다 (계약, V28)", () => {
+  it("OmniRoute 키를 120개 이상으로 채운다 → listKeys 한 번에 만든 키가 모두 있고 개수 ≥ 120 (어댑터의 total 검사 통과)", { timeout: 300_000 }, async () => {
+    const before = (await c.client.listKeys()).length;
+    const made: string[] = [];
+    for (let i = 0; i < Math.max(120 - before, 3); i++) {
+      const k = await c.client.createKey(`contract-k3-list-${Date.now().toString(36)}-${i}`);
+      c.keys.push(k.id);
+      made.push(k.id);
+    }
+    const all = await c.client.listKeys();
+    expect(all.length).toBeGreaterThanOrEqual(120);
+    const ids = new Set(all.map((k) => k.id));
+    expect(made.filter((id) => !ids.has(id))).toEqual([]);
+  });
+});

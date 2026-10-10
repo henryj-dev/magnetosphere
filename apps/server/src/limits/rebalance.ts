@@ -28,7 +28,7 @@ import { createCipher } from "@magnetosphere/runtime/crypto";
 import { LeaseLostError, updatedRows, type Lease } from "@magnetosphere/runtime/lease";
 import type { DbHandle, Job, Runtime } from "@magnetosphere/runtime/types";
 import { requireSecret } from "../config.ts";
-import { applyKey } from "../keys/apply.ts";
+import { applyKey, isMissing, markMissing } from "../keys/apply.ts";
 import { describeError } from "../queue/index.ts";
 import { readOmniRouteToken } from "../setup/omniroute.ts";
 import { computeBudgets, type Budgets } from "./compute.ts";
@@ -60,6 +60,8 @@ export interface KeyRow {
   budgetUsd: number | null;
   budgetAt: Date | null;
   budgetMonth: string | null;
+  /** api_keys.sync_state. missing 이면 OmniRoute 에 없는 키라 예산·켜기를 하지 않는다 (사용액에는 계속 센다) */
+  syncState: string;
 }
 
 export interface MemberRow {
@@ -77,6 +79,8 @@ export interface ApplyCounts {
   failed: number;
   /** 더 새 계산이 이미 쓴 키 수 (budget_at 이 내 분석 시각 이후) */
   stale: number;
+  /** OmniRoute 에 없는 키 수 (404, sync_state missing·alert.key_missing). 실패로 세지 않는다 (K3 리뷰 #6) */
+  missing: number;
 }
 
 export interface ApplyContext {
@@ -91,7 +95,7 @@ export interface ApplyContext {
   counts: ApplyCounts;
 }
 
-export const emptyCounts = (): ApplyCounts => ({ setBudget: 0, cleared: 0, off: 0, on: 0, failed: 0, stale: 0 });
+export const emptyCounts = (): ApplyCounts => ({ setBudget: 0, cleared: 0, off: 0, on: 0, failed: 0, stale: 0, missing: 0 });
 
 const toKey = (r: any): KeyRow => ({
   id: r.id,
@@ -102,6 +106,7 @@ const toKey = (r: any): KeyRow => ({
   budgetUsd: r.budgetUsd == null ? null : Number(r.budgetUsd),
   budgetAt: r.budgetAt ?? null,
   budgetMonth: r.budgetMonth ?? null,
+  syncState: r.syncState ?? "synced",
 });
 
 /** 회원 상태 active 인 회원의 키 전부 (삭제 포함)와 월 한도. userId 를 주면 그 회원만 */
@@ -119,6 +124,7 @@ export async function loadMembers(h: DbHandle, userId?: string): Promise<{ membe
       budgetUsd: k.budgetUsd,
       budgetAt: k.budgetAt,
       budgetMonth: k.budgetMonth,
+      syncState: k.syncState,
       limitUsd: u.monthlyLimitUsd,
     })
     .from(k)
@@ -162,7 +168,10 @@ async function setKeyBudget(c: ApplyContext, key: KeyRow, monthlyUsd: number): P
     await c.client().setBudget(key.omnirouteKeyId, { monthlyUsd });
   } catch (e) {
     lost(c, e);
-    c.counts.failed++;
+    if (isMissing(e)) {
+      await markMissing(c.h, c.lease, { keyId: key.id, omnirouteKeyId: key.omnirouteKeyId }, c.at);
+      c.counts.missing++;
+    } else c.counts.failed++;
     return false;
   }
   c.counts.setBudget++;
@@ -186,7 +195,10 @@ async function clearKeyBudget(c: ApplyContext, key: KeyRow): Promise<boolean> {
     await c.client().clearBudget(key.omnirouteKeyId);
   } catch (e) {
     lost(c, e);
-    c.counts.failed++;
+    if (isMissing(e)) {
+      await markMissing(c.h, c.lease, { keyId: key.id, omnirouteKeyId: key.omnirouteKeyId }, c.at);
+      c.counts.missing++;
+    } else c.counts.failed++;
     return false;
   }
   c.counts.cleared++;
@@ -227,6 +239,7 @@ async function turnOn(c: ApplyContext, key: KeyRow, budgetClaimed: boolean): Pro
   }
   const r = await applyKey(c.h, key.id, { client: c.client, lease: c.lease, signal: c.signal, now: c.at, budgetReady: true });
   if (r.syncState === "synced" && r.target === "on") c.counts.on++;
+  else if (r.syncState === "missing") c.counts.missing++;
   else c.counts.failed++;
 }
 
@@ -243,6 +256,8 @@ const behind = (keys: readonly KeyRow[], month: string) =>
 export async function applyPlan(c: ApplyContext, keys: readonly KeyRow[], r: Budgets): Promise<void> {
   for (const key of keys) {
     if (c.signal?.aborted) throw c.signal.reason;
+    // OmniRoute 에 없는 키는 예산·켜기·끄기를 보내지 않는다 (사용액은 계산에 들어 있다)
+    if (key.syncState === "missing") continue;
     if (r.exhausted) {
       if (key.state === "active") await turnOff(c, key);
       continue;

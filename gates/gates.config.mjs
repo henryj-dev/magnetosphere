@@ -290,7 +290,7 @@ export const GATES = {
       { id: "G-K0.11", how: "cmd", desc: "TC-K0.T3.a·b concurrency 규칙 (음성 대조 포함)", cmd: "node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-guard/concurrency-cancel-main.yml --expect 6 --expect-fail" },
       // K0.T4 확인 결과 검사기 항목 묶음
       { id: "G-K0.12", how: "test", desc: "TC-K0.T4.a~e check-verify --set 음성 대조", cmd: nodeTest("scripts/check-verify.test.mjs", "TC-K0.T4"), expectPassed: 5 },
-      { id: "G-K0.13", how: "cmd", desc: "확인 파일 6개 존재·모양", cmd: "node scripts/check-verify.mjs present --set phase2" },
+      { id: "G-K0.13", how: "cmd", desc: "확인 파일 7개 존재·모양 (V28 은 K3 리뷰)", cmd: "node scripts/check-verify.mjs present --set phase2" },
       { id: "G-K0.14", how: "cmd", desc: "설계를 막는 결과 없음", cmd: "node scripts/check-verify.mjs unblocked --set phase2" },
       { id: "G-K0.15", how: "cmd", desc: "막았던 결과는 현재 계획서 버전을 가리킴", cmd: "node scripts/check-verify.mjs resolved --set phase2" },
       // K0.T5~T10 확인 항목 (계약 환경 127.0.0.1:20170 에서 관찰 == V<n>.json answer)

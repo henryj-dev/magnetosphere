@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "check-verify.mjs");
 const ITEMS = ["V10", "V11", "V16", "V17", "V21", "V26", "V27"];
-const PHASE2 = ["V12", "V13", "V15", "V18", "V19", "V20"];
+const PHASE2 = ["V12", "V13", "V15", "V18", "V19", "V20", "V28"];
 
 function fixture(overrides = {}, { items = ITEMS, version = "v5.2" } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "verify-test-"));
@@ -55,12 +55,12 @@ test("TC-S1.G.d resolved 는 막았던 항목이 현재 계획서 버전을 가�
 const phase2 = (overrides = {}) => fixture(overrides, { items: PHASE2, version: "v5.6" });
 const set2 = ["--set", "phase2"];
 
-test("TC-K0.T4.a phase2 정상 파일 여섯은 세 모드 모두 통과한다", () => {
+test("TC-K0.T4.a phase2 정상 파일 일곱은 세 모드 모두 통과한다", () => {
   const dir = phase2();
   for (const mode of ["present", "unblocked", "resolved"]) {
     const r = check(dir, mode, ...set2);
     assert.equal(r.status, 0, `${mode}: ${r.stderr}`);
-    assert.match(r.stdout, /6개 항목 통과/, "묶음이 빈 목록이면 0개 항목으로 늘 초록이다");
+    assert.match(r.stdout, /7개 항목 통과/, "묶음이 빈 목록이면 0개 항목으로 늘 초록이다");
   }
 });
 

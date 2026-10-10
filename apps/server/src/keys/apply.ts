@@ -30,6 +30,7 @@ import { rebalanceMember } from "../limits/member.ts";
 import type { LimitsClient } from "../limits/rebalance.ts";
 import { guard, holds } from "../limits/store.ts";
 import { enqueue, KEY_DELETE_DELAY_MS, RETRY_DELAYS_MS } from "../queue/index.ts";
+import { alertOnce } from "./alerts.ts";
 import { readTarget, targetState, type KeyTarget, type KeyTargetRow } from "./target.ts";
 
 /** 걸고 다시 읽기 횟수 상한 */
@@ -46,7 +47,10 @@ export interface ApplyOptions {
   now?: Date;
   /** 끈 시각을 재는 시계 (key.delete 시각). 기본: now 를 주었으면 그 값, 아니면 실제 시계 */
   clock?: () => number;
-  /** OmniRoute 의 실제 isActive (정합성 점검이 listKeys 로 읽은 값). 모르면 늘 건다 */
+  /**
+   * OmniRoute 의 실제 isActive (정합성 점검이 listKeys 로 읽은 값). 모르면 늘 건다.
+   * 목록은 점검 처음에 읽은 옛 값일 수 있어, 키 sync_state 가 synced 가 아니면(반영 중·실패) 이 값을 믿지 않고 건다 (K3 리뷰 #4)
+   */
   actual?: boolean;
   /** 예산을 방금 걸었다 (1분 분배의 limit 켜기). 켜기 전 즉시 분배를 건너뛴다 */
   budgetReady?: boolean;
@@ -57,8 +61,11 @@ export interface ApplyOptions {
 export interface ApplyResult {
   /** 마지막으로 건 목표. 키 행이 없으면 null */
   target: KeyTarget | null;
-  /** synced: 목표가 OmniRoute 에 걸렸다. pending: 실패했거나 목표가 계속 바뀌어 큐·점검이 다시 건다 */
-  syncState: "synced" | "pending";
+  /**
+   * synced: 목표가 OmniRoute 에 걸렸다. pending: 실패했거나 목표가 계속 바뀌어 큐·점검이 다시 건다.
+   * missing: 켜려는데 OmniRoute 에 그 키가 없다(404). sync_state missing·alert.key_missing, 다시 만들지 않는다
+   */
+  syncState: "synced" | "pending" | "missing";
   /** setKeyActive 를 부른 횟수 */
   calls: number;
 }
@@ -105,6 +112,19 @@ async function markSynced(h: DbHandle, lease: Lease | undefined, cur: KeyTargetR
     userIs(h, cur.userId, eq(h.schema.user.status, cur.userStatus)),
   );
   return (await updatedRows(h, h.db.update(k).set({ syncState: "synced" }).where(guard(h, lease, same)), k.id)) === 1;
+}
+
+/** OmniRoute 에서 404 인가 (키가 없다) */
+export const isMissing = (e: unknown) => e instanceof OmniRouteError && e.status === 404;
+
+/**
+ * OmniRoute 에서 사라진 키 (켜기·예산이 404, K3 리뷰 #6). 매핑에 sync_state missing 을 적고 alert.key_missing 을 하루 한 번 남긴다.
+ * 키를 다시 만들지 않는다 (원문 키가 바뀌어 회원 도구가 깨진다. 관리자가 본다). 다른 키의 반영은 계속한다
+ */
+export async function markMissing(h: DbHandle, lease: Lease | undefined, key: { keyId: string; omnirouteKeyId: string }, now: Date): Promise<void> {
+  const k = h.schema.apiKeys;
+  await h.db.update(k).set({ syncState: "missing" }).where(guard(h, lease, eq(k.id, key.keyId)));
+  await alertOnce(h, lease, "key_missing", key.omnirouteKeyId, { keyId: key.keyId }, now);
 }
 
 async function markPending(h: DbHandle, lease: Lease | undefined, keyId: string): Promise<void> {
@@ -157,6 +177,8 @@ export async function applyKey(h: DbHandle, keyId: string, opts: ApplyOptions): 
     for (let round = 0; round < APPLY_ROUNDS; round++) {
       stopIfLost();
       let cur = await readTarget(h, keyId);
+      // 반영 중·실패한 키는 목록의 옛 값을 믿지 않는다 (예산 단계도 실제 값을 모르는 것으로 본다)
+      if (round === 0 && cur && cur.syncState !== "synced") actual = undefined;
       if (cur && (await normalize(h, opts.lease, cur, now))) cur = await readTarget(h, keyId);
       if (cur && cur.target === "on" && !cur.deletePending && actual !== true && !budgeted && needsBudget(cur)) {
         stopIfLost();
@@ -172,7 +194,13 @@ export async function applyKey(h: DbHandle, keyId: string, opts: ApplyOptions): 
       if (call) {
         stopIfLost();
         calls++;
-        await setActive(opts.client(), cur.omnirouteKeyId, active);
+        try {
+          await setActive(opts.client(), cur.omnirouteKeyId, active);
+        } catch (e) {
+          if (!(active && isMissing(e))) throw e;
+          await markMissing(h, opts.lease, cur, now);
+          return { target: cur.target, syncState: "missing", calls };
+        }
       }
       actual = active;
       if (cur.target === "deleted") await scheduleDelete(h, opts.lease, cur, clock(), call);

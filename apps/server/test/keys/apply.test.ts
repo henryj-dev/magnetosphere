@@ -6,6 +6,7 @@ import { connectNode } from "@magnetosphere/runtime/node";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import { applyKey, KeyConflictError, requestEnable } from "../../src/keys/apply.ts";
 import { CONFIRMED_KEY } from "../../src/limits/daily.ts";
+import { rebalanceAll } from "../../src/limits/rebalance.ts";
 import { writeSetting } from "../../src/limits/store.ts";
 import { omnirouteHandlers } from "../../src/queue/handlers.ts";
 import { enqueue, KEY_DELETE_DELAY_MS, runDue } from "../../src/queue/index.ts";
@@ -155,5 +156,23 @@ describe("TC-K3.T2.i OmniRoute 에서 사라진 키 하나가 회원의 다른 �
     await applyKey(h, keyIds["ork-A"], { client: () => om.client(), now: new Date(T0.getTime() + 60_000) });
     const alerts = (await h.db.select().from(h.schema.auditLog)).filter((a: { action: string }) => a.action === "alert.key_missing");
     expect(alerts.map((a: { target: string }) => a.target)).toEqual(["ork-B"]);
+  });
+});
+
+describe("TC-K3.T2.h 1분 분배의 limit 켜기가 OmniRoute 에서 실패하면 active·pending 으로 남고 큐가 1분 뒤 다시 켠다", () => {
+  it("limit 키(한도 회복) → setBudget 뒤 setKeyActive(true) 503 → state active·sync_state pending·key.apply_state next_run_at − 분배 시각 == 60,000ms", async () => {
+    await writeSetting(h, CONFIRMED_KEY, "2026-04-10", T0);
+    const { keyIds } = await addMember(h, 5, [{ ork: "ork-h", state: "disabled", reason: "limit" }]);
+    const keyId = keyIds["ork-h"];
+    const om = fakeKeys();
+    om.add("ork-h", { isActive: false });
+    om.costs = { "ork-h": 1 };
+    om.fail.setKeyActive = [new OmniRouteError("PATCH", "/keys", 503, null, "unavailable")];
+    const r = await rebalanceAll({ db: h, now: T0, client: () => om.client() });
+    expect(om.seq()).toEqual(["getAnalytics", "setBudget", "setKeyActive(true)"]);
+    expect(r).toMatchObject({ on: 0, failed: 1 });
+    expect(await keyOf(keyId)).toMatchObject({ state: "active", disabledReason: null, syncState: "pending" });
+    const jobs = await jobsOf(keyId, "key.apply_state");
+    expect(jobs.map((j: { nextRunAt: Date }) => j.nextRunAt.getTime() - T0.getTime())).toEqual([60_000]);
   });
 });

@@ -67,7 +67,7 @@ describe("TC-S5.T2.f 응답 형식이 바뀌면 조용히 넘어가지 않고 �
 describe("TC-S5.T2.i 어댑터는 키 범위(scopes)를 보내지 않는다", () => {
   it("모든 함수의 요청 본문에 scopes 가 없고, 키 수정 본문은 isActive 또는 name 하나뿐이다", async () => {
     const { fetch, sent } = fakeFetch({
-      "GET /api/keys": { body: { keys: [{ id: "k1", name: "m_1", isActive: true, scopes: ["self:usage"] }] } },
+      "GET /api/keys": { body: { keys: [{ id: "k1", name: "m_1", isActive: true, scopes: ["self:usage"] }], total: 1 } },
       "POST /api/keys": { status: 201, body: { id: "k1", key: "sk-abc", name: "m_1" } },
       "PATCH *": { body: { isActive: false, name: "m_2" } },
       "DELETE *": { body: { success: true } },

@@ -6,14 +6,14 @@
 //   node scripts/check-verify.mjs resolved  [--set <묶음>] [--dir <dir>] [--plan <file>]
 //                                            was_blocking 이 true 인 항목은 resolved_in 이 계획서 현재 버전과 같다
 //
-// --set 은 항목 묶음이다. phase1(기본값, S1 봉인 커밋 재검이 인자 없이 부른다) · phase2(K0).
+// --set 은 항목 묶음이다. phase1(기본값, S1 봉인 커밋 재검이 인자 없이 부른다) · phase2(K0, V28 은 K3 리뷰에서 더함).
 
 import fs from "node:fs";
 import path from "node:path";
 
 const SETS = {
   phase1: ["V10", "V11", "V16", "V17", "V21", "V26", "V27"],
-  phase2: ["V12", "V13", "V15", "V18", "V19", "V20"],
+  phase2: ["V12", "V13", "V15", "V18", "V19", "V20", "V28"],
 };
 
 function arg(name, fallback) {
