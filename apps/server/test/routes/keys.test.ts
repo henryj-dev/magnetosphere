@@ -25,11 +25,12 @@ const down = (fn: string) => new OmniRouteError(fn, "(시험)", 503, null, "Omni
 const jobs = async (action: string) => (await e.h.db.select().from(e.h.schema.omnirouteJobs)).filter((j: { action: string }) => j.action === action);
 
 describe("TC-K4.T1.a 발급 순서가 계획서 5.2 와 같다", () => {
-  it("createKey → setKeyActive(false) → setBudget → setKeyActive(true), 201 에 원문 1회. 예산이 성공한 뒤에만 켠다 (대조: 예산 실패면 켜기 호출 0)", async () => {
+  it("createKey → setKeyActive(false) → setBudget → setKeyActive(true), 201 에 원문 1회·Cache-Control no-store. 예산이 성공한 뒤에만 켠다 (대조: 예산 실패면 켜기 호출 0)", async () => {
     const u = await addUser(e.h, { limitUsd: 5 });
     const r = await call(e, "POST", "/api/me/keys", { user: u, body: { label: "노트북" } });
     expect(r.status, r.text).toBe(201);
     expect(e.om.writes()).toEqual(ISSUE_ORDER);
+    expect(r.headers.get("cache-control"), "원문이 든 응답은 저장하지 않는다").toBe("no-store");
     const secret = r.json.secret as string;
     expect(secret).toMatch(/^sk-/);
     expect(r.text.split(secret).length - 1, "응답에 원문은 한 번").toBe(1);
@@ -259,7 +260,7 @@ describe("TC-K4.T7.b 삭제는 바로 끄고, 행을 남기고, DELETE 는 2분 
 });
 
 describe("TC-K4.T7.c 재발급은 새 키 + 옛 키 삭제이고 한도를 초기화하지 않는다 (V19 의존)", () => {
-  it("어댑터 호출 == [createKey, setKeyActive(false), setBudget, setKeyActive(true), setKeyActive(false)], regenerate 0, 새 원문, 옛 행 deleted, 다음 분배 apiKeyIds 에 옛·새 id", async () => {
+  it("어댑터 호출 == [createKey, setKeyActive(false), setBudget, setKeyActive(true), setKeyActive(false)], regenerate 0, 새 원문(no-store), 옛 행 deleted, 다음 분배 apiKeyIds 에 옛·새 id", async () => {
     const u = await addUser(e.h, { limitUsd: 5 });
     const old = await seedKey(e, u, { budgetUsd: 5, budgetMonth: monthKey(new Date()) });
     const r = await call(e, "POST", `/api/me/keys/${old.id}/regenerate`, { user: u });
@@ -269,6 +270,7 @@ describe("TC-K4.T7.c 재발급은 새 키 + 옛 키 삭제이고 한도를 초�
     expect(e.om.of("setKeyActive").at(-1)?.id).toBe(old.ork);
     const fresh = [...e.om.keys.values()].find((k) => k.id !== old.ork)!;
     expect(r.json.secret).toBe(fresh.secret);
+    expect(r.headers.get("cache-control"), "원문이 든 응답은 저장하지 않는다").toBe("no-store");
     expect(r.json.key.id).not.toBe(old.id);
     const rows = await keysOf(e.h, u);
     expect(rows.find((x: { id: string }) => x.id === old.id).state).toBe("deleted");
