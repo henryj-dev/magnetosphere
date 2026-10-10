@@ -492,3 +492,18 @@ test("TC-K0.T1.d expectPassed 없는 1단계 검사는 통과 ≥ 1 그대로다
   assert.equal(r.code, 0, r.out);
   assert.match(r.out, /PASS\s+t .*통과 3/);
 });
+
+test("TC-K0.T1.e grep 검사의 ^·$ 는 줄의 시작·끝이다", () => {
+  // 2단계 GATE 의 grep 패턴(^- v5\.6: …, ^\s+run: node scripts/gate\.mjs K0\b)은 줄 단위다. 파일 시작에만 걸리면 늘 0 이다
+  const dir = repo(
+    { P: { needs: [], checks: [
+      { id: "line", how: "grep", pattern: "^\\s+run: node scripts/gate\\.mjs K0\\b", in: ["ci.yml"], op: "==", limit: 1 },
+      { id: "end", how: "grep", pattern: "K0 --explain$", in: ["ci.yml"], op: "==", limit: 1 },
+    ] } },
+    { "ci.yml": "jobs:\n  p2-k0:\n    steps:\n      - run: echo\n        run: node scripts/gate.mjs K0 --explain\n      - run: node scripts/gate.mjs K01\n" },
+  );
+  const r = gate(dir, "P");
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /PASS\s+line .*\(1 \/ == 1\)/);
+  assert.match(r.out, /PASS\s+end .*\(1 \/ == 1\)/);
+});
