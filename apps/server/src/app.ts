@@ -3,6 +3,7 @@
 //   /api/auth/*    packages/auth 의 감싼 handler (clientIp 를 런타임 어댑터에서 받는다, S3 보안 리뷰 M2)
 //                  관리자가 없는 동안(설치 전)은 가입을 403 으로 막는다 (TC-S4.T4.e). 기본 가입 정책이 invite_only 다 (계획서 4.2)
 //   /api/setup     최초 설치 (setup/). /api/setup/omniroute 는 OmniRoute 토큰 상태·붙여 넣기 (관리자 세션)
+//   /api/me/keys   회원 키 API (routes/keys.ts)
 //   /api/*         그 밖은 JSON 404. 모르는 API 경로가 index.html 200 이 되면 클라이언트가 오류를 성공으로 오인한다
 //   나머지         SPA 정적 파일 (apps/web 빌드). 없는 경로는 index.html (TC-S4.T3.a)
 // 모든 응답(SPA·API)에 보안 헤더를 단다 (TC-S4.T3.f). 스크립트·스타일 출처는 SPA 빌드가 <meta> CSP 로 건다
@@ -14,6 +15,9 @@ import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
+import type { ClientFor } from "./limits/daily.ts";
+import type { KeysClient } from "./routes/issue.ts";
+import { keyRoutes } from "./routes/keys.ts";
 import { adminExists } from "./setup/index.ts";
 import type { OmniRouteConfig } from "./setup/omniroute.ts";
 import { setupRoutes } from "./setup/routes.ts";
@@ -32,6 +36,10 @@ export interface Services {
   setupToken?: string | null;
   /** 요청의 클라이언트 IP (런타임 어댑터). 설치 시도 횟수 제한이 쓴다. 못 정하면 null */
   clientIp?: (req: Request) => string | null | Promise<string | null>;
+  /** BETTER_AUTH_URL 의 출처. 회원·관리자 변경 API 의 CSRF 검사가 쓴다. 없으면 그 변경 요청을 모두 막는다 */
+  appOrigin?: string;
+  /** OmniRoute 어댑터 (주소 + 설치 때 저장한 관리 토큰). 연결이 없으면 null */
+  keysClient?: () => Promise<ClientFor<KeysClient> | null>;
 }
 
 export interface AppDeps {
@@ -100,6 +108,7 @@ export function createApp(deps: AppDeps) {
   });
   app.all("/api/auth/*", async (c) => (await deps.services()).auth.handler(c.req.raw));
   app.route("/api/setup", setupRoutes(deps.services, { setupTokenFromSecret: deps.setupTokenFromSecret, log: deps.log }));
+  app.route("/api/me/keys", keyRoutes(deps.services));
   app.all("/api/*", (c) => c.json({ error: "not_found" }, 404));
   app.get("*", deps.assets);
   app.onError((e, c) => {
