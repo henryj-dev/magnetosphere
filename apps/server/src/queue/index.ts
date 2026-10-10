@@ -7,6 +7,12 @@
 //   - 4번째 재시도(다섯 번째 시도)도 실패하면 failed_at = 지금, 대상 키 sync_state = failed, audit_log alert.job_failed 1행.
 //     next_run_at 은 그대로 둔다. failed_at 이 있는 작업은 runDue 가 다시 집지 않는다 (정합성 점검이 키를 다시 맞춘다, 5.7).
 //   - failed_at 에서 30분이 지나면 "오래 실패"다 (isLongFailed, 관리 화면은 7단계).
+// 키별 순서 (K1 리뷰 #1, TC-K1.T3.f)
+//   - key.apply_state 는 값을 싣지 않는다 (payload { keyId }). 실행할 때 api_keys·회원 상태로 목표를 다시 계산해 건다 (target.ts).
+//     그래서 오래된 재시도가 더 새 반영을 덮지 않는다.
+//   - 같은 키의 미완료 key.apply_state 가 있으면 새로 넣지 않고 그 id 를 돌려준다 (합치기). 동시에 넣어 둘이 생겨도
+//     둘 다 실행 시점의 목표를 걸므로 결과는 같다.
+//   - 같은 키에 미완료 key.delete 가 있으면 key.apply_state 는 켜지 않는다 (delete 가 이긴다).
 // 차지 (TC-K1.T3.c)
 //   - 실행기 둘이 동시에 돌아도 작업마다 핸들러는 한 번이다. 작업 하나를 "attempts 가 내가 읽은 값일 때만" 바꾸는 UPDATE 로
 //     차지한다 (attempts + 1, next_run_at = 지금 + CLAIM_MS). 0행이면 다른 실행기가 먼저 차지한 것이다.
@@ -48,7 +54,7 @@ export interface QueuedJob {
   attempts: number;
 }
 
-export type Handler = (payload: JobPayload, ctx: { job: QueuedJob; signal?: AbortSignal }) => Promise<void>;
+export type Handler = (payload: JobPayload, ctx: { job: QueuedJob; db: DbHandle; signal?: AbortSignal }) => Promise<void>;
 export type Handlers = Record<JobAction, Handler>;
 
 export interface EnqueueOptions {
@@ -61,8 +67,21 @@ export interface EnqueueOptions {
 export async function enqueue(h: DbHandle, action: JobAction, payload: JobPayload, opts: EnqueueOptions = {}): Promise<string> {
   if (!ACTIONS.includes(action)) throw new TypeError(`모르는 작업: ${action}`);
   if (action === "key.delete" && !opts.runAt) throw new TypeError("key.delete 는 runAt(끈 시각 + KEY_DELETE_DELAY_MS)이 필요하다 (V18)");
+  const keyId = typeof payload.keyId === "string" && payload.keyId !== "" ? payload.keyId : null;
+  const t = h.schema.omnirouteJobs;
+  if (action === "key.apply_state") {
+    if (!keyId) throw new TypeError("key.apply_state 는 payload.keyId(api_keys.id)가 필요하다");
+    // 값은 싣지 않는다. 넣는 쪽이 준 active 등은 버린다 (실행할 때 다시 계산한다)
+    payload = { keyId };
+    const [pending] = await h.db
+      .select({ id: t.id })
+      .from(t)
+      .where(and(eq(t.keyId, keyId), eq(t.action, action), isNull(t.doneAt), isNull(t.failedAt)))
+      .limit(1);
+    if (pending) return pending.id;
+  }
   const id = crypto.randomUUID();
-  await h.db.insert(h.schema.omnirouteJobs).values({ id, action, payload: JSON.stringify(payload), attempts: 0, nextRunAt: opts.runAt ?? opts.now ?? new Date() });
+  await h.db.insert(t).values({ id, action, payload: JSON.stringify(payload), keyId, attempts: 0, nextRunAt: opts.runAt ?? opts.now ?? new Date() });
   return id;
 }
 
@@ -128,7 +147,7 @@ export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: R
     try {
       const handler = handlers[job.action];
       if (!handler) throw new TypeError(`모르는 작업: ${job.action}`);
-      await handler(job.payload, { job, signal: opts.signal });
+      await handler(job.payload, { job, db: h, signal: opts.signal });
       await h.db.update(t).set({ doneAt: now, lastError: null }).where(mine);
       result.done++;
     } catch (e) {

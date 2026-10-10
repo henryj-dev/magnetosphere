@@ -91,7 +91,7 @@ describe("TC-K1.T3.b 재시도를 다 써도 실패하면 대상 키가 failed �
 
 describe("TC-K1.T3.d 성공한 작업은 done_at 이 찍히고 다시 돌지 않는다", () => {
   it("성공 → done_at 설정, attempts 1, 다음 runDue 에서 호출 0", async () => {
-    const id = await enqueue(h, "key.apply_state", { omnirouteKeyId: "k", active: true }, { now: T0 });
+    const id = await enqueue(h, "key.rollback", { omnirouteKeyId: "k" }, { now: T0 });
     // 아직 차례가 아닌 작업은 집지 않는다 (대조)
     const later = await enqueue(h, "budget.set", { omnirouteKeyId: "k", monthlyUsd: 2 }, { runAt: new Date(T0.getTime() + 60_000) });
     const calls: string[] = [];
