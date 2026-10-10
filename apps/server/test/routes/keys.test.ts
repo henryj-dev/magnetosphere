@@ -2,6 +2,7 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OmniRouteError } from "@magnetosphere/omniroute";
+import { markMissing } from "../../src/keys/apply.ts";
 import { rebalanceMember } from "../../src/limits/member.ts";
 import { monthKey } from "../../src/limits/month.ts";
 import { KEY_DELETE_DELAY_MS } from "../../src/queue/index.ts";
@@ -347,5 +348,59 @@ describe("TC-K4.T7.f 재발급도 발급 조건을 본다", () => {
     expect(e.om.calls).toEqual([]);
     const [row] = await keysOf(e.h, z);
     expect(row.state, "옛 키는 그대로").toBe("disabled");
+  });
+});
+
+describe("TC-K4.T7.g 발급 중인 자리 행은 회원이 건드리지 못한다 (K4 보안 리뷰 M1)", () => {
+  it("발급 도중 GET → state issuing(개수에는 듦), enable·disable·PATCH·regenerate·DELETE → 409 issuing·pending- id 호출 0·alert.key_missing 0, 발급은 201. 예산 단계 전 행이 바뀌면 되돌린다", async () => {
+    const u = await addUser(e.h, { limitUsd: 5, maxKeys: 2 });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let paused!: () => void;
+    const reached = new Promise<void>((r) => (paused = r));
+    e.om.before = async (c) => {
+      if (c.fn === "createKey") {
+        paused();
+        await gate;
+      }
+    };
+    const pending = call(e, "POST", "/api/me/keys", { user: u, body: {} });
+    await reached;
+    const list = await call(e, "GET", "/api/me/keys", { user: u });
+    expect(list.json.keys.map((k: { state: string }) => k.state)).toEqual(["issuing"]);
+    expect(list.json.remainingSlots).toBe(1);
+    const id = list.json.keys[0].id as string;
+    const tries: [string, string, unknown?][] = [
+      ["POST", `/api/me/keys/${id}/enable`],
+      ["POST", `/api/me/keys/${id}/disable`],
+      ["PATCH", `/api/me/keys/${id}`, { label: "x" }],
+      ["POST", `/api/me/keys/${id}/regenerate`],
+      ["DELETE", `/api/me/keys/${id}`],
+    ];
+    for (const [method, path, body] of tries) {
+      const r = await call(e, method, path, { user: u, body });
+      expect([method, path, r.status, r.json?.error]).toEqual([method, path, 409, "issuing"]);
+    }
+    release();
+    const done = await pending;
+    expect(done.status, done.text).toBe(201);
+    expect(e.om.calls.filter((c) => c.id?.startsWith("pending-"))).toEqual([]);
+    const alerts = (await e.h.db.select().from(e.h.schema.auditLog)).filter((a: { action: string }) => a.action === "alert.key_missing");
+    expect(alerts).toEqual([]);
+    expect(done.json.key).toMatchObject({ state: "active", syncState: "synced" });
+    // K3 쪽 방어: 자리 행 id 로는 missing·alert.key_missing 을 쓰지 않는다
+    await markMissing(e.h, undefined, { keyId: id, omnirouteKeyId: `pending-${id}` }, new Date());
+    expect((await e.h.db.select().from(e.h.schema.auditLog)).filter((a: { action: string }) => a.action === "alert.key_missing")).toEqual([]);
+
+    // 예산 단계 전에 자리 행이 바뀌면(다른 쓰기) 예산·켜기를 하지 않고 되돌린다 (모순 상태 active·limit 을 만들지 않는다)
+    const u2 = await addUser(e.h, { limitUsd: 5 });
+    e.om.calls.length = 0;
+    e.om.before = async (c) => {
+      if (c.fn === "setKeyActive" && c.value === false) await e.h.db.update(e.h.schema.apiKeys).set({ state: "active", disabledReason: null }).where(eq(e.h.schema.apiKeys.userId, u2));
+    };
+    const r2 = await call(e, "POST", "/api/me/keys", { user: u2, body: {} });
+    expect(r2.status).toBe(409);
+    expect(e.om.writes()).toEqual(["createKey", "setKeyActive(false)", "deleteKey"]);
+    expect(await keysOf(e.h, u2)).toEqual([]);
   });
 });

@@ -5,7 +5,7 @@
 //   - 클라이언트 IP: 시험 헤더 x-test-ip (런타임 어댑터 대신).
 import { randomBytes, randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import type { Analytics } from "@magnetosphere/omniroute";
+import { OmniRouteError, type Analytics } from "@magnetosphere/omniroute";
 import { seedAppSettings } from "@magnetosphere/db/src/seed.ts";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import { connectNode } from "@magnetosphere/runtime/node";
@@ -40,6 +40,8 @@ export interface FakeOmni {
   /** 읽기(getAnalytics)를 뺀 순서 */
   writes: () => string[];
   of: (fn: OmniCall["fn"]) => OmniCall[];
+  /** 호출을 기록하기 전에 부른다 (기다리게 하거나 DB 를 바꿔 끼어들기를 흉내 낸다) */
+  before?: (call: OmniCall) => void | Promise<void>;
 }
 
 export function fakeOmni(): FakeOmni {
@@ -54,14 +56,21 @@ export function fakeOmni(): FakeOmni {
     writes: () => f.seq().filter((x) => x !== "getAnalytics"),
     of: (fn) => f.calls.filter((c) => c.fn === fn),
   };
-  const record = (call: OmniCall) => {
+  const record = async (call: OmniCall) => {
+    await f.before?.(call);
     const e = f.fail[call.fn]?.shift();
     f.calls.push(call);
     if (e !== undefined) throw e;
   };
+  // OmniRoute 처럼 없는 키는 404 다
+  const known = (id: string) => {
+    const k = f.keys.get(id);
+    if (!k) throw new OmniRouteError("PATCH", "(시험)", 404, null, `키 ${id} 없음`);
+    return k;
+  };
   const client: KeysClient = {
     async createKey(name: string) {
-      record({ fn: "createKey", value: name });
+      await record({ fn: "createKey", value: name });
       const id = randomUUID();
       const secret = `sk-${randomBytes(24).toString("hex")}`;
       f.keys.set(id, { id, name, isActive: true, secret, budget: null });
@@ -69,27 +78,27 @@ export function fakeOmni(): FakeOmni {
       return { id, key: secret, name };
     },
     async getAnalytics(q): Promise<Analytics> {
-      record({ fn: "getAnalytics", apiKeyIds: q.apiKeyIds });
+      await record({ fn: "getAnalytics", apiKeyIds: q.apiKeyIds });
       const byApiKey = Object.entries(f.costs)
         .filter(([id]) => !q.apiKeyIds || q.apiKeyIds.includes(id))
         .map(([apiKeyId, cost]) => ({ apiKeyId, requests: 1, cost }));
       return { totalCost: byApiKey.reduce((s, x) => s + x.cost, 0), totalRequests: byApiKey.length, promptTokens: 0, completionTokens: 0, byApiKey };
     },
     async setBudget(id, b) {
-      record({ fn: "setBudget", id, value: b.monthlyUsd });
-      const k = f.keys.get(id);
-      if (k) k.budget = b.monthlyUsd;
+      await record({ fn: "setBudget", id, value: b.monthlyUsd });
+      known(id).budget = b.monthlyUsd;
     },
     async clearBudget(id) {
-      record({ fn: "clearBudget", id });
+      await record({ fn: "clearBudget", id });
+      known(id).budget = null;
     },
     async setKeyActive(id, active) {
-      record({ fn: "setKeyActive", id, value: active });
-      const k = f.keys.get(id);
-      if (k) k.isActive = active;
+      await record({ fn: "setKeyActive", id, value: active });
+      known(id).isActive = active;
     },
     async deleteKey(id) {
-      record({ fn: "deleteKey", id });
+      await record({ fn: "deleteKey", id });
+      known(id);
       f.keys.delete(id);
     },
   };
@@ -201,7 +210,7 @@ export async function call(e: RouteEnv, method: string, path: string, o: CallOpt
   } catch {
     // JSON 이 아닌 응답
   }
-  return { status: res.status, json, text };
+  return { status: res.status, json, text, headers: res.headers };
 }
 
 /** api_keys 행 (OmniRoute id 로) */
