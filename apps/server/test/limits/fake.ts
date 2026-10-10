@@ -54,7 +54,7 @@ export interface OmniCall {
 /** onChange: setBudget·setKeyActive·clearBudget 를 기록하기 전에 부른다. 던지면 그 호출이 실패한다 (임대 상실·OmniRoute 오류 흉내) */
 export function fakeOmni(
   analytics: (q: { apiKeyIds?: string[]; start: string; end: string; timeoutMs?: number }) => { [id: string]: number | undefined } | Error,
-  opts: { onChange?: (call: OmniCall) => void } = {},
+  hooks: { onChange?: (call: OmniCall) => void } = {},
 ) {
   const calls: OmniCall[] = [];
   const client = (opts?: { timeoutMs?: number }): LimitsClient => ({
@@ -72,17 +72,17 @@ export function fakeOmni(
     },
     async setBudget(id, b) {
       const call: OmniCall = { fn: "setBudget", id, value: b.monthlyUsd };
-      opts.onChange?.(call);
+      hooks.onChange?.(call);
       calls.push(call);
     },
     async clearBudget(id) {
       const call: OmniCall = { fn: "clearBudget", id };
-      opts.onChange?.(call);
+      hooks.onChange?.(call);
       calls.push(call);
     },
     async setKeyActive(id, active) {
       const call: OmniCall = { fn: "setKeyActive", id, value: active };
-      opts.onChange?.(call);
+      hooks.onChange?.(call);
       calls.push(call);
     },
   });
