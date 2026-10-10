@@ -7,8 +7,11 @@
 계획서가 정하지 않았거나 서로 어긋나 3단계 TC 의 단언을 쓸 수 없는 빈칸이다. 아래 본문은 모두 **(추천)** 선택지를 고른 것으로 쓰고, 질문에 기댄 곳에 `(Q<n> 의존)`을 붙였다. 고른 결과는 M0.T6 이 계획서 v5.8 로 넣는다. 고를 때마다 그 질문의 마지막 줄 `- 결정: 미정`을 `- 결정: <선택지> (v5.8)`로 바꾼다. `G-M0.11`이 줄 전체가 `- 결정: 미정`인 줄 0개를 요구한다.
 
 코드에서 확인한 사실 (2026-10-11, main `e307b4e`, better-auth 1.7.7 소스 포함)
-- 공개 가입이 지금 열려 있다. `apps/server/src/app.ts`는 설치 전에만 `/sign-up/*`를 403 `setup_required`로 막고, 설치 뒤에는 `signup_mode`(시드 `invite_only`)를 아무도 읽지 않는다 (Q1, 고침 PR 진행 중).
-- **Better Auth 가입은 거부를 숨긴다.** `requireEmailVerification: true`(지금 설정)이면 `sign-up.mjs:155`의 `shouldReturnGenericDuplicateResponse`가 참이다. 그러면 이미 있는 이메일은 `:193-202`에서 훅에 닿기 전에 가짜 user 로 200 을 받는다. `user.create.before` 훅이 던진 403 도 `:227`에서 같은 200 으로 바뀐다. 그래서 훅만으로는 "거부 사유 응답"을 낼 수 없다. 사유를 이메일마다 다르게 내면 계정 존재가 드러난다.
+- 공개 가입은 보안 고침 PR #13(`7e1b5bf`, main)이 닫았다. 판정은 `packages/db/src/signup.ts` 한 곳이고, 공개 가입을 받는 값 `PUBLIC_SIGNUP_MODES`가 비어 있어 설치 뒤 `/sign-up/*`는 정책과 관계없이 403 `signup_closed`다.
+  - 앞 판정 둘: 서버 `apps/server/src/app.ts`(`/api/auth/*` 미들웨어)와 Better Auth `hooks.before`(`packages/auth/src/index.ts` `signUpGate`). 둘 다 이메일 찾기 전이라 응답이 이메일 존재와 무관하다 (TC-SEC.1.a·b).
+  - 뒷받침: `databaseHooks.user.create.before`(`userCreateGuard`)가 관리자가 있으면 모든 회원 생성(이메일 가입, `auth.api.signUpEmail`, OAuth·SSO JIT)을 400 `SIGNUP_CLOSED`로 거부한다. 403 은 가짜 200 으로 숨겨지므로 400 으로 던진다. 같은 훅이 비어 있는 `monthly_limit_usd`에 `default_limit_usd`(행이 없으면 시드 5)를 넣는다 (TC-SEC.1.c).
+  - 그래서 3단계는 이 판정을 **새로 만들지 않고 넓힌다**. M2 가 `PUBLIC_SIGNUP_MODES`·도메인·메일·상한을, 생성 훅에 초대 문맥 통과를 더한다.
+- **Better Auth 가입은 거부를 숨긴다** (#13 이 이것을 피해 앞 판정을 두었다). `requireEmailVerification: true`(지금 설정)이면 `sign-up.mjs:155`의 `shouldReturnGenericDuplicateResponse`가 참이다. 그러면 이미 있는 이메일은 `:193-202`에서 훅에 닿기 전에 가짜 user 로 200 을 받는다. `user.create.before` 훅이 던진 403 도 `:227`에서 같은 200 으로 바뀐다. 그래서 훅만으로는 "거부 사유 응답"을 낼 수 없다. 사유를 이메일마다 다르게 내면 계정 존재가 드러난다.
 - 가입은 `emailVerified: false`를 넣지만(`:215-221`), `with-hooks.mjs`는 훅이 돌려준 `data`를 그 뒤에 펼친다. 그래서 훅이 `emailVerified: true`를 넣을 수 있다. 인증 메일은 `emailVerified`와 관계없이 보낸다 (`:241`).
 - 비밀번호 재설정(`password.mjs:161`)은 credential 계정이 없으면 새로 만든다. 재설정 뒤 세션 무효화는 `revokeSessionsOnPasswordReset`이 켜졌을 때만이다 (`:169`). 지금 꺼져 있다.
 - `invites` 테이블은 0000 마이그레이션에 있지만 운영 코드가 쓰지 않는다. 회원 `status`를 쓰는 운영 코드도 없다. `default_limit_usd`(시드 5)를 읽는 코드가 없다. `user.status` 기본값은 `active`다.
@@ -17,9 +20,9 @@
 - 로그인·가입·초대 수락 화면이 없다 (`apps/web`에는 설치 화면뿐).
 
 ### Q1 — 지금 열려 있는 공개 가입을 언제 막나
-- 조율 세션이 정했다. 3단계 전에 따로 고침 PR(`fix/signup-closed`, PR 번호가 나오면 여기 적는다)로 막는다. 설치 뒤 공개 `/sign-up/*`는 정책과 관계없이 일괄 403 이다.
-- 영향: M2 는 이 일괄 차단 위에 정책을 얹는다. `open`·`domain_allowlist`에서만 다시 연다. M2.T1 의 재현 빨강은 "`open`에서 공개 가입이 회원 행을 만든다"를 **생긴 행 수**로 단언한다 (고침 PR 뒤에는 0행이라 빨강).
-- 결정: 결정됨 — 3단계 전 고침 PR (`fix/signup-closed`)
+- 조율 세션이 정했고 이미 main 에 들어갔다: PR #13 (`7e1b5bf`). 설치 뒤 공개 `/sign-up/*`는 정책과 관계없이 일괄 403 이다.
+- 영향: M2 는 #13 의 판정 위에 정책을 얹는다. `PUBLIC_SIGNUP_MODES`에 `open`·`domain_allowlist`를 넣고 도메인·메일·상한 판정을 더한다. 앞 판정 두 자리와 생성 훅 자리는 그대로 쓴다. M2.T1 의 재현 빨강은 "`open` + 메일 있음에서 공개 가입이 회원 행을 만든다"를 **생긴 행 수**로 단언한다. #13 위에서는 `PUBLIC_SIGNUP_MODES`가 비어 있어 `app.ts`가 403 으로 막으므로 0행, 빨강이다.
+- 결정: 결정됨 — 3단계 전 고침 PR #13 (`7e1b5bf`)
 
 ### Q2 — 3단계에 화면을 넣나
 - (가) **API 만 (추천)**. 초대 링크 모양(`<공개 주소>/invite#<토큰>`)만 정해 두고, 수락은 API 로 한다. 로그인·가입·초대 수락 화면은 회원 화면 묶음으로 4단계 앞머리에 넣는다.
@@ -139,6 +142,10 @@ UTC 날짜로 센다. 초대 수락은 세지 않는다. 넘으면 그날 남은
 - (나) 초대에 한도·최대 키를 싣는다 (`invites.monthly_limit_usd`·`max_keys`).
 - (다) `monthly_limit_usd` NULL 의 뜻을 "기본값"으로 바꾸고 무제한은 따로 표시한다. 2단계 분배·발급 코드와 시드가 바뀌는 큰 변경이다.
 - 영향: TC-M2.T2.c, TC-M3.T2.d. 이미 있는 회원(3단계 전에 가입해 NULL)은 그대로 무제한이다. 운영 중인 설치가 없다고 보고 옮기지 않는다.
+- 결정됨(부분): PR #13 (`7e1b5bf`)이 (가)의 "가입 때 복사"를 구현했다 (`userCreateGuard` → `defaultMonthlyLimit`). 초대 수락도 같은 훅을 지나므로 따로 할 일이 없다.
+- 남은 것은 `default_limit_usd` 값이 null 일 때다. #13 은 null·행 없음·잘못된 값을 모두 시드값 5 로 본다 ("null 은 3단계 설정 API 가 생길 때 Q16 으로 정한다").
+  - (가) **설정 API(M1.T1·M2.T5)가 null 을 받지 않는다. 기본 한도는 늘 0 이상 수이고, 무제한은 회원마다 관리자가 `PATCH /api/admin/users/:id`로만 준다. #13 의 "null → 5" 대체는 행이 없을 때의 안전장치로 남는다 (추천)**.
+  - (나) null 을 "새 회원 무제한"으로 받는다. `defaultMonthlyLimit`이 null 을 돌려주게 바꾸고, 설정 화면에 경고를 띄운다.
 - 결정: 미정
 
 ### Q17 — 감사 기록 범위와 보존
@@ -258,13 +265,13 @@ IdP 는 5단계에 생긴다. 지금 `sso_only`를 고르면 로컬 가입이 �
 ## 선행 관계
 
 ```
-fix/signup-closed (Q1, 3단계 밖)
+PR #13 7e1b5bf (Q1, 3단계 밖, main 에 있음)
 K6 ─▶ M0 ─▶ M1 ─▶ M2 ─▶ M3 ─▶ M4 ─▶ M5 ─▶ M6
 ```
 - 전부 직렬이다. 동시 진행 상한 1.
-- M0 은 `fix/signup-closed`가 main 에 들어간 뒤 시작한다 (M2 의 재현 빨강이 그 위에서 정해진다).
+- #13 이 main 에 있으므로 M0 은 바로 시작할 수 있다. M2 의 재현 빨강은 #13 위에서 정해진다.
 - M1 이 M0 을 기다리는 이유: 질문 Q1~Q20 의 결정이 스키마(0003)·상태 전이 표·설정 값 검사를 정한다. V29·V31 은 가입·로그인을 막는 자리(Better Auth 훅)를 정한다.
-- M3(초대)이 M2(가입 정책)를 기다리는 이유: 초대 수락은 M2 가 만든 정책 판정(`decideSignup`의 초대 줄), 초대 문맥 통로(`signup/context.ts`), 가입 응답 최소 시간(`signup/timing.ts`)을 부른다. 이 파일들은 M2 `outputs`(`apps/server/src/signup/**`)라 M2 가 잠긴 동안에는 만들 수 없다.
+- M3(초대)이 M2(가입 정책)를 기다리는 이유: 초대 수락은 M2 가 넓힌 정책 판정(`packages/db/src/signup.ts` `decideSignup`의 초대 줄), 초대 문맥 통로(`packages/auth/src/invite-context.ts`), 가입 응답 최소 시간(`apps/server/src/signup/timing.ts`)을 부른다. 마지막 것은 M2 `outputs`(`apps/server/src/signup/**`)라 M2 가 잠긴 동안에는 만들 수 없다. 앞의 둘은 기존 파일·패키지라 `outputs` 밖이고 순서는 M2 봉인(R1)이 지킨다.
 - M4 가 M3 을 기다리는 이유: 승인은 M2 가 만든 `pending` 회원을, E2E 회원은 M3 초대로 만든다. 정지·삭제의 로그인 차단은 M2 의 Better Auth 훅 자리를 같이 쓴다.
 
 ## 3단계 범위 판단
@@ -276,7 +283,7 @@ K6 ─▶ M0 ─▶ M1 ─▶ M2 ─▶ M3 ─▶ M4 ─▶ M5 ─▶ M6
 | 승인·정지·탈퇴 API, 4.5 세션 무효화(역할·정지·탈퇴·비밀번호 변경·재설정) | 함 (M4) | 9장 3단계 "승인, 정지, 세션 무효화". 2단계가 3단계로 넘김 |
 | 설치 뒤 메일 설정 API | 함 (M2, Q20 의존) | `open`·`domain_allowlist`를 고를 길 |
 | 4.5 IdP 삭제·비활성화 때 세션 무효화 | 옮김 → 5단계 | IdP 가 5단계에 생긴다. 세션 무효화 함수(M4.T3)는 그때 그대로 부른다 |
-| 4.5 역할 매핑·`sso_only` JIT | 옮김 → 5단계 | `sso_only` 판정의 로컬 가입 거부만 3단계 (Q18) |
+| 4.5 역할 매핑·`sso_only` JIT | 옮김 → 5단계 | `sso_only` 판정의 로컬 가입 거부만 3단계 (Q18). 3단계 동안 SSO JIT 는 #13 생성 훅이 막는다 — 5단계가 `decideSignup`에 IdP 줄을 더해 연다 |
 | 4.4 피해자 이메일 선점 후 SSO 연결 (7장 회귀) | 옮김 → 5단계 | 계정 연결은 5단계. Q5 (가)가 남기는 연결 위험은 5단계에 넘긴다 |
 | 회원 관리·설정 화면 (6장) | 옮김 → 7단계 | 9장 7단계 "관리 화면". 3단계는 API 까지 |
 | 로그인·가입·초대 수락 화면 (6장) | 옮김 → 4단계 앞머리 (Q2 의존) | 9장 어느 단계에도 없다 |
@@ -292,6 +299,7 @@ K6 ─▶ M0 ─▶ M1 ─▶ M2 ─▶ M3 ─▶ M4 ─▶ M5 ─▶ M6
 | 2단계가 넘긴 정지·탈퇴 API | 함 | M4.T1·T2 |
 | E2E 회원을 DB 에 직접 넣음 (`tests/e2e/keys/env.mjs` `addMember`) | 그대로 두고 3단계 E2E 는 초대 경로로 만든다 | M5. 2단계 키 시나리오는 봉인한 시험이라 고치지 않는다. M6.T2 가 운영 코드의 user 직접 쓰기 자리를 고정한다 |
 | amd64·arm64 빌드 차이 — "3단계(정지)가 거부 응답을 회원에게 보여 주기 전에 다시 본다" (phase2 「막혔을 때」) | 함 (확인만) | M4.T5. 정지는 키를 끄기(403)로 막고 응답 본문을 회원 앱이 읽지 않는다. 두 아키텍처에서 정지 직후 첫 요청이 거부되는지만 계약 시험으로 본다 |
+| 보안 고침 PR #13 (`7e1b5bf`): 설치 뒤 공개 가입 일괄 차단, 판정 한 곳 `packages/db/src/signup.ts`, 생성 훅의 기본 한도 복사 | 넓힘 | M2.T1~T3. 리뷰의 낮음 셋(첫 관리자 무제한·SSO JIT 차단·select 두 번)은 M2 「설계」 메모와 M6.T3 |
 | `app_settings` 읽기·쓰기 도우미가 두 벌 (`setup/index.ts`의 지우고 넣기, `limits/store.ts`의 upsert) | 함 | M1.T1. 3단계 설정은 한 벌만 쓴다. 설치 쪽 지우고 넣기(원자적이지 않음)는 바꾼다 |
 | 감사 기록 쓰기가 자리마다 따로 (`admin-limits.ts`, `limits/*`, `keys/alerts.ts`, `queue/index.ts`) | 일부 함 | M1.T3 이 쓰기 함수 하나를 두고 3단계 코드가 쓴다. 2단계 자리는 봉인한 시험을 건드리므로 옮기지 않는다 |
 
@@ -299,7 +307,7 @@ K6 ─▶ M0 ─▶ M1 ─▶ M2 ─▶ M3 ─▶ M4 ─▶ M5 ─▶ M6
 
 # M0 — 확인 항목 넷과 계획서 v5.8 🔓 (K6 필요)
 
-**브랜치** `p3/m0`. `fix/signup-closed`(Q1)가 main 에 들어간 뒤 시작한다.
+**브랜치** `p3/m0`. 보안 고침 #13(Q1)이 main 에 있다.
 **outputs** `docs/verify/V29.json`~`V32.json`, `packages/auth/test/verify-p3/**`, `apps/server/test/verify-p3/**` (D1 확인은 wrangler dev 시험 Worker 로 해야 해서 `apps/server` 쪽에 둔다). `scripts/check-verify.mjs`(기존 파일)는 `outputs`에 없다.
 
 ### ☐ M0.T1 — 확인 결과 검사기에 3단계 묶음
@@ -431,7 +439,7 @@ TC-M0.T5.a  회원 변경·생성 경로의 기본 상태가 V32 와 같다 (V32
 선행 M0.T2 ~ M0.T5 · 산출 `docs/design/omniroute-member-layer.md`, 이 문서 · 되돌리기 커밋 1개
 
 【작업】
-1. `(사용자/메인 세션)` 맨 위 질문 Q2~Q10·Q12~Q20 을 고른다 (Q1·Q11 은 결정됨). Q1 의 고침 PR 번호를 적는다.
+1. `(사용자/메인 세션)` 맨 위 질문 Q2~Q10·Q12~Q20 을 고른다 (Q1·Q11 은 결정됨, Q16 은 null 기본값만).
 2. 고른 결과와 V29~V32 결과를 계획서에 반영한다 (4.2·4.4·4.5·4.6·5.9·6장·7장·9장). 상태 줄을 `v5.8`로, 변경 이력 맨 위에 `- v5.8: …` 한 줄(3단계 Q1~Q20 을 모두 언급). 함께 고칠 낡은 문장: 5.9 "사용량 데이터는 OmniRoute에 있으므로 우리 DB에 두지 않는다" (v5.7 의 `usage_daily`와 어긋남). 이 문서의 `- 결정: 미정` 줄을 모두 바꾸고, 추천과 다르게 고른 질문의 `(Q<n> 의존)` TC 단언을 고친다. 커밋.
 
 【테스트】
@@ -509,7 +517,7 @@ TC-M0.T7.b  ruleset 필수 검사가 이 잡을 포함한다
      - `allowed_domains`: 문자열 배열 (소문자·punycode, 최대 100개, Q14)
      - `signup_requires_approval`: 참·거짓
      - `daily_signup_cap`: null 또는 0 이상 정수 (Q13)
-     - `default_limit_usd`: null 또는 `DECIMAL(12,6)` 범위
+     - `default_limit_usd`: 0 이상 `DECIMAL(12,6)` 범위, null 은 받지 않음 (Q16 남은 결정)
      - `default_max_keys`: 0 이상 정수
    - `mailConfigured(h)` = `mail_settings` 행 있음 (Q15).
    - 정책 검사:
@@ -520,8 +528,8 @@ TC-M0.T7.b  ruleset 필수 검사가 이 잡을 포함한다
 
 【테스트】
 ```
-TC-M1.T1.a  잘못된 설정 값은 저장하지 않는다 (Q14 의존)
-  단언:  signup_mode "Open" · daily_signup_cap -1 · 1.5 · allowed_domains ["*.a.com"] · default_limit_usd 1e13 → SettingsError·행 변화 0. ["A.COM"] → "a.com" 으로 저장, ["bücher.example"] → "xn--bcher-kva.example"
+TC-M1.T1.a  잘못된 설정 값은 저장하지 않는다 (Q14·Q16 의존)
+  단언:  signup_mode "Open" · daily_signup_cap -1 · 1.5 · allowed_domains ["*.a.com"] · default_limit_usd 1e13 · default_limit_usd null → SettingsError·행 변화 0. ["A.COM"] → "a.com" 으로 저장, ["bücher.example"] → "xn--bcher-kva.example"
   검출:  대문자·유니코드 도메인이 그대로 저장돼 소문자·punycode 로 바뀐 가입 이메일과 영원히 일치하지 않는 것, 음수 상한이 "상한 없음"으로 읽히는 것
 TC-M1.T1.b  메일·도메인·IdP 가 없으면 그 정책을 저장하지 않는다 (Q15·Q18 의존)
   단언:  mail_settings 없음 + open → mail_required, domain_allowlist + 메일 있음 + 도메인 [] → domains_required, sso_only → no_idp. 각 경우 signup_mode 그대로
@@ -656,39 +664,44 @@ TC-M1.T5.b  ruleset 필수 검사가 이 잡을 포함한다
 
 🛡 보안 리뷰 대상: 앞 판정이 이메일 존재와 무관한지, 뒷받침 훅이 모든 user 생성 경로를 덮는지, 초대 문맥 통로를 공개 요청이 흉내 낼 수 없는지, 응답 시간으로 드러나는 계정 존재.
 
-설계 (V29 의존)
-- **앞 판정**: `hooks.before`(경로 `/sign-up/email`)가 정책·도메인·메일·하루 상한(읽기만)을 본다. Better Auth 가 이메일을 찾기(`findUserByEmail`) 전이라, 같은 정책·같은 도메인이면 있는 이메일·없는 이메일에 같은 응답을 낸다 (Q19 (가) 403·사유 코드).
+설계 (V29 의존). #13 의 자리 셋을 그대로 쓰고 판정만 넓힌다.
+- **판정 한 곳**: `packages/db/src/signup.ts`. #13 의 `publicSignupClosed`를 `decideSignup`으로 넓힌다. `PUBLIC_SIGNUP_MODES`에 `open`·`domain_allowlist`를 넣고 도메인·메일·상한을 더한다. 서버와 `packages/auth`가 같이 쓴다 (`packages/auth`가 서버 코드에 기대지 않게 하려고 판정은 `packages/db`에 둔다 — #13 과 같은 이유).
+- **앞 판정**: #13 의 두 자리(`app.ts` `/api/auth/*` 미들웨어, Better Auth `hooks.before` `signUpGate`)가 정책·도메인·메일·하루 상한(읽기만)을 본다. Better Auth 가 이메일을 찾기(`findUserByEmail`) 전이라, 같은 정책·같은 도메인이면 있는 이메일·없는 이메일에 같은 응답을 낸다 (Q19 (가) 403·사유 코드).
 - **뒷받침 훅**: `databaseHooks.user.create.before`는 경로와 관계없이 모든 회원 생성에서 돈다.
   - 공개 가입이면 앞 판정을 다시 돌린다 (정책이 그사이 바뀐 경우).
   - 초대 문맥이 있으면 초대 줄로 판정한다.
-  - 둘 다 아니면(SSO 등 다른 경로) 거부한다. 거부는 403 이라 Better Auth 가 가짜 200 으로 숨긴다. 그래서 시험은 행 수로 본다.
+  - 둘 다 아니면(SSO 등 다른 경로) 거부한다. #13 처럼 400 `SIGNUP_CLOSED`로 던진다. `/sign-up/*`는 앞 판정이 먼저 막으므로 이 400 이 이메일 존재를 드러내는 경로는 없다. 시험은 응답보다 행 수로 본다.
   - 통과하면 `{ data: { status, monthlyLimitUsd, role?, emailVerified? } }`를 돌려준다.
   - 하루 상한 세기(Q13 (가))도 여기서 한다.
-- **초대 문맥 통로**: `signup/context.ts`의 `AsyncLocalStorage`다. `runAsInvite({ inviteId, role, email, verified }, fn)` 안에서 부른 `auth.api.signUpEmail`만 훅이 초대 가입으로 본다. 요청 본문·헤더는 쓰지 않는다. 공개 요청은 이 값을 넣을 길이 없다 (V29 TC-M0.T2.d). 초대 단계(M3)는 이 함수를 부르기만 한다.
+- **#13 리뷰에서 넘어온 메모 셋**
+  - 첫 관리자는 한도가 없다. `runSetup`이 Better Auth 를 거치지 않고 user 행을 넣어(`monthly_limit_usd` NULL) 생성 훅의 기본값 복사를 지나지 않는다. 운영자 본인이라 의도로 보고 바꾸지 않는다. 운영 문서에 적는다 (M6.T3).
+  - SSO JIT 는 3단계 동안 막혀 있다. #13 의 생성 훅이 관리자가 있으면 초대 문맥 밖의 모든 회원 생성을 거부하기 때문이다. 이것은 의도다. 5단계는 `decideSignup`에 IdP 줄(`via: "sso"`, `sso_provider_settings.jit_enabled`·도메인)을 더해 연다. TC-M2.T1.b 의 "다른 생성 경로 거부"가 그때 바뀐다.
+  - 가입 경로가 설정을 두 번 읽는다. `app.ts`와 `signUpGate`가 각각 `hasAdmin`·`signup_mode`를 select 하고, 생성 훅이 한 번 더 읽는다. M2.T1 은 요청 하나 안에서만 판정 입력을 한 번 읽어 두고 쓴다 (요청 문맥 메모). 인스턴스 캐시는 쓰지 않는다 — 정책을 닫아도 다른 인스턴스가 가입을 받게 된다 (TC-M2.T5.a).
+- **초대 문맥 통로**: `packages/auth/src/invite-context.ts`의 `AsyncLocalStorage`다. 생성 훅이 `packages/auth` 안에 있어서 통로도 그 패키지에 둔다. `runAsInvite({ inviteId, role, email, verified }, fn)` 안에서 부른 `auth.api.signUpEmail`만 훅이 초대 가입으로 본다. 요청 본문·헤더는 쓰지 않는다. 공개 요청은 이 값을 넣을 길이 없다 (V29 TC-M0.T2.d). 초대 단계(M3)는 이 함수를 부르기만 한다.
 
 ### ☐ M2.T1 — 정책 판정·앞 판정·뒷받침 훅·초대 문맥 🛡 보안 리뷰 (V29·Q1·Q3·Q15·Q19 의존)
-선행 없음 · 산출 `apps/server/src/signup/{policy,context,hooks}.ts`, `packages/auth/src/index.ts`, `apps/server/src/config.ts`, `apps/server/src/app.ts` · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-M2.T1.a`
+선행 없음 · 산출 `packages/db/src/signup.ts`(#13 의 판정을 넓힌다), `packages/auth/src/{index,invite-context}.ts`, `apps/server/src/app.ts`, `apps/server/src/signup/request-memo.ts` · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-M2.T1.a`
 
 【작업】
 1. 재현 시험을 넣는다. 꼬리줄 `Red: TC-M2.T1.a`. 커밋.
    - 설치 뒤 `signup_mode open` + 메일 있음 → 공개 `/api/auth/sign-up/email` → user 1행을 단언한다.
-   - Q1 고침 PR 뒤라 지금은 0행이므로 빨강이다.
-2. 정책 판정과 두 훅을 만든다. 커밋.
-   - `decideSignup({ settings, mailConfigured, email, via: "public" | "invite", invite? })` → `{ ok, code, data }` 순수 함수.
+   - #13 위에서는 `PUBLIC_SIGNUP_MODES`가 비어 `app.ts`가 403 `signup_closed`로 막으므로 0행, 빨강이다.
+2. #13 의 판정과 두 훅을 넓힌다. 커밋.
+   - `packages/db/src/signup.ts`의 `publicSignupClosed`를 `decideSignup({ settings, mailConfigured, email, via: "public" | "invite", invite? })` → `{ ok, code, data }` 순수 함수.
    - 공개 가입:
      - `open`(메일 필요) · `domain_allowlist`(메일·도메인 일치 필요)만 통과한다.
      - `invite_only`·`closed`·`sso_only` → `signup_closed`.
    - 초대 가입: `invite_only`·`open`·`domain_allowlist`는 통과, `closed`·`sso_only`는 거부 (Q3).
-   - 판정에 쓰는 설정은 앱이 `createAuth`에 넘기는 콜백으로 받는다. `packages/auth`가 서버 코드에 기대지 않게 하려는 것이다.
-   - 위 「설계」대로 `hooks.before`와 `user.create.before`를 건다.
-   - Q1 고침 PR 의 일괄 403 은 이 판정으로 바꾼다. 설치 전 403 `setup_required`(app.ts)는 그대로 앞에 둔다.
+   - `app.ts` 미들웨어·`signUpGate`·`userCreateGuard`가 `publicSignupClosed` 대신 `decideSignup`을 부른다. 위 「설계」대로 생성 훅에 초대 문맥 통과와 `data`(상태·역할·인증)를 더한다.
+   - 판정 입력(관리자 있음·설정·메일)은 요청 하나에 한 번만 읽는다 (#13 리뷰 메모, `request-memo.ts`).
+   - 설치 전 403 `setup_required`(app.ts)는 그대로 앞에 둔다.
    - V32 에서 열려 있던 이메일 변경·회원 삭제 경로를 `disabledPaths`에 더한다.
 
 【테스트】
 ```
 TC-M2.T1.a  정책 다섯 × 경로 둘 표, 행 수로 판정 (Q3·Q19 의존)
   단언:  공개 가입: open·domain_allowlist(도메인 안) → user·account 각 +1, invite_only·closed·sso_only → 행 증가 0·메일 0·403 signup_closed. 초대 문맥(runAsInvite, 가짜 초대): invite_only·open·domain_allowlist → +1, closed·sso_only → 0 (Node DB 넷, D1 은 G-M2.17)
-  검출:  Q1 의 일괄 403 을 정책 판정으로 바꾸며 invite_only·closed 에서도 공개 가입이 다시 열리는 것, 반대로 open 에서도 계속 막혀 open 정책이 동작하지 않는 것
+  검출:  #13 의 PUBLIC_SIGNUP_MODES 를 넓히며 invite_only·closed 에서도 공개 가입이 다시 열리는 것, 두 앞 판정(app.ts·signUpGate) 중 하나만 고쳐 open 에서도 계속 403 이거나 한쪽 경로로만 열리는 것
 TC-M2.T1.b  user 를 만드는 다른 경로는 뒷받침 훅이 막는다 (V29·V32 의존)
   단언:  V32 answer 의 createsUser 경로 각각 + $context.internalAdapter.createUser 직접 호출 → closed 에서 새 user 0 (응답은 Better Auth 가 숨겨도 됨). 경로 목록은 고정 값과 비교해 새 경로가 생기면 실패 (Node DB 넷, D1)
   검출:  앞 판정을 /sign-up/email 에만 걸고 뒷받침이 없어, 5단계 SSO 콜백이나 나중에 켜는 플러그인이 user 를 만들어 정책을 비켜 가는 것
@@ -711,13 +724,13 @@ TC-M2.T1.f  공개 요청은 초대 문맥을 흉내 낼 수 없다 (V29 의존)
 - [ ] G-M2.21 통과 (Red 커밋에서 TC-M2.T1.a 실패)
 
 ### ☐ M2.T2 — 허용 도메인·승인 대기·기본값 (Q6·Q14·Q16 의존)
-선행 M2.T1 · 산출 `apps/server/src/signup/{policy,defaults}.ts` · 되돌리기 커밋 1개
+선행 M2.T1 · 산출 `packages/db/src/signup.ts` · 되돌리기 커밋 1개
 
 【작업】
 1. 도메인 비교와 새 회원의 값을 정한다. 커밋.
    - 도메인 일치: 이메일 `@` 뒤를 소문자·punycode 로 바꿔 `allowed_domains`와 정확히 비교한다 (Q14).
    - 공개 가입 회원의 상태: `signup_requires_approval`이면 `status pending`, 아니면 `active` (Q6).
-   - 모든 새 회원(공개·초대)에 `monthly_limit_usd = default_limit_usd`를 넣는다 (Q16).
+   - 기본 월 한도 복사는 #13 이 이미 한다 (`userCreateGuard` → `defaultMonthlyLimit`). 이 작업은 초대 문맥에서도 같은 값이 들어가는지와 Q16 남은 결정(null)을 맞춘다.
    - 이 값들은 `user.create.before`가 돌려주는 `data`로 넣는다. 같은 트랜잭션이고, `input: false` 칼럼이라 본문으로는 못 바꾼다 (V29 TC-M0.T2.c).
    - 감사 기록 `member.signup`.
 
@@ -730,19 +743,19 @@ TC-M2.T2.b  허용 도메인은 정확히 일치한다 (Q14·Q19 의존)
   단언:  허용 ["example.com"] → a@example.com +1, a@EXAMPLE.com +1, a@sub.example.com · a@notexample.com · a@example.com.evil.io → 행 0·403 domain_not_allowed, a@bücher.example 은 punycode 로 허용 목록과 비교
   검출:  endsWith("example.com") 으로 비교해 a@notexample.com·example.com.evil.io 가 통과하는 것
 TC-M2.T2.c  새 회원에게 기본 월 한도가 걸린다 (Q16 의존)
-  단언:  default_limit_usd 5 → 새 회원 monthly_limit_usd 5, max_keys NULL. 설정을 7 로 바꾼 뒤 → 기존 회원 5 그대로, 새 회원 7. default_limit_usd null → 새 회원 NULL(무제한)
-  검출:  default_limit_usd 를 읽는 코드가 없어(지금 main) 새 회원이 monthly_limit_usd NULL = 무제한으로 운영자 비용을 쓰는 것
+  단언:  default_limit_usd 5 → 공개·초대 새 회원 monthly_limit_usd 5, max_keys NULL. 설정을 7 로 바꾼 뒤 → 기존 회원 5 그대로, 새 회원 7. 설정 API 로 null → 400 (Q16 (가)), 행 없음 → 시드 5 (#13 TC-SEC.1.c 와 같음)
+  검출:  초대 문맥의 data 가 #13 훅의 기본값 복사를 덮어 초대 회원만 monthly_limit_usd NULL = 무제한이 되는 것, 설정 API 가 null 을 저장해 #13 의 대체(5)와 운영자 의도(무제한)가 어긋나는 것
 ```
 
 【통과】
 - [ ] G-M2.7 ~ G-M2.9 통과
 
 ### ☐ M2.T3 — 하루 가입 상한 (Q13 의존)
-선행 M2.T1 · 산출 `apps/server/src/signup/cap.ts` · 되돌리기 커밋 1개
+선행 M2.T1 · 산출 `packages/db/src/signup.ts`(상한 세기) · 되돌리기 커밋 1개
 
 【작업】
 1. 하루 가입 상한을 건다. 커밋.
-   - 키는 `signup-day|<UTC 날짜>`다. 세는 함수는 `consume(h, key, daily_signup_cap, 하루)`로, `routes/guard.ts`의 고정 창 세기다 (D1 안전, 여러 인스턴스 공유).
+   - 키는 `signup-day|<UTC 날짜>`다. 세는 방식은 `routes/guard.ts` `consume`과 같은 세 문장의 고정 창 세기다 (D1 안전, 여러 인스턴스 공유). 생성 훅(`packages/auth`)이 부르므로 함수는 판정과 같은 `packages/db/src/signup.ts`에 둔다.
    - Q13 (가)는 앞 판정에서 오늘 수만 읽고, 뒷받침 훅(공개 가입일 때만)에서 `consume` 한다. 훅에서 넘치면 403 이 되고 Better Auth 가 가짜 200 으로 숨긴다. 앞 판정과 훅 사이 경쟁에서 진 요청뿐이다. 행은 생기지 않는다.
    - Q13 (나)면 앞 판정에서 곧바로 `consume` 한다.
    - 넘으면 앞 판정이 403 `signup_cap`을 낸다. 그날 처음 넘을 때 `alert.signup_cap` 1행을 쓴다 (`keys/alerts.ts` `alertOnce`와 같은 하루 한 번).
@@ -872,7 +885,7 @@ TC-M2.T6.b  ruleset 필수 검사가 이 잡을 포함한다
 # M3 — 초대 🔒 (M2 필요)
 
 **브랜치** `p3/m3`.
-**outputs** `apps/server/src/invites/**`, `apps/server/test/invites/**`. M2 의 `signup/**`(정책 판정·초대 문맥·응답 시간)는 부르기만 하고 고치지 않는다.
+**outputs** `apps/server/src/invites/**`, `apps/server/test/invites/**`. M2 가 넓힌 판정(`packages/db/src/signup.ts`)·초대 문맥(`packages/auth/src/invite-context.ts`)·응답 시간(`apps/server/src/signup/timing.ts`)은 부르기만 하고 고치지 않는다.
 
 🛡 보안 리뷰 대상: 토큰 생성·저장·비교, 한 번만 쓰기 경쟁, 관리자 역할 초대, 이메일 지정 초대의 인증 처리(Q5), 중복 이메일 수락.
 
@@ -1446,11 +1459,12 @@ TC-M6.T2.b  별칭·구조 분해·재내보내기로 쓴 것도 잡는다
    - 탈퇴하면 개인정보는 지우지만 OmniRoute 호출 기록과 키별 사용액은 남는다 (Q9)
    - 회원 한도는 계정 단위라 탈퇴 뒤 재가입하면 그달 한도를 새로 받는다 (Q9)
    - 하루 가입 상한은 UTC 날짜로 센다
+   - 첫 관리자(설치 때 만든 계정)는 월 한도가 없다 (#13 리뷰 메모)
 
 【테스트】
 ```
 TC-M6.T3.a  운영 문서에 정책과 데이터 처리가 있다 (Q9 의존)
-  단언:  grep "invite_only" deploy/README.md ≥ 1, grep "OmniRoute 호출 기록은 지워지지 않는다" == 1, grep "회원 한도는 계정 단위" == 1, grep "UTC 날짜" ≥ 1
+  단언:  grep "invite_only" deploy/README.md ≥ 1, grep "OmniRoute 호출 기록은 지워지지 않는다" == 1, grep "회원 한도는 계정 단위" == 1, grep "UTC 날짜" ≥ 1, grep "첫 관리자" ≥ 1
   검출:  운영자가 탈퇴 처리로 OmniRoute 쪽 기록까지 지워진다고 믿거나, 회원 한도를 사람 단위 상한으로 믿고 외부 사용자에게 그렇게 안내하는 것
 ```
 
@@ -1554,7 +1568,7 @@ TC-M6.T4.c  ruleset 필수 검사가 이 잡을 포함한다
 | TC-M0.T3.a·b, TC-M4.T3.a·b·d | V30 세션 행 삭제 즉시성, 비밀번호 변경·재설정 기본 동작 | 계획서 4.5 에 지연을 적거나 쿠키 캐시를 끔 |
 | TC-M0.T4.a·b, TC-M4.T3.a·c·e·g | V31 로그인 거부 훅, 재설정·인증 링크 자동 로그인, after 훅 | 로그인 차단 자리를 `hooks.before` 경로별로, 경쟁은 두 번째 지우기 |
 | TC-M0.T5.a, TC-M2.T1.b·d | V32 기본으로 열린 회원 변경·생성 경로 | `disabledPaths` 목록, 뒷받침 대상 |
-| TC-M2.T1.a (재현 대상) | Q1 고침 PR 의 일괄 403 | 결정됨 |
+| TC-M2.T1.a (재현 대상) | Q1 PR #13 의 일괄 403 | 결정됨 |
 | (단계 구성) | Q2 화면 범위 | 단계 하나 추가 |
 | TC-M2.T1.a, TC-M3.T1.e, TC-M5.T1.a | Q3 정책마다 초대 | 표 |
 | TC-M3.T1.c, TC-M3.T2.a, TC-M1.T4.a | Q4 한 번만·7일·30일 | 0003 칼럼, 동시 수락 기대 수 |
@@ -1569,7 +1583,7 @@ TC-M6.T4.c  ruleset 필수 검사가 이 잡을 포함한다
 | TC-M2.T3.a·b·c, TC-M5.T1.b | Q13 성공 가입만 세기·UTC·null/0 | (나)면 TC-M2.T3.b 단언이 반대로 |
 | TC-M1.T1.a, TC-M2.T2.b, TC-M2.T1.d, TC-M5.T1.c | Q14 정확히 일치·이메일 변경 막음 | 비교 함수 |
 | TC-M1.T1.b, TC-M2.T1.c, TC-M2.T5.b | Q15 메일 = `mail_settings` 행, fail-closed | 판정 |
-| TC-M2.T2.c, TC-M3.T2.d, TC-M5.T1.b | Q16 기본 한도 복사, max_keys NULL 유지 | 스키마·분배 코드(다) |
+| TC-M2.T2.c, TC-M3.T2.d, TC-M5.T1.b, TC-M1.T1.a | Q16 기본 한도 복사(#13 구현), null 기본값 거부, max_keys NULL 유지 | (나)면 `defaultMonthlyLimit`이 null 을 돌려줌 |
 | TC-M1.T3.a·b | Q17 action 목록·개인정보 없음 | 목록 |
 | TC-M1.T1.b | Q18 `sso_only` 저장 거부 (IdP 없음) | 400 으로 |
 | TC-M2.T1.a·c·e, TC-M2.T2.b, TC-M2.T3.a, TC-M5.T1.b·c | Q19 정책 거부 = 403·사유 코드 | 일반 200 으로, 행 수 단언은 그대로 |
@@ -1578,6 +1592,7 @@ TC-M6.T4.c  ruleset 필수 검사가 이 잡을 포함한다
 ## 코드 미확인 TC 목록
 
 열어 보고 검출줄에 그 사실을 적은 코드는 아래와 같다.
+- 보안 고침 #13: `packages/db/src/signup.ts`, `packages/auth/src/index.ts`(`signUpGate`·`userCreateGuard`), `apps/server/src/app.ts`, `apps/server/test/signup-closed.test.ts`, `packages/auth/test/signup-closed.test.ts`
 - 1·2단계 코드: `packages/auth/src/index.ts`·`rate-limit.ts`, `packages/db/src/schema/common.ts`·`seed.ts`·`auth-options.ts`·`users.ts`, `apps/server/src/app.ts`·`config.ts`·`setup/*`·`routes/{guard,keys,issue,admin-limits}.ts`·`keys/{target,apply,reconcile,alerts}.ts`·`queue/index.ts`, `tests/e2e/keys/env.mjs`, `packages/auth/test/*`
 - better-auth 1.7.7: `api/routes/sign-up.mjs`, `api/routes/password.mjs`, `db/internal-adapter.mjs`, `db/with-hooks.mjs`
 

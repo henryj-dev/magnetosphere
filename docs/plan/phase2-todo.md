@@ -1748,6 +1748,6 @@ TC-K6.T5.b  S6 조합 불일치 음성 대조는 [combo-set] 로 잡힌다 (K6 �
 - 판정은 `packages/db/src/signup.ts` 한 곳이다. 공개 가입을 받는 값(`PUBLIC_SIGNUP_MODES`)이 지금은 비어 있다.
 
 3단계가 이어받을 것
-- Q1: (가)로 이미 막혔다. M3.T1 의 재현 빨강은 정책별 판정 표로 시작한다. `open`·`domain_allowlist`를 넣을 때 `PUBLIC_SIGNUP_MODES`와 두 차단 지점을 함께 고친다. 초대 수락(`auth.api.signUpEmail` 서버 호출)은 지금 훅에 막히므로 M2 가 초대 가입을 통과시키는 표시를 훅에 넣어야 한다.
-- Q16: 가입 때 `default_limit_usd`를 복사하는 (가)를 미리 넣었다. `default_limit_usd` null(무제한 기본값)은 지금 시드값 5 로 본다 — 설정 API(M1)를 만들 때 정한다.
+- Q1: (가)로 이미 막혔다. `open`·`domain_allowlist`를 넣을 때 `PUBLIC_SIGNUP_MODES`와 두 차단 지점을 함께 고친다. 초대 수락(`auth.api.signUpEmail` 서버 호출)은 지금 훅에 막히므로 초대 가입을 통과시키는 표시를 훅에 넣어야 한다. (3단계 실행판 2차 개정에서 가입 정책은 M2, 초대는 M3 이다. 재현 빨강은 M2.T1, 초대 통과 표시는 M2.T1 의 초대 문맥 ALS.)
+- Q16: 가입 때 `default_limit_usd`를 복사하는 (가)를 미리 넣었다. `default_limit_usd` null(무제한 기본값)은 지금 시드값 5 로 본다 — 설정 API(3단계 M1.T1·M2.T5)를 만들 때 정한다 (3단계 Q16).
 - 운영 코드는 `seedAppSettings`를 부르지 않는다 (`app_settings`에 `signup_mode`·`default_limit_usd` 행이 없다). 지금 판정은 행이 없어도 안전한 쪽으로 정해 두었다.
