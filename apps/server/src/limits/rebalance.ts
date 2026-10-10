@@ -32,7 +32,7 @@ import { describeError, enqueue } from "../queue/index.ts";
 import { readOmniRouteToken } from "../setup/omniroute.ts";
 import { computeBudgets, type Budgets } from "./compute.ts";
 import { confirmDays, costsOf, coveredUntil, storedSpent, type AnalyticsClient, type ClientFor, type ConfirmResult } from "./daily.ts";
-import { monthChanged, monthKey, monthStart, REBALANCE_MONTH_KEY } from "./month.ts";
+import { dayKey, monthChanged, monthKey, monthStart, REBALANCE_MONTH_KEY } from "./month.ts";
 import { guard, holds, readSetting, writeSetting } from "./store.ts";
 
 /** OmniRoute 호출 하나의 제한 시간 (어댑터 기본값과 같다) */
@@ -153,7 +153,7 @@ const lost = (c: ApplyContext, e: unknown) => {
  */
 async function setKeyBudget(c: ApplyContext, key: KeyRow, monthlyUsd: number): Promise<boolean> {
   const k = c.h.schema.apiKeys;
-  if ((await updateKey(c, key.id, { budgetUsd: null, budgetAt: c.at }, olderThan(c.h, c.at))) !== 1) {
+  if ((await updateKey(c, key.id, { budgetUsd: null, budgetMonth: null, budgetAt: c.at }, olderThan(c.h, c.at))) !== 1) {
     c.counts.stale++;
     return false;
   }
@@ -165,8 +165,9 @@ async function setKeyBudget(c: ApplyContext, key: KeyRow, monthlyUsd: number): P
     return false;
   }
   c.counts.setBudget++;
-  // 부르는 사이 더 새 계산이 budget_at 을 가져갔으면 내 setBudget 이 그쪽 것을 덮었을 수 있다. 비워서 다음 분배가 다시 걸게 한다
-  if ((await updateKey(c, key.id, { budgetUsd: monthlyUsd, budgetMonth: c.month }, eq(k.budgetAt, c.at))) !== 1) await updateKey(c, key.id, { budgetUsd: null }, undefined);
+  // 부르는 사이 더 새 계산이 budget_at 을 가져갔으면 내 setBudget 이 늦게 도착해 그쪽 것(예산·해제)을 덮었을 수 있다.
+  // 값과 달을 모두 비워 다음 분배가 반드시 다시 건다 (K2 재검토 H1)
+  if ((await updateKey(c, key.id, { budgetUsd: monthlyUsd, budgetMonth: c.month }, eq(k.budgetAt, c.at))) !== 1) await updateKey(c, key.id, { budgetUsd: null, budgetMonth: null }, undefined);
   return true;
 }
 
@@ -188,7 +189,9 @@ async function clearKeyBudget(c: ApplyContext, key: KeyRow): Promise<boolean> {
     return false;
   }
   c.counts.cleared++;
-  await updateKey(c, key.id, { budgetUsd: null, budgetMonth: c.month }, eq(k.budgetAt, c.at));
+  // 풀린 상태 = budget_usd NULL·budget_month 이번 달. 더 새 계산이 budget_at 을 가져갔으면 내 해제가 늦게 도착해 그쪽 예산을
+  // 덮었을 수 있다. 값과 달을 모두 비워 다음 분배가 다시 건다 (K2 재검토 H1)
+  if ((await updateKey(c, key.id, { budgetUsd: null, budgetMonth: c.month }, eq(k.budgetAt, c.at))) !== 1) await updateKey(c, key.id, { budgetUsd: null, budgetMonth: null }, undefined);
   return true;
 }
 
@@ -251,7 +254,9 @@ export async function applyPlan(c: ApplyContext, keys: readonly KeyRow[], r: Bud
     if (key.state !== "active" && !limitOff) continue;
     if (r.remaining === null) {
       // 무제한: 옛 예산이 남아 있으면 풀고, limit 으로 꺼진 키는 그 뒤에 켠다
-      const hadBudget = key.budgetUsd !== null;
+      // 예산 값을 알면(budget_usd) 풀고, 모르면(budget_usd·budget_month NULL 인데 budget_at 이 있음 = 걸다가 실패·임대 상실·경합)
+      // 걸려 있을 수 있으니 푼다 (K2 재검토 M-a). 풀린 키는 budget_month 가 있어 다시 부르지 않는다
+      const hadBudget = key.budgetUsd !== null || (key.budgetMonth === null && key.budgetAt !== null);
       if (hadBudget && !(await clearKeyBudget(c, key))) continue;
       if (limitOff) await turnOn(c, key, hadBudget);
       continue;
@@ -296,14 +301,61 @@ export interface RebalanceResult extends ApplyCounts {
   confirm: ConfirmResult;
 }
 
+/** 최근 분배에서 실패한 회원 { 회원 id: 실패 시각 }. 다음 실행 정렬에서 뒤로 보낸다 (K2 재검토 M-b) */
+export const FAILED_MEMBERS_KEY = "budget_rebalance_failed";
+/** 오늘 남긴 실패 알림 { day, keys: ["회원 id|오류"] }. 같은 회원·같은 오류는 하루(UTC) 한 번 (K2 재검토 M-c) */
+export const ALERTED_KEY = "budget_rebalance_alerted";
+/** 연속 실패 { count, alertedDay } (K2 재검토 L-a) */
+export const STALLED_KEY = "budget_rebalance_stalled";
+/** 이만큼 연속으로 실패하면 alert.rebalance_stalled (1분 주기라 10분) */
+export const STALL_RUNS = 10;
+
 /**
- * 1분 분배 한 번 (K2 리뷰 M2).
- *   1단계: 남은 한도 0 인 회원의 켜진 키를 모두 끈다. 2단계: 예산·켜기. 이번 달 예산을 아직 받지 못한 키가 있는 회원부터.
- *   회원 하나의 예외(깨진 값·DB 오류)는 그 회원만 실패로 세고 다음 회원으로 간다. 실패한 회원은 alert.rebalance_failed 1행에 남긴다.
- *   임대를 잃으면(신호 끊김) 곧바로 멈춘다. 시간 예산(임대의 2/3)이 지나면 다음 회원을 시작하지 않고 멈춘다.
+ * 1분 분배 한 번 (K2 리뷰 M2, 재검토 M-b·M-c·L-a).
+ *   1단계: 남은 한도 0 인 회원과 계산이 깨진 회원(computeBudgets 예외, fail-closed)의 켜진 키를 limit 으로 끈다.
+ *     계산이 다시 되면 limit 으로 꺼진 키는 정상 경로로 다시 켜진다.
+ *   2단계: 예산·켜기. 이번 달 예산을 아직 받지 못한 키가 있는 회원부터, 최근 실패한 회원은 맨 뒤.
+ *   회원 하나의 예외·OmniRoute 실패는 그 회원만 실패로 세고 다음 회원으로 간다. alert.rebalance_failed 는 같은 회원·같은 오류를
+ *   하루 한 번만 남긴다. 임대를 잃으면 곧바로 멈춘다. 시간 예산(임대의 2/3)이 지나면 다음 회원을 시작하지 않고 멈춘다.
  *   다음 실행은 budget_month 가 이번 달인 키를 건너뛰므로 멈춘 자리 뒤 회원부터 이어 간다.
+ *   실행 전체가 실패(분석·날 확정 오류)하면 예산을 바꾸지 않는다(fail-closed). STALL_RUNS 번 연속이면 alert.rebalance_stalled 를 하루 한 번.
  */
 export async function rebalanceAll(d: RebalanceDeps): Promise<RebalanceResult> {
+  try {
+    const r = await rebalanceOnce(d);
+    const s = await readSetting<{ count: number; alertedDay?: string }>(d.db, STALLED_KEY);
+    if (s && s.count > 0) await writeSetting(d.db, STALLED_KEY, { ...s, count: 0 }, d.now, d.lease);
+    return r;
+  } catch (e) {
+    if (!d.signal?.aborted && !(e instanceof LeaseLostError)) await noteStall(d, e).catch(() => undefined);
+    throw e;
+  }
+}
+
+async function noteStall(d: RebalanceDeps, e: unknown): Promise<void> {
+  const h = d.db;
+  const today = dayKey(d.now);
+  const s = (await readSetting<{ count: number; alertedDay?: string }>(h, STALLED_KEY)) ?? { count: 0 };
+  const next = { count: s.count + 1, alertedDay: s.alertedDay };
+  if (next.count >= STALL_RUNS && s.alertedDay !== today) {
+    if (d.lease && !(await holds(h, d.lease))) return;
+    await h.db.insert(h.schema.auditLog).values({
+      id: crypto.randomUUID(),
+      actorId: null,
+      action: "alert.rebalance_stalled",
+      target: null,
+      detail: JSON.stringify({ runs: next.count, error: describeError(e) }),
+      ip: null,
+      createdAt: d.now,
+    });
+    next.alertedDay = today;
+  }
+  await writeSetting(h, STALLED_KEY, next, d.now, d.lease);
+}
+
+type Item = { m: { member: MemberRow; keys: KeyRow[] }; r: Budgets | null; error?: string };
+
+async function rebalanceOnce(d: RebalanceDeps): Promise<RebalanceResult> {
   const h = d.db;
   const clock = d.clock ?? Date.now;
   const startedAt = clock();
@@ -314,6 +366,8 @@ export async function rebalanceAll(d: RebalanceDeps): Promise<RebalanceResult> {
   const members = (await loadMembers(h)).filter((m) => needsRebalance(m.keys));
   const counts = emptyCounts();
   const failed: { userId: string; error: string }[] = [];
+  const recent = (await readSetting<Record<string, string>>(h, FAILED_MEMBERS_KEY)) ?? {};
+  const nextRecent = { ...recent };
   let stopped = false;
   if (members.length > 0) {
     const from = await coveredUntil(h, d.now);
@@ -322,47 +376,76 @@ export async function rebalanceAll(d: RebalanceDeps): Promise<RebalanceResult> {
     const stored = await storedSpent(h, ids, monthStart(d.now), from);
     const spent = new Map(ids.map((id) => [id, (stored.get(id) ?? 0) + (today.get(id) ?? 0)]));
     const c: ApplyContext = { h, client: d.client, at: d.now, month, lease: d.lease, signal: d.signal, counts };
-    const plans: { m: (typeof members)[number]; r: Budgets }[] = [];
-    for (const m of members) {
+    const items: Item[] = members.map((m) => {
       try {
-        plans.push({ m, r: planMember(m.member, m.keys, spent) });
+        return { m, r: planMember(m.member, m.keys, spent) };
       } catch (e) {
-        failed.push({ userId: m.member.id, error: describeError(e) });
+        return { m, r: null, error: describeError(e) };
       }
-    }
-    const offFirst = plans.filter((p) => p.r.exhausted);
-    const rest = plans.filter((p) => !p.r.exhausted);
-    const order = [...offFirst, ...rest.filter((p) => behind(p.m.keys, month)), ...rest.filter((p) => !behind(p.m.keys, month))];
-    for (const p of order) {
+    });
+    const late = (i: Item) => Object.hasOwn(recent, i.m.member.id);
+    const offFirst = items.filter((i) => i.r === null || i.r.exhausted);
+    const rest = items.filter((i) => i.r !== null && !i.r.exhausted);
+    const order = [
+      ...offFirst,
+      ...rest.filter((i) => !late(i) && behind(i.m.keys, month)),
+      ...rest.filter((i) => !late(i) && !behind(i.m.keys, month)),
+      ...rest.filter((i) => late(i)),
+    ];
+    for (const i of order) {
       if (clock() - startedAt >= budgetMs) {
         stopped = true;
         break;
       }
+      const before = counts.failed;
+      let error = i.error ?? null;
       try {
-        await applyPlan(c, p.m.keys, p.r);
+        // 계산이 깨진 회원은 켜진 키를 끈다 (fail-closed). 지난달 예산을 단 채 켜 두지 않는다
+        if (i.r === null) {
+          for (const key of i.m.keys) if (key.state === "active") await turnOff(c, key);
+        } else {
+          await applyPlan(c, i.m.keys, i.r);
+        }
       } catch (e) {
         if (d.signal?.aborted) throw d.signal.reason ?? e;
-        failed.push({ userId: p.m.member.id, error: describeError(e) });
+        error ??= describeError(e);
+      }
+      if (error === null && counts.failed > before) error = "OmniRoute 반영 실패";
+      if (error === null) delete nextRecent[i.m.member.id];
+      else {
+        failed.push({ userId: i.m.member.id, error });
+        nextRecent[i.m.member.id] = d.now.toISOString();
       }
     }
   }
+  if (JSON.stringify(nextRecent) !== JSON.stringify(recent)) await writeSetting(h, FAILED_MEMBERS_KEY, nextRecent, d.now, d.lease);
   if (failed.length > 0) await alertFailed(h, d.lease, failed, d.now);
   if (changed && !stopped) await writeSetting(h, REBALANCE_MONTH_KEY, month, d.now, d.lease);
   return { ...counts, members: members.length, failedMembers: failed.length, stopped, monthChanged: changed, confirm };
 }
 
-/** 분배하지 못한 회원 (관리자 알림, 계획서 v5.6 Q6). 한 실행에 1행. 회원 id 와 오류는 앞 20개만 */
+/**
+ * 분배하지 못한 회원 (관리자 알림, 계획서 v5.6 Q6). 같은 회원·같은 오류는 하루(UTC) 한 번. 새로 알릴 것이 있으면 한 실행에 1행,
+ * 회원 id 와 오류는 앞 20개만
+ */
 async function alertFailed(h: DbHandle, lease: Lease | undefined, failed: { userId: string; error: string }[], now: Date): Promise<void> {
+  const day = dayKey(now);
+  const seen = await readSetting<{ day: string; keys: string[] }>(h, ALERTED_KEY);
+  const keys = new Set(seen?.day === day ? seen.keys : []);
+  const fresh = failed.filter((f) => !keys.has(`${f.userId}|${f.error}`));
+  if (fresh.length === 0) return;
   if (lease && !(await holds(h, lease))) throw new LeaseLostError(lease);
   await h.db.insert(h.schema.auditLog).values({
     id: crypto.randomUUID(),
     actorId: null,
     action: "alert.rebalance_failed",
     target: null,
-    detail: JSON.stringify({ members: failed.length, userIds: failed.slice(0, 20).map((f) => f.userId), errors: failed.slice(0, 20).map((f) => f.error) }),
+    detail: JSON.stringify({ members: fresh.length, userIds: fresh.slice(0, 20).map((f) => f.userId), errors: fresh.slice(0, 20).map((f) => f.error) }),
     ip: null,
     createdAt: now,
   });
+  for (const f of fresh) keys.add(`${f.userId}|${f.error}`);
+  await writeSetting(h, ALERTED_KEY, { day, keys: [...keys] }, now, lease);
 }
 
 /** jobs.ts 의 budget_rebalance 본문. OmniRoute 연결(주소 + 설치 때 저장한 관리 토큰)이 없으면 할 일이 없다 */

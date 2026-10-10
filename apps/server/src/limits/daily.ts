@@ -220,6 +220,9 @@ export async function confirmDays(h: DbHandle, now: Date, client: ClientFor<Anal
   const mapped = await mappedKeyIds(h);
 
   if (!confirmed || confirmed < today) {
+    // 지난달 분할 대조는 새 달에 할 일이 없다 (K2 재검토 L-b)
+    const old = await readSetting<SplitState>(h, SPLIT_KEY);
+    if (old && old.until <= dayKey(monthStart(now))) await deleteSetting(h, SPLIT_KEY, lease);
     const yesterday = addDays(today, -1);
     const a = await client().getAnalytics({ startDate: dayOf(yesterday), endDate: endOfDay(yesterday) });
     const rewritten = await saveDay(h, lease, yesterday, costsOf(a, mapped), now, false);
