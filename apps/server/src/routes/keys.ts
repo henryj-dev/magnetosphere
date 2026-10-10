@@ -22,6 +22,9 @@ import type { Services } from "../app.ts";
 import { consumeIssue, sessionMember, type Member } from "./guard.ts";
 import { IssueError, issueKey, maxKeysOf, PENDING_PREFIX, type KeysClient } from "./issue.ts";
 
+/** 원문이 든 응답은 브라우저·프록시가 저장하지 않게 한다 (K4 보안 리뷰 L1) */
+const NO_STORE = { "cache-control": "no-store" };
+
 /** 이름 최대 길이 */
 export const LABEL_MAX = 64;
 
@@ -143,7 +146,7 @@ export function keyRoutes(services: () => Promise<Services>) {
     if (!body || !label.ok) return c.json({ error: "invalid_body" }, 400);
     const issued = await issue(c, s, m, label.label ?? null);
     if (issued instanceof Response) return issued;
-    return c.json({ key: view(await rowOf(s, issued.id)), secret: issued.secret }, 201);
+    return c.json({ key: view(await rowOf(s, issued.id)), secret: issued.secret }, 201, NO_STORE);
   });
 
   r.patch("/:id", async (c) => {
@@ -220,7 +223,7 @@ export function keyRoutes(services: () => Promise<Services>) {
     await deleteKeyRow(s, m, id);
     const client = await clientOf(c, s);
     if (!(client instanceof Response)) await applyKey(s.db, id, { client });
-    return c.json({ key: view(await rowOf(s, issued.id)), secret: issued.secret }, 201);
+    return c.json({ key: view(await rowOf(s, issued.id)), secret: issued.secret }, 201, NO_STORE);
   });
 
   r.delete("/:id", async (c) => {
