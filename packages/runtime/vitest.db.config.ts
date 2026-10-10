@@ -5,7 +5,7 @@ import { defineConfig } from "vitest/config";
 // 서버 전역 시간대를 바꾸는 TC 가 있어 파일을 동시에 돌리지 않는다.
 export default defineConfig({
   test: {
-    include: ["test/db.test.ts"],
+    include: ["test/db.test.ts", "test/lease-fence/**/*.db.test.ts"],
     fileParallelism: false,
     testTimeout: 60_000,
     hookTimeout: 120_000,
