@@ -72,7 +72,17 @@ export interface QueuedJob {
   generation: number;
 }
 
-export type Handler = (payload: JobPayload, ctx: { job: QueuedJob; db: DbHandle; signal?: AbortSignal }) => Promise<void>;
+export interface HandlerContext {
+  job: QueuedJob;
+  db: DbHandle;
+  signal?: AbortSignal;
+  /** 실행기의 임대. 핸들러의 DB 쓰기도 펜싱한다 (K3 반영) */
+  lease?: Lease;
+  /** 실행기의 시계 (ms). 끈 시각 등 핸들러가 적는 시각을 이것으로 잰다 */
+  clock: () => number;
+}
+
+export type Handler = (payload: JobPayload, ctx: HandlerContext) => Promise<void>;
 export type Handlers = Record<JobAction, Handler>;
 
 export interface EnqueueOptions {
@@ -209,7 +219,7 @@ export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: R
     let outcome: unknown = null;
     if (!permanent && !failOnly) {
       try {
-        await handlers[job.action](job.payload, { job, db: h, signal: opts.signal });
+        await handlers[job.action](job.payload, { job, db: h, signal: opts.signal, lease: opts.lease, clock });
       } catch (e) {
         outcome = e ?? new Error("unknown");
       }
