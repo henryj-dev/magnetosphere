@@ -251,4 +251,118 @@ export const GATES = {
       { id: "G-S7.9", how: "test", desc: "TC-S0.T2.n 봉인 재검이 설치 실패를 보고 (S7 리뷰 M4)", cmd: nodeTest("scripts/gate.test.mjs", "TC-S0.T2.n") },
     ],
   },
+
+  // ---------- 2단계 "키·한도" (실행판 docs/plan/phase2-todo.md) ----------
+  // K0~K6 은 직렬이다. strictTests: test 검사마다 expectPassed(통과 수 ==)가 있어야 한다 (K0.T1 이 gate 에 넣는다).
+  // outputs 는 그 단계가 처음 만드는 경로만 둔다. 여러 단계가 고치는 공용 파일(app.ts·ci.yml 이후 수정 등)은 가장 이른 단계에만 두거나 넣지 않는다.
+  // 앞 단계 산출을 뒤 단계 outputs 에 넣으면 앞 단계 작업이 막힌다 (--assert-order 는 잠긴 단계 outputs 변경을 거부한다).
+  // K1~K6 의 checks 는 그 단계를 시작할 때 실행판 GATE 표대로 채운다 (빈 단계는 gate 가 실행·봉인을 거부한다).
+  K0: {
+    needs: ["S7"],
+    waivable: false,
+    strictTests: true,
+    outputs: [
+      "scripts/check-ci-matrix.mjs", "test/check-ci-matrix.test.mjs", "test/fixtures/ci-guard/concurrency-cancel-main.yml",
+      "scripts/check-verify.mjs", "scripts/check-verify.test.mjs",
+      "scripts/check-required-checks.mjs", "test/check-required-checks.test.mjs", "test/fixtures/required-checks/**",
+      "docs/verify/V12.json", "docs/verify/V13.json", "docs/verify/V15.json", "docs/verify/V18.json", "docs/verify/V19.json", "docs/verify/V20.json",
+      "packages/omniroute/test/contract/verify/**", "tests/contract/budget-block.mjs", "tests/contract/budget-block.test.mjs", "tests/bench/**",
+      "scripts/check-red.mjs", "test/check-red.test.mjs",
+    ],
+    checks: [
+      // 장치 음성 대조 다시 돌리기 (1단계 TC-S0.T2.a~d, TC-S0.T3)
+      { id: "G-K0.1", how: "test", desc: "TC-S0.T2.a 선행 미봉인 거부", cmd: nodeTest("scripts/gate.test.mjs", "TC-S0.T2.a"), expectPassed: 1 },
+      { id: "G-K0.2", how: "test", desc: "TC-S0.T2.b 되돌리면 봉인 무효", cmd: nodeTest("scripts/gate.test.mjs", "TC-S0.T2.b"), expectPassed: 1 },
+      { id: "G-K0.3", how: "test", desc: "TC-S0.T2.c --seal 재검", cmd: nodeTest("scripts/gate.test.mjs", "TC-S0.T2.c"), expectPassed: 1 },
+      { id: "G-K0.4", how: "test", desc: "TC-S0.T2.d 검사 종류마다 이빨 (하위 테스트 포함 13)", cmd: nodeTest("scripts/gate.test.mjs", "TC-S0.T2.d"), expectPassed: 13 },
+      { id: "G-K0.5", how: "test", desc: "TC-S0.T3 pre-push 훅 거부", cmd: nodeTest("scripts/hook.test.mjs", "TC-S0.T3"), expectPassed: 2 },
+      // K0.T1 gate test 판정 expectPassed
+      { id: "G-K0.6", how: "test", desc: "TC-K0.T1.a 통과 수가 expectPassed 와 다르면 실패", cmd: nodeTest("scripts/gate.test.mjs", "TC-K0.T1.a"), expectPassed: 1 },
+      { id: "G-K0.7", how: "test", desc: "TC-K0.T1.b 여러 vitest 요약을 합산", cmd: nodeTest("scripts/gate.test.mjs", "TC-K0.T1.b"), expectPassed: 1 },
+      { id: "G-K0.8", how: "test", desc: "TC-K0.T1.c strictTests 단계의 expectPassed 없는 test 검사 실패", cmd: nodeTest("scripts/gate.test.mjs", "TC-K0.T1.c"), expectPassed: 1 },
+      { id: "G-K0.9", how: "test", desc: "TC-K0.T1.d expectPassed 없는 1단계 검사는 통과 ≥ 1 그대로", cmd: nodeTest("scripts/gate.test.mjs", "TC-K0.T1.d"), expectPassed: 1 },
+      // K0.T2 봉인된 단계만 CI 단계 잡 요구
+      { id: "G-K0.10", how: "test", desc: "TC-K0.T2.a·b 봉인된 단계만 단계 잡 요구 (음성 대조 포함)", cmd: "node --test --test-reporter=tap test/check-ci-matrix.test.mjs", expectPassed: 2 },
+      // K0.T3 main 에서 앞 실행을 취소하지 않음 (S7 리뷰 L5)
+      { id: "G-K0.11", how: "cmd", desc: "TC-K0.T3.a·b concurrency 규칙 (음성 대조 포함)", cmd: "node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-guard/concurrency-cancel-main.yml --expect 6 --expect-fail" },
+      // K0.T4 확인 결과 검사기 항목 묶음
+      { id: "G-K0.12", how: "test", desc: "TC-K0.T4.a~e check-verify --set 음성 대조", cmd: nodeTest("scripts/check-verify.test.mjs", "TC-K0.T4"), expectPassed: 5 },
+      { id: "G-K0.13", how: "cmd", desc: "확인 파일 6개 존재·모양", cmd: "node scripts/check-verify.mjs present --set phase2" },
+      { id: "G-K0.14", how: "cmd", desc: "설계를 막는 결과 없음", cmd: "node scripts/check-verify.mjs unblocked --set phase2" },
+      { id: "G-K0.15", how: "cmd", desc: "막았던 결과는 현재 계획서 버전을 가리킴", cmd: "node scripts/check-verify.mjs resolved --set phase2" },
+      // K0.T5~T10 확인 항목 (계약 환경 127.0.0.1:20170 에서 관찰 == V<n>.json answer)
+      { id: "G-K0.16", how: "test", requires: ["local-services"], desc: "TC-K0.T5.a V12 키 그룹·쿼터 풀 공동 예산", cmd: 'pnpm test:contract -t "TC-K0.T5.a"', expectPassed: 1 },
+      { id: "G-K0.17", how: "test", requires: ["local-services"], desc: "TC-K0.T6.a V13 call-logs 키 거르기", cmd: 'pnpm test:contract -t "TC-K0.T6.a"', expectPassed: 1 },
+      { id: "G-K0.18", how: "cmd", requires: ["local-services"], desc: "TC-K0.T7.a V15 분석 API 측정 재현", cmd: "node tests/bench/analytics.mjs --assert" },
+      { id: "G-K0.19", how: "json", desc: "V15 기록 수 ≥ 300,000", file: "docs/verify/V15.json", path: "answer.dataset.records", op: ">=", value: 300000 },
+      { id: "G-K0.20", how: "json", desc: "V15 키 수 ≥ 300", file: "docs/verify/V15.json", path: "answer.dataset.keys", op: ">=", value: 300 },
+      { id: "G-K0.21", how: "json", desc: "V15 전체 키 한 달 분석 p95 ≤ 5,000ms", file: "docs/verify/V15.json", path: "answer.fullMonth.p95Ms", op: "<=", value: 5000 },
+      { id: "G-K0.22", how: "json", desc: "V15 회원 하나 분석 p95 ≤ 1,000ms", file: "docs/verify/V15.json", path: "answer.member.p95Ms", op: "<=", value: 1000 },
+      { id: "G-K0.23", how: "json", desc: "V15 측정 횟수 ≥ 10", file: "docs/verify/V15.json", path: "answer.fullMonth.runs", op: ">=", value: 10 },
+      { id: "G-K0.24", how: "test", requires: ["local-services"], desc: "TC-K0.T8.a V18 삭제한 키 기록이 분석에 남음", cmd: 'pnpm test:contract -t "TC-K0.T8.a"', expectPassed: 1 },
+      { id: "G-K0.25", how: "test", requires: ["local-services"], desc: "TC-K0.T9.a V19 regenerate 의 id·누적 지출·예산", cmd: 'pnpm test:contract -t "TC-K0.T9.a"', expectPassed: 1 },
+      { id: "G-K0.26", how: "test", requires: ["local-services"], desc: "TC-K0.T10.a·b·c V20 월 예산 시간대·달 중간 변경·경계값", cmd: 'pnpm test:contract -t "TC-K0.T10"', expectPassed: 3 },
+      // K0.T11 예산 차단 판정 도우미 (amd64·arm64 빌드 차이)
+      { id: "G-K0.27", how: "test", desc: "TC-K0.T11.a 두 빌드의 예산 차단은 참, 일반 429 는 거짓", cmd: nodeTest("tests/contract/budget-block.test.mjs", "TC-K0.T11.a"), expectPassed: 1 },
+      // K0.T12 계획서 개정 (설계 공백 Q1~Q6)
+      { id: "G-K0.28", how: "grep", desc: "TC-K0.T12.a 계획서 v5.6 변경 이력이 공백 Q1~Q6 을 닫음", pattern: "^- v5\\.6: .*Q1.*Q2.*Q3.*Q4.*Q5.*Q6", in: ["docs/design/omniroute-member-layer.md"], op: "==", limit: 1 },
+      { id: "G-K0.29", how: "grep", desc: "계획서 상태 줄이 v5.6 이상", pattern: "^상태: 초안 v5\\.([6-9]|[1-9][0-9])", in: ["docs/design/omniroute-member-layer.md"], op: "==", limit: 1 },
+      // K0.T13 필수 검사·병합 방식 대조
+      { id: "G-K0.30", how: "test", desc: "TC-K0.T13.a·b 필수 검사 대조기 음성 대조", cmd: "node --test --test-reporter=tap test/check-required-checks.test.mjs", expectPassed: 2 },
+      { id: "G-K0.31", how: "cmd", desc: "TC-K0.T13.c·TC-K0.T15.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
+      // K0.T14 재현 빨강 확인 장치와 이 단계의 행동 변경 재현
+      { id: "G-K0.34", how: "test", desc: "TC-K0.T14.a·b·c 재현 빨강 확인기 음성 대조", cmd: "node --test --test-reporter=tap test/check-red.test.mjs", expectPassed: 3 },
+      { id: "G-K0.35", how: "cmd", desc: "재현 빨강: TC-K0.T1.a 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K0.6 --since seal:S7" },
+      { id: "G-K0.36", how: "cmd", desc: "재현 빨강: TC-K0.T3.a 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K0.11 --since seal:S7" },
+      // 이 단계의 CI 잡과 스크립트 테스트 전부
+      { id: "G-K0.32", how: "grep", desc: "TC-K0.T15.a CI 단계 잡 (K0)", pattern: "^\\s+run: node scripts/gate\\.mjs K0\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
+      { id: "G-K0.33", how: "cmd", desc: "스크립트 테스트 전부", cmd: 'node --test --test-reporter=tap "scripts/*.test.mjs"' },
+    ],
+  },
+  K1: {
+    needs: ["K0"],
+    waivable: false,
+    strictTests: true,
+    outputs: [
+      "packages/runtime/src/lease.ts", "packages/runtime/src/node.ts", "packages/runtime/src/workers.ts", "packages/runtime/src/types.ts",
+      "packages/runtime/test/**", "packages/db/src/schema/**", "packages/db/migrations/**", "packages/db/test/**",
+      "apps/server/src/jobs.ts", "apps/server/src/queue/**", "apps/server/test/queue/**", "apps/server/wrangler.toml",
+    ],
+    checks: [],
+  },
+  K2: {
+    needs: ["K1"],
+    waivable: false,
+    strictTests: true,
+    outputs: ["packages/omniroute/src/**", "apps/server/src/limits/**", "apps/server/test/limits/**", "apps/server/test/contract/limits/**"],
+    checks: [],
+  },
+  K3: {
+    needs: ["K2"],
+    waivable: false,
+    strictTests: true,
+    outputs: ["apps/server/src/keys/**", "apps/server/test/keys/**", "apps/server/test/contract/keys/**"],
+    checks: [],
+  },
+  K4: {
+    needs: ["K3"],
+    waivable: false,
+    strictTests: true,
+    outputs: ["apps/server/src/routes/**", "apps/server/test/routes/**", "apps/server/test/contract/routes/**"],
+    checks: [],
+  },
+  K5: {
+    needs: ["K4"],
+    waivable: false,
+    strictTests: true,
+    outputs: ["tests/e2e/keys/**", "tests/e2e/claude-code/**"],
+    checks: [],
+  },
+  K6: {
+    needs: ["K5"],
+    waivable: false,
+    strictTests: true,
+    outputs: [],
+    checks: [],
+  },
 };
