@@ -200,16 +200,14 @@ export async function issueKey(h: DbHandle, m: Member, opts: IssueOptions): Prom
     throw new IssueError(502, "omniroute_failed");
   }
   const preview = created.key.slice(-4);
-  let disabled = false;
   try {
     await h.db.update(k).set({ omnirouteKeyId: created.id, keyPreview: preview }).where(eq(k.id, id));
     await opts.client().setKeyActive(created.id, false);
-    disabled = true;
     // 예산을 먼저 걸고 켜게 limit 으로 꺼진 키로 둔다. 분배가 예산 → 켜기를 한다 (위 3번)
     await h.db.update(k).set({ disabledReason: "limit", budgetAt: null, budgetUsd: null, budgetMonth: null }).where(eq(k.id, id));
     await budgetThenEnable(h, m.id, id, now, opts.client);
   } catch (e) {
-    await rollback(h, opts.client, { id, omnirouteKeyId: created.id }, disabled, now, log);
+    await rollback(h, opts.client, { id, omnirouteKeyId: created.id }, now, log);
     if (e instanceof IssueError) throw e;
     log(`[keys] 발급 실패: 끄기·예산·켜기 (회원 ${m.id}, OmniRoute 키 ${created.id}) ${describeError(e)}`);
     throw new IssueError(502, "omniroute_failed");
@@ -237,10 +235,10 @@ async function budgetThenEnable(h: DbHandle, userId: string, keyId: string, now:
 }
 
 /**
- * 만든 키를 되돌린다. deleteKey 가 되면 행을 지운다. 안 되면 아직 끄지 못한 키를 끄고(실패해도 진행) key.rollback 을 넣고
+ * 만든 키를 되돌린다. deleteKey 가 되면 행을 지운다. 안 되면 키를 끄고(실패해도 진행) key.rollback 을 넣고
  * 행을 state deleted 로 남긴다 (정합성 점검이 끄고 지운다)
  */
-async function rollback(h: DbHandle, client: ClientFor<KeysClient>, key: { id: string; omnirouteKeyId: string }, disabled: boolean, now: Date, log: (line: string) => void) {
+async function rollback(h: DbHandle, client: ClientFor<KeysClient>, key: { id: string; omnirouteKeyId: string }, now: Date, log: (line: string) => void) {
   const k = h.schema.apiKeys;
   try {
     await client().deleteKey(key.omnirouteKeyId);
@@ -249,7 +247,8 @@ async function rollback(h: DbHandle, client: ClientFor<KeysClient>, key: { id: s
   } catch (e) {
     log(`[keys] 되돌리기 실패: deleteKey (OmniRoute 키 ${key.omnirouteKeyId}) ${describeError(e)}. key.rollback 에 넣는다`);
   }
-  if (!disabled) await client().setKeyActive(key.omnirouteKeyId, false).catch(() => undefined);
+  // 끄기 단계 뒤라도 분배가 이미 켰을 수 있다. 늘 다시 끈다 (실패해도 진행: 정합성 점검이 목표 "삭제됨"으로 끈다)
+  await client().setKeyActive(key.omnirouteKeyId, false).catch(() => undefined);
   await h.db.update(k).set({ state: "deleted", deletedAt: now, disabledReason: "member", syncState: "pending" }).where(eq(k.id, key.id));
   await enqueue(h, "key.rollback", { keyId: key.id, omnirouteKeyId: key.omnirouteKeyId }, { now });
 }
