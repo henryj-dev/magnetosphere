@@ -51,7 +51,8 @@ export function upWithMock(stack) {
       break;
     } catch (e) {
       if (n === 3) throw e;
-      console.error(`[e2e] docker compose up 실패. ${ms / 1000}초 뒤 다시 띄운다 (${n}/3)\n${e.message.slice(0, 500)}`);
+      // GitHub Actions 경고 주석 형식이라 CI 실행 요약에 남는다 (K5 리뷰 L5)
+      console.error(`::warning title=docker compose up 재시도::[e2e] docker compose up 실패. ${ms / 1000}초 뒤 다시 띄운다 (${n}/3)\n${e.message.slice(0, 500)}`);
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
     }
   }

@@ -340,9 +340,14 @@ jobs:
       - name: 시험용 OmniRoute (계약 환경, 가짜 상위 서버 mko·mka)
         run: |
           # Docker Hub 가 이미지 받기에 가끔 502 를 준다. 5초·15초 쉬고 세 번까지 (scripts/compose-up.mjs 와 같은 간격)
+          # 다시 할 때마다 경고 주석을 남긴다. 느린 healthcheck 가 재시도에 묻히지 않고 실행 요약에 보이게 (K5 리뷰 L5)
+          n=1
           for wait in 5 15 0; do
             docker compose -f tests/contract/docker-compose.yml up -d --wait && break
             if [ "$wait" = 0 ]; then exit 1; fi
+            echo "::warning title=docker compose up 재시도::계약 환경 띄우기 실패 ($n/3). ${wait}초 뒤 다시 띄운다"
+            docker compose -f tests/contract/docker-compose.yml ps -a || true
+            n=$((n + 1))
             sleep "$wait"
           done
           node tests/contract/setup.mjs

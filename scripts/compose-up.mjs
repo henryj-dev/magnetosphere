@@ -14,7 +14,8 @@ export function composeUp(file, services = [], { tries = 3, waitMs = [5_000, 15_
     const r = spawnSync(docker, ["compose", "-f", file, "up", "-d", "--wait", ...services], { stdio: "inherit" });
     if (r.status === 0 || n >= tries) return r;
     const ms = waitMs[Math.min(n - 1, waitMs.length - 1)];
-    console.error(`docker compose up 실패 (종료코드 ${r.status}). ${ms / 1000}초 뒤 다시 띄운다 (${n}/${tries}).`);
+    // GitHub Actions 경고 주석 형식이라 CI 실행 요약에 남는다. 느린 healthcheck 가 재시도에 묻히지 않게 (K5 리뷰 L5)
+    console.error(`::warning title=docker compose up 재시도::docker compose up 실패 (종료코드 ${r.status}). ${ms / 1000}초 뒤 다시 띄운다 (${n}/${tries}).`);
     pause(ms);
   }
 }
