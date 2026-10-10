@@ -20,6 +20,13 @@
 //     그 뒤 날이 바뀐 첫 실행은 다시 한 번 호출로 대조한다.
 //   - 키·날마다 차이가 DRIFT_USD 보다 큰 것이 하나라도 있으면 audit_log alert.usage_drift 1행(차이 난 키·날 수, 합계 차이).
 //     처음 확정(usage_daily_confirmed 없음)은 저장값이 없어 차이가 아니므로 알리지 않는다.
+//   - 응답에 없는 키는 "자료 없음"이다. 그 키의 저장값을 0 으로 지우지 않는다 (K2 리뷰). OmniRoute 3.8.51 의 byApiKey 는
+//     개수 제한이 없다 (V15.json evidence).
+// 저장값과 분석 창의 경계 (coveredUntil, K2 리뷰 M1)
+//   - 이 날 전은 usage_daily 의 정확한 저장값, 이 날부터 지금까지는 분석 창 한 번으로 센다. 분할 대조가 남아 있으면 그 다음 날
+//     (split.next)이 경계다: 공백이 이틀 넘거나 처음 설치한 날 대조가 시간 초과면 저장되지 않은 날이 있기 때문이다.
+//     분할이 하루씩 나아가면 경계도 따라 나아간다. 경계 뒤를 덮는 분석 창이 실패하면 그 실행은 실패다 (예산을 바꾸지 않는다).
+//   - 분할 대조의 하루 창이 시간 초과면 그날만 다음 실행으로 미룬다. 그날은 여전히 경계 뒤라 분석 창으로 센다 (K2 리뷰 L3).
 // 1분 분배의 임대 아래에서 돈다. 쓰기는 펜싱한다 (store.ts).
 import { and, eq, gte, lt } from "drizzle-orm";
 import type { Analytics } from "@magnetosphere/omniroute";
@@ -111,8 +118,10 @@ export async function coveredUntil(h: DbHandle, now: Date): Promise<Date> {
   const today = dayKey(now);
   const first = dayKey(monthStart(now));
   const confirmed = await readSetting<string>(h, CONFIRMED_KEY);
-  if (!confirmed || confirmed <= first) return dayOf(first);
-  return dayOf(confirmed < today ? confirmed : today);
+  let until = !confirmed || confirmed <= first ? first : confirmed < today ? confirmed : today;
+  const split = await readSetting<SplitState>(h, SPLIT_KEY);
+  if (split && split.next < split.until && split.next < until) until = split.next;
+  return dayOf(until < first ? first : until);
 }
 
 const isTimeout = (e: unknown, signal: AbortSignal | undefined) => !signal?.aborted && e instanceof Error && e.name === "TimeoutError";
@@ -123,14 +132,13 @@ async function saveCost(h: DbHandle, lease: Lease | undefined, keyId: string, da
 }
 
 /**
- * 하루 값을 정확히 덮는다. 응답에 없는 키의 저장값은 0 이다. 바뀐 저장값을 돌려준다.
+ * 하루 값을 응답대로 덮는다. 응답에 없는 키는 자료 없음이라 저장값을 그대로 둔다. 바뀐 저장값을 돌려준다.
  * 새로 생긴 행은 대조(countNew)에서만 차이다 — 날 확정에서는 처음 저장하는 값이다.
  */
 async function saveDay(h: DbHandle, lease: Lease | undefined, day: string, costs: Map<string, number>, now: Date, countNew: boolean): Promise<{ keyId: string; day: string; diff: number }[]> {
   const old = new Map((await storedRows(h, day, addDays(day, 1))).map((r) => [r.keyId, r.costUsd]));
   const diffs: { keyId: string; day: string; diff: number }[] = [];
-  for (const keyId of new Set([...old.keys(), ...costs.keys()])) {
-    const next = costs.get(keyId) ?? 0;
+  for (const [keyId, next] of costs) {
     const prev = old.get(keyId);
     if (prev === undefined ? next === 0 : Math.abs(next - prev) <= DRIFT_USD) continue;
     await saveCost(h, lease, keyId, day, next, now);
@@ -169,9 +177,9 @@ async function reconcileTotals(h: DbHandle, lease: Lease | undefined, from: stri
   }
   const fallback = addDays(until, -1);
   const diffs: { keyId: string; day: string; diff: number }[] = [];
-  for (const keyId of new Set([...byKey.keys(), ...totals.keys()])) {
+  // 응답에 없는 키는 자료 없음: 저장값을 그대로 둔다
+  for (const [keyId, total] of totals) {
     const days = byKey.get(keyId) ?? new Map<string, number>();
-    const total = totals.get(keyId) ?? 0;
     if (Math.abs(total - [...days.values()].reduce((s, v) => s + v, 0)) <= DRIFT_USD) continue;
     for (const [day, v] of redistribute(days, total, fallback)) {
       const prev = days.get(day) ?? 0;
@@ -238,7 +246,15 @@ export async function confirmDays(h: DbHandle, now: Date, client: ClientFor<Anal
   const split = await readSetting<SplitState>(h, SPLIT_KEY);
   if (split && split.next < split.until) {
     const day = split.next;
-    const a = await client({ timeoutMs: RECONCILE_TIMEOUT_MS }).getAnalytics({ startDate: dayOf(day), endDate: endOfDay(day) });
+    let a: Analytics;
+    try {
+      a = await client({ timeoutMs: RECONCILE_TIMEOUT_MS }).getAnalytics({ startDate: dayOf(day), endDate: endOfDay(day) });
+    } catch (e) {
+      // 그날만 다음 실행으로 미룬다. 경계(coveredUntil)가 그날이라 분배는 그날부터 분석 창으로 센다
+      if (!isTimeout(e, signal)) throw e;
+      result.timedOut = true;
+      return result;
+    }
     const diffs = await saveDay(h, lease, day, costsOf(a, mapped), now, true);
     result.reconciled = { from: day, until: addDays(day, 1) };
     result.drift = await alertDrift(h, lease, diffs, result.reconciled, now);
