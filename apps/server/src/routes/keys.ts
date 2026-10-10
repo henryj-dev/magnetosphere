@@ -10,6 +10,7 @@
 // 공통
 //   - 회원 세션 필요 (401). 역할·상태는 DB 에서 읽는다. 탈퇴(deleted) 회원은 모두 403.
 //   - 키는 id 와 세션 회원 id 로 함께 찾는다. 남의 키·삭제한 키·없는 키는 모두 404 이고 OmniRoute 를 부르지 않는다.
+//   - 변경 요청은 같은 출처만 (guard.ts sameOrigin, app.ts 에서 건다). 발급·재발급은 요청 수 제한 (Q4, 429).
 //   - OmniRoute 연결(주소·관리 토큰)이 없으면 OmniRoute 를 부르는 요청은 503 omniroute_unavailable.
 import { and, asc, eq, ne } from "drizzle-orm";
 import { Hono, type Context } from "hono";
@@ -17,7 +18,7 @@ import { applyKey, KeyConflictError, requestEnable } from "../keys/apply.ts";
 import { readTarget } from "../keys/target.ts";
 import type { ClientFor } from "../limits/daily.ts";
 import type { Services } from "../app.ts";
-import { sessionMember, type Member } from "./guard.ts";
+import { consumeIssue, sessionMember, type Member } from "./guard.ts";
 import { IssueError, issueKey, maxKeysOf, type KeysClient } from "./issue.ts";
 
 /** 이름 최대 길이 */
@@ -107,10 +108,11 @@ export function keyRoutes(services: () => Promise<Services>) {
     return c.json({ keys: rows.map(view), maxKeys, remainingSlots: Math.max(maxKeys - rows.length, 0) });
   });
 
-  /** 발급·재발급 공통 */
+  /** 발급·재발급 공통: 요청 수 제한 → 발급 */
   const issue = async (c: Context, s: Services, m: Member, label: string | null, replacing?: string) => {
     if (m.status !== "active") return c.json({ error: "member_inactive" }, 403);
     if (!m.emailVerified) return c.json({ error: "email_unverified" }, 403);
+    if (!(await consumeIssue(s.db, m.id, (await s.clientIp?.(c.req.raw)) ?? null))) return c.json({ error: "too_many_requests" }, 429);
     const client = await clientOf(c, s);
     if (client instanceof Response) return client;
     try {

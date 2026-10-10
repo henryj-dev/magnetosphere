@@ -1,7 +1,11 @@
-// 회원·관리자 API 공용 검사 (계획서 v5.7 4.5·4.6).
+// 회원·관리자 API 공용 검사 (계획서 v5.7 4.5·4.6·7장, K4.T4).
+//   - CSRF: /api/me/*·/api/admin/* 의 GET·HEAD 아닌 요청은 Origin 이 BETTER_AUTH_URL 출처와 같아야 한다. Origin 이 없어도 403.
+//     세션 쿠키가 SameSite=Lax 라도 같은 사이트의 다른 하위 도메인 페이지는 쿠키를 실어 보낼 수 있다 (7장 "변경 API 는 CSRF 보호").
 //   - 세션: Better Auth get-session 으로 회원 id 만 얻고, 역할·상태·한도는 DB 에서 읽는다 (세션 응답의 값을 믿지 않는다).
-import { eq } from "drizzle-orm";
-import type { Context } from "hono";
+//   - 요청 수 제한: 키 발급·재발급은 회원당 1시간 10회, 클라이언트 IP 당 1시간 30회 (계획서 v5.6 Q4). 저장소는 rate_limit 테이블이라
+//     여러 인스턴스가 함께 센다. 한 칸은 "처음 요청 시각부터 1시간" 고정 창이다. 칸 넣기·올리기가 DB 한 문장씩이라 동시에 와도 넘지 않는다.
+import { and, eq, lt, sql } from "drizzle-orm";
+import type { Context, MiddlewareHandler } from "hono";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import type { Services } from "../app.ts";
 
@@ -13,6 +17,19 @@ export interface Member {
   emailVerified: boolean;
   monthlyLimitUsd: number | null;
   maxKeys: number | null;
+}
+
+const SAFE_METHODS = new Set(["GET", "HEAD"]);
+
+/** 변경 요청의 Origin 검사. appOrigin 을 모르면(설정 누락) 모든 변경 요청을 막는다 (fail-closed) */
+export function sameOrigin(services: () => Promise<Services>): MiddlewareHandler {
+  return async (c, next) => {
+    if (SAFE_METHODS.has(c.req.method)) return next();
+    const want = (await services()).appOrigin;
+    const got = c.req.header("origin");
+    if (!want || !got || got !== want) return c.json({ error: "forbidden_origin" }, 403);
+    return next();
+  };
 }
 
 /** 요청의 세션 회원. 세션이 없거나 DB 에 회원이 없으면 401 응답 */
@@ -50,4 +67,31 @@ export async function sessionAdmin(c: Context, s: Services): Promise<Member | Re
   if (m instanceof Response) return m;
   if (m.role !== "admin" || m.status !== "active") return c.json({ error: "forbidden" }, 403);
   return m;
+}
+
+/** 키 발급·재발급 요청 수 제한 (Q4) */
+export const ISSUE_LIMITS = {
+  member: { max: 10, windowMs: 60 * 60_000 },
+  ip: { max: 30, windowMs: 60 * 60_000 },
+} as const;
+
+/** rate_limit 칸 하나에서 한 번을 쓴다. 창 안에서 max 번을 이미 썼으면 false */
+export async function consume(h: DbHandle, key: string, max: number, windowMs: number, now: number): Promise<boolean> {
+  const t = h.schema.rateLimit;
+  await h.db.delete(t).where(and(eq(t.key, key), lt(t.lastRequest, now - windowMs)));
+  const row = { id: crypto.randomUUID(), key, count: 1, lastRequest: now };
+  const inserted =
+    h.provider === "mysql"
+      ? (await h.db.insert(t).ignore().values(row))[0].affectedRows === 1
+      : (await h.db.insert(t).values(row).onConflictDoNothing().returning()).length === 1;
+  if (inserted) return true;
+  const bump = h.db.update(t).set({ count: sql`${t.count} + 1` }).where(and(eq(t.key, key), lt(t.count, max)));
+  if (h.provider === "mysql") return (await bump)[0].affectedRows === 1;
+  return (await bump.returning()).length === 1;
+}
+
+/** 발급·재발급 한 번. 회원 칸을 먼저 쓰고, 넘지 않았을 때만 IP 칸을 쓴다. 둘 중 하나라도 넘으면 false */
+export async function consumeIssue(h: DbHandle, userId: string, ip: string | null, now = Date.now()): Promise<boolean> {
+  if (!(await consume(h, `key-issue|member|${userId}`, ISSUE_LIMITS.member.max, ISSUE_LIMITS.member.windowMs, now))) return false;
+  return consume(h, `key-issue|ip|${ip ?? "unknown"}`, ISSUE_LIMITS.ip.max, ISSUE_LIMITS.ip.windowMs, now);
 }
