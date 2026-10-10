@@ -2,11 +2,12 @@
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { OmniRouteError } from "@magnetosphere/omniroute";
+import { OmniRouteError, type OmniRouteClient } from "@magnetosphere/omniroute";
 import { acquireLease, LeaseLostError } from "@magnetosphere/runtime/lease";
 import { connectNode } from "@magnetosphere/runtime/node";
 import type { DbHandle } from "@magnetosphere/runtime/types";
-import { ACTIONS, CLAIM_MS, DUE_GRACE_MS, enqueue, isLongFailed, RETRY_DELAYS_MS, runDue, type Handler, type Handlers } from "../../src/queue/index.ts";
+import { ACTIONS, CLAIM_MS, DUE_GRACE_MS, enqueue, KEY_DELETE_DELAY_MS, isLongFailed, RETRY_DELAYS_MS, runDue, type Handler, type Handlers } from "../../src/queue/index.ts";
+import { omnirouteHandlers } from "../../src/queue/handlers.ts";
 import { makeTestEnv, type TestEnv } from "../helpers.ts";
 
 const T0 = new Date("2026-10-01T00:00:00.000Z");
@@ -113,7 +114,7 @@ describe("TC-K1.T3.b 재시도를 다 써도 실패하면 대상 키가 failed �
 
 describe("TC-K1.T3.d 성공한 작업은 done_at 이 찍히고 다시 돌지 않는다", () => {
   it("성공 → done_at 설정, attempts 1, 다음 runDue 에서 호출 0", async () => {
-    const id = await enqueue(h, "key.rollback", { omnirouteKeyId: "k" }, { now: T0 });
+    const id = await enqueue(h, "key.rollback", { keyId: "key-k", omnirouteKeyId: "k" }, { now: T0 });
     // 아직 차례가 아닌 작업은 집지 않는다 (대조)
     const later = await enqueue(h, "budget.set", { omnirouteKeyId: "k", monthlyUsd: 2 }, { runAt: new Date(T0.getTime() + 60_000) });
     const calls: string[] = [];
@@ -158,7 +159,7 @@ describe("TC-K1.T3.h 망가진 payload 는 곧바로 failed 로 두고 큐를 �
     const j = h.schema.omnirouteJobs;
     const broken = randomUUID();
     await h.db.insert(j).values({ id: broken, action: "key.apply_state", payload: "{broken", keyId, attempts: 0, nextRunAt: T0 });
-    const good = await enqueue(h, "key.rollback", { omnirouteKeyId: "k" }, { runAt: new Date(T0.getTime() + 1) });
+    const good = await enqueue(h, "key.rollback", { keyId: "key-k", omnirouteKeyId: "k" }, { runAt: new Date(T0.getTime() + 1) });
     const calls: string[] = [];
     const result = await runDue(h, all(async (_p, { job }) => void calls.push(job.id)), new Date(T0.getTime() + 1));
     expect(calls).toEqual([good]);
@@ -222,5 +223,31 @@ describe("TC-K1.T3.l 실패 처리가 계속 실패해도 OmniRoute 호출을 �
     await runDue(h, handlers, new Date(T0.getTime() + CLAIM_MS));
     expect(calls).toEqual([]);
     expect((await jobRow(id)).failedAt).toBeInstanceOf(Date);
+  });
+});
+
+describe("TC-K1.T3.n key.* 작업은 keyId 없이 넣을 수 없다 (delete 우선이 조용히 꺼지지 않게)", () => {
+  it("key.delete·key.rollback·key.apply_state 를 keyId 없이 → TypeError·행 0, keyId 가 있으면 key_id 칼럼에 남고 미완료 key.delete 가 켜기를 막는다", async () => {
+    const runAt = new Date(T0.getTime() + KEY_DELETE_DELAY_MS);
+    for (const [action, payload, opts] of [
+      ["key.delete", { omnirouteKeyId: "k" }, { runAt }],
+      ["key.rollback", { omnirouteKeyId: "k" }, { now: T0 }],
+      ["key.apply_state", {}, { now: T0 }],
+      ["key.delete", { keyId: "", omnirouteKeyId: "k" }, { runAt }],
+    ] as const) {
+      await expect(enqueue(h, action, payload, opts), `${action} ${JSON.stringify(payload)}`).rejects.toThrow(TypeError);
+    }
+    expect(await h.db.select().from(h.schema.omnirouteJobs)).toHaveLength(0);
+
+    // 켜져 있어야 할 키에 미완료 key.delete 가 있으면 반영은 끈다 (delete 가 이긴다)
+    const keyId = await keyRow();
+    await h.db.update(h.schema.apiKeys).set({ state: "active" }).where(eq(h.schema.apiKeys.id, keyId));
+    const del = await enqueue(h, "key.delete", { keyId, omnirouteKeyId: `ork-${keyId}` }, { runAt });
+    expect((await jobRow(del)).keyId).toBe(keyId);
+    await enqueue(h, "key.apply_state", { keyId }, { now: T0 });
+    const set: boolean[] = [];
+    const client = { setKeyActive: async (_id: string, v: boolean) => void set.push(v) } as unknown as OmniRouteClient;
+    await runDue(h, omnirouteHandlers(() => client), T0);
+    expect(set).toEqual([false]);
   });
 });

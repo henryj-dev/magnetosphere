@@ -22,7 +22,7 @@ describe.each(enabledDbs())("%s", (kind: DbKind) => {
   it(`TC-K1.T3.c ${LABEL[kind]}: 작업 20개, 실행기 둘 동시 runDue → 작업마다 핸들러 호출 정확히 1`, async () => {
     const now = new Date("2026-10-01T00:00:00.000Z");
     const ids: string[] = [];
-    for (let i = 0; i < 20; i++) ids.push(await enqueue(a, "key.rollback", { omnirouteKeyId: `ork-${i}` }, { now }));
+    for (let i = 0; i < 20; i++) ids.push(await enqueue(a, "key.rollback", { keyId: `key-${i}`, omnirouteKeyId: `ork-${i}` }, { now }));
     const calls = new Map<string, string[]>();
     const runner = (name: string): Handlers => {
       const handler: Handler = async (_p, { job }) => {
