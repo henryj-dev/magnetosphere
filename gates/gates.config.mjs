@@ -329,7 +329,34 @@ export const GATES = {
     waivable: false,
     strictTests: true,
     outputs: ["packages/db/migrations/*/0001_*", "packages/runtime/test/lease-fence/**", "apps/server/src/queue/**", "apps/server/test/queue/**"],
-    checks: [],
+    checks: [
+      // K1.T1 job_leases.fence·omniroute_jobs.failed_at
+      { id: "G-K1.1", how: "test", requires: ["local-services"], desc: "TC-K1.T1.a 다섯 DB fence·failed_at 칼럼 (0000 → 기존 행 → 0001)", cmd: 'pnpm -C packages/db test:migrate -t "TC-K1.T1.a" --db sqlite,mysql,mariadb,pg,d1', expectPassed: 5 },
+      { id: "G-K1.2", how: "cmd", desc: "TC-K1.T1.b 생성물·드리프트", cmd: "pnpm -C packages/db gen && git diff --exit-code packages/db/src/schema/ && pnpm -C packages/db check:drift" },
+      // K1.T2 임대 하트비트·펜싱 (S4 보안 리뷰 L4)
+      { id: "G-K1.3", how: "test", requires: ["local-services"], desc: "TC-K1.T2.a 하트비트가 있는 동안 다른 인스턴스는 임대를 못 잡는다", cmd: 'pnpm -C packages/runtime test:db -t "TC-K1.T2.a" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-K1.4", how: "test", requires: ["local-services"], desc: "TC-K1.T2.b 임대를 잃은 쪽의 펜싱 쓰기는 0행", cmd: 'pnpm -C packages/runtime test:db -t "TC-K1.T2.b" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-K1.5", how: "test", desc: "TC-K1.T2.c 하트비트 실패면 작업 신호가 끊기고 호출이 멈춘다", cmd: 'pnpm -C packages/runtime test -t "TC-K1.T2.c"', expectPassed: 1 },
+      { id: "G-K1.6", how: "test", requires: ["local-services"], desc: "TC-K1.T2.d fence 는 같은 이름에서 엄격히 증가", cmd: 'pnpm -C packages/runtime test:db -t "TC-K1.T2.d" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      // K1.T3 작업 큐와 재시도 (계획서 v5.6 Q2·Q3·Q6)
+      { id: "G-K1.7", how: "test", desc: "TC-K1.T3.a 재시도 간격 60,000·120,000·600,000·1,800,000ms", cmd: 'pnpm -C apps/server test -t "TC-K1.T3.a"', expectPassed: 1 },
+      { id: "G-K1.8", how: "test", desc: "TC-K1.T3.b 재시도 소진 → failed_at·sync_state failed·alert.job_failed", cmd: 'pnpm -C apps/server test -t "TC-K1.T3.b"', expectPassed: 1 },
+      { id: "G-K1.9", how: "test", requires: ["local-services"], desc: "TC-K1.T3.c 동시 실행기 둘, 작업마다 핸들러 한 번", cmd: 'pnpm -C apps/server test:db -t "TC-K1.T3.c" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-K1.10", how: "test", desc: "TC-K1.T3.d 완료 기록", cmd: 'pnpm -C apps/server test -t "TC-K1.T3.d"', expectPassed: 1 },
+      { id: "G-K1.11", how: "test", desc: "TC-K1.T3.e last_error 에 비밀 값 없음", cmd: 'pnpm -C apps/server test -t "TC-K1.T3.e"', expectPassed: 1 },
+      // K1.T4 주기 작업 등록
+      { id: "G-K1.12", how: "test", desc: "TC-K1.T4.a 큐 실행기 1분 주기 등록", cmd: 'pnpm -C apps/server test -t "TC-K1.T4.a"', expectPassed: 1 },
+      { id: "G-K1.13", how: "test", desc: "TC-K1.T4.b wrangler crons 집합 == JOBS cron 집합", cmd: 'pnpm -C apps/server test -t "TC-K1.T4.b"', expectPassed: 1 },
+      { id: "G-K1.14", how: "test", requires: ["local-services"], desc: "TC-K1.T4.c Workers scheduled 는 받은 cron 의 작업만", cmd: 'pnpm -C apps/server test:workers -t "TC-K1.T4.c"', expectPassed: 1 },
+      { id: "G-K1.15", how: "test", requires: ["local-services"], desc: "TC-K1.T4.d Node 는 1분 경계마다 하나만", cmd: 'pnpm -C apps/server test:db -t "TC-K1.T4.d" --db mysql,pg', expectPassed: 2 },
+      { id: "G-K1.16", how: "grep", desc: "큐 실행기 등록", pattern: 'name: "omniroute_jobs"', in: ["apps/server/src/jobs.ts"], op: "==", limit: 1 },
+      { id: "G-K1.17", how: "grep", desc: "재시도 간격 상수", pattern: "\\[60_000, 120_000, 600_000, 1_800_000\\]", in: ["apps/server/src/queue"], op: "==", limit: 1 },
+      { id: "G-K1.18", how: "cmd", desc: "재현 빨강: TC-K1.T2.a 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K1.3 --since seal:K0" },
+      { id: "G-K1.19", how: "cmd", desc: "타입 검사", cmd: "pnpm -r typecheck" },
+      // K1.T5 CI 단계 잡과 ruleset 필수 검사
+      { id: "G-K1.20", how: "grep", desc: "TC-K1.T5.a CI 단계 잡 (K1)", pattern: "^\\s+run: node scripts/gate\\.mjs K1\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
+      { id: "G-K1.21", how: "cmd", desc: "TC-K1.T5.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
+    ],
   },
   K2: {
     needs: ["K1"],

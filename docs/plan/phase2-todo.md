@@ -494,12 +494,12 @@ TC-K0.T15.b  ruleset 필수 검사가 이 잡을 포함한다
 
 ---
 
-# K1 — 작업 기반: 임대·작업 큐·주기 등록 🔒 (K0 필요)
+# K1 — 작업 기반: 임대·작업 큐·주기 등록 🔓 (K0 필요)
 
 **브랜치** `p2/k1`.
 **outputs** `packages/db/migrations/*/0001_*`, `packages/runtime/test/lease-fence/**`, `apps/server/src/queue/**`, `apps/server/test/queue/**` (새 경로만, 0절). 이 단계가 고치는 기존 파일(`lease.ts`·`node.ts`·`workers.ts`·`types.ts`, `packages/db/src/schema/**`, `apps/server/src/jobs.ts`, `apps/server/wrangler.toml`)은 `outputs`에 없다. 스키마 변경(V19 결과의 `api_keys` 칼럼 포함)은 모두 이 단계가 한다.
 
-### ☐ K1.T1 — `job_leases` 펜싱 토큰 칼럼
+### ☑ K1.T1 — `job_leases` 펜싱 토큰 칼럼
 선행 없음 · 산출 `packages/db/src/schema/**`, `packages/db/migrations/{sqlite,mysql,pg}/0001_*` · 되돌리기 커밋 1개
 
 【작업】
@@ -516,9 +516,9 @@ TC-K1.T1.b  마이그레이션과 생성 스키마가 같다
 ```
 
 【통과】
-- [ ] G-K1.1 · G-K1.2 통과
+- [x] G-K1.1 · G-K1.2 통과
 
-### ☐ K1.T2 — 임대 하트비트·펜싱 (S4 보안 리뷰 L4)
+### ☑ K1.T2 — 임대 하트비트·펜싱 (S4 보안 리뷰 L4)
 선행 K1.T1 · 산출 `packages/runtime/src/lease.ts`, `packages/runtime/src/node.ts`, `packages/runtime/src/workers.ts`, `packages/runtime/test/lease-fence/**` · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-K1.T2.a`
 
 【작업】
@@ -542,10 +542,10 @@ TC-K1.T2.d  fence 는 같은 이름에서 엄격히 증가한다
 ```
 
 【통과】
-- [ ] G-K1.3 ~ G-K1.6 통과
-- [ ] G-K1.18 통과 (Red 커밋에서 TC-K1.T2.a 실패)
+- [x] G-K1.3 ~ G-K1.6 통과
+- [x] G-K1.18 통과 (Red 커밋에서 TC-K1.T2.a 실패)
 
-### ☐ K1.T3 — 작업 큐 `omniroute_jobs` 와 재시도
+### ☑ K1.T3 — 작업 큐 `omniroute_jobs` 와 재시도
 선행 K1.T2 · 산출 `apps/server/src/queue/**`, `apps/server/test/queue/**` · 되돌리기 커밋 1개
 
 【작업】
@@ -571,9 +571,9 @@ TC-K1.T3.e  last_error 에 비밀 값이 없다
 ```
 
 【통과】
-- [ ] G-K1.7 ~ G-K1.11 · G-K1.17 통과
+- [x] G-K1.7 ~ G-K1.11 · G-K1.17 통과
 
-### ☐ K1.T4 — 주기 작업 등록 (1분 분배·5분 정합성·큐 실행기)
+### ☑ K1.T4 — 주기 작업 등록 (1분 분배·5분 정합성·큐 실행기)
 선행 K1.T3 · 산출 `apps/server/src/jobs.ts`, `apps/server/wrangler.toml`, `packages/runtime/src/types.ts` · 되돌리기 커밋 1개
 
 【작업】
@@ -596,9 +596,9 @@ TC-K1.T4.d  Node 는 1분 경계마다 인스턴스 둘 중 하나만 1분 작�
 ```
 
 【통과】
-- [ ] G-K1.12 ~ G-K1.16 통과
+- [x] G-K1.12 ~ G-K1.16 통과
 
-### ☐ K1.T5 — K1 CI 잡과 봉인
+### ◐ K1.T5 — K1 CI 잡과 봉인
 선행 K1.T1 ~ K1.T4 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
 
 【작업】
