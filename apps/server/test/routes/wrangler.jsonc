@@ -1,0 +1,11 @@
+{
+  // TC-K4.T1.f 의 D1 시험 Worker. 배포하지 않는다. 회원 키 API(createApp)를 로컬 D1 에 붙이고, 세션·OmniRoute 는 가짜다 (issue-worker.ts).
+  // 마이그레이션은 시험이 wrangler d1 migrations apply --local 로 적용한다.
+  "name": "mg-server-keys-test",
+  "main": "./issue-worker.ts",
+  "compatibility_date": "2026-07-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "mg-server-keys-test", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "../../../../packages/db/migrations/sqlite" }
+  ]
+}

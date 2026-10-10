@@ -1,11 +1,13 @@
 // 서버 구성. 비밀 값은 런타임 어댑터의 secret() 으로 읽는다 (Node 는 환경 변수, Workers 는 env 바인딩).
 import { createAuth, type Mailer } from "@magnetosphere/auth";
+import { createClient } from "@magnetosphere/omniroute";
 import { consoleMailer, MailError } from "@magnetosphere/auth/mail";
 import { createCipher } from "@magnetosphere/runtime/crypto";
 import type { Runtime } from "@magnetosphere/runtime/types";
 import type { Services } from "./app.ts";
 import { assertSetupTokenStrength } from "./setup/index.ts";
 import { settingsMailer } from "./setup/mail.ts";
+import { readOmniRouteToken } from "./setup/omniroute.ts";
 
 export function requireSecret(rt: Runtime, name: string): string {
   const v = rt.secret(name);
@@ -56,5 +58,12 @@ export async function buildServices(rt: Runtime, opts: ServiceOptions): Promise<
   // 약한 SETUP_TOKEN 은 시작을 거부한다 (Node 는 시작 때, Workers 는 처음 요청 때 500 + 로그)
   const setupToken = rt.secret("SETUP_TOKEN") || null;
   assertSetupTokenStrength(setupToken);
-  return { db, auth, cipher, omniroute, setupToken, clientIp: rt.clientIp };
+  // 회원 키 API 의 OmniRoute 어댑터. 요청마다 저장된 관리 토큰을 읽는다 (붙여 넣기로 바뀐 토큰을 바로 쓴다)
+  const keysClient = async () => {
+    const baseUrl = omniroute.baseUrl;
+    const token = baseUrl ? await readOmniRouteToken(db, cipher) : null;
+    if (!baseUrl || !token) return null;
+    return (o?: { timeoutMs?: number }) => createClient({ baseUrl, credential: { token }, timeoutMs: o?.timeoutMs });
+  };
+  return { db, auth, cipher, omniroute, setupToken, clientIp: rt.clientIp, appOrigin: new URL(baseURL).origin, keysClient };
 }

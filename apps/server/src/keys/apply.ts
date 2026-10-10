@@ -33,6 +33,9 @@ import { enqueue, KEY_DELETE_DELAY_MS, RETRY_DELAYS_MS } from "../queue/index.ts
 import { alertOnce } from "./alerts.ts";
 import { readTarget, targetState, type KeyTarget, type KeyTargetRow } from "./target.ts";
 
+/** 발급 중인 자리 행의 omniroute_key_id 접두사 (K4 routes/issue.ts). 이 id 는 OmniRoute 에 없다 */
+export const PENDING_KEY_PREFIX = "pending-";
+
 /** 걸고 다시 읽기 횟수 상한 */
 export const APPLY_ROUNDS = 3;
 
@@ -122,6 +125,8 @@ export const isMissing = (e: unknown) => e instanceof OmniRouteError && e.status
  * 키를 다시 만들지 않는다 (원문 키가 바뀌어 회원 도구가 깨진다. 관리자가 본다). 다른 키의 반영은 계속한다
  */
 export async function markMissing(h: DbHandle, lease: Lease | undefined, key: { keyId: string; omnirouteKeyId: string }, now: Date): Promise<void> {
+  // 발급 중인 자리 행(K4)은 OmniRoute 키가 아직 없다. 사라진 키로 적거나 알리지 않는다 (K4 보안 리뷰 M1)
+  if (key.omnirouteKeyId.startsWith(PENDING_KEY_PREFIX)) return;
   const k = h.schema.apiKeys;
   await h.db.update(k).set({ syncState: "missing" }).where(guard(h, lease, eq(k.id, key.keyId)));
   await alertOnce(h, lease, "key_missing", key.omnirouteKeyId, { keyId: key.keyId }, now);

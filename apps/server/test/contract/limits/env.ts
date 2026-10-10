@@ -146,11 +146,15 @@ export async function isActive(c: Ctx, id: string): Promise<boolean | undefined>
 /** 막힌 응답인가: 예산 차단(K0.T11 도우미) 또는 끈 키 403 */
 export const blocked = (r: Infer) => isBudgetBlocked(r.status, r.json) || r.status === 403;
 
-/** OmniRoute 가 기록을 마칠 때까지 기다린다 (분석은 요청 직후 바로 잡히지 않을 수 있다) */
-export async function settled(c: Ctx, ids: string[], requests: number, timeoutMs = 90_000) {
+/**
+ * OmniRoute 가 기록을 마칠 때까지 기다린다 (분석은 요청 직후 바로 잡히지 않을 수 있다).
+ * 창 시작은 기본 24시간 전이다. 그보다 이른 기록(TC-K2.T7.d 의 어제 12:00)을 넣은 시험은 from 을 준다.
+ * 안 주면 UTC 12:00 뒤에 돈 실행에서 그 기록이 창 밖으로 빠진다 (2026-10-10 CI 38050586245)
+ */
+export async function settled(c: Ctx, ids: string[], requests: number, timeoutMs = 90_000, from?: Date) {
   const end = Date.now() + timeoutMs;
   for (;;) {
-    const a = await c.client.getAnalytics({ apiKeyIds: ids, startDate: new Date(Date.now() - 86_400_000), endDate: new Date(Date.now() + 60_000) });
+    const a = await c.client.getAnalytics({ apiKeyIds: ids, startDate: from ?? new Date(Date.now() - 86_400_000), endDate: new Date(Date.now() + 60_000) });
     if (a.totalRequests >= requests || Date.now() > end) return a;
     await new Promise((r) => setTimeout(r, 500));
   }

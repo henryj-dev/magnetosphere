@@ -157,7 +157,9 @@ describe("TC-K2.T7.d 지난 날 합 + 오늘 == 분석 API 한 달 값이다 (�
     const stamps = [today.toISOString(), ...(sameMonth ? [yesterday.toISOString()] : [])];
     expect(insertUsageCopies(a.id, stamps)).toBe(stamps.length);
     const ids = [a.id, b.id];
-    const month = await settled(c, ids, 3 + stamps.length);
+    // 이번 달 1일부터 센다. 24시간 창이면 UTC 12:00 뒤 실행에서 어제 12:00 기록이 빠진다 (시각 의존)
+    const month = await settled(c, ids, 3 + stamps.length, 90_000, monthStart(now));
+    expect(month.totalRequests).toBe(3 + stamps.length);
 
     const r = await confirmDays(c.h, now, c.limits);
     expect(r.confirmed).toBe(new Date(today.getTime() - 86_400_000).toISOString().slice(0, 10));

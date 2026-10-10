@@ -813,6 +813,9 @@ TC-K2.T7.c  대조가 제한 시간에 걸리면 날 단위로 나눈다
 TC-K2.T7.d  지난 날 합 + 오늘 == 분석 API 한 달 값이다 (계약, V15 의존)
   단언:  계약 환경, 키 A·B 요청 3건, 계약 OmniRoute usage_history 에 A 의 OpenAI 기록을 본떠 어제 12:00 과 오늘 00:00:00.000(자정 정각)에 넣음 → 실제 시계로 confirmDays → storedSpent([A,B], 이번 달 1일 ~ 오늘) + 오늘 창(자정 기록 포함 4건) == getAnalytics(apiKeyIds [A,B], 이번 달 1일 ~ 지금).totalCost (오차 1e-9). (K2 리뷰 L4: 가짜 '내일' 창은 미래라 늘 0 이었다)
   검출:  창 경계를 [시작, 끝] 둘 다 포함으로 잡아 자정 정각 기록을 두 번 세거나, byApiKey 비용과 summary 비용 계산이 달라 저장 합이 분석 API 한 달 값과 어긋나는 것
+  고침:  (2026-10-10, CI 38050586245) 기록이 잡혔는지 기다리는 settled 의 창이 [지금 − 24시간, 지금 + 60초]라, UTC 12:00 뒤(1일 제외)에
+         돌면 어제 12:00 기록이 기대값 쪽에서 빠져 0.00221 어긋났다. 시험 시각에 달린 시험 버그다 (운영 코드는 UTC 날·달 경계만 쓴다).
+         settled 를 이번 달 1일부터 세게 하고 기록 수(3 + 넣은 수)를 단언한다. 대조: daily.ts endOfDay 를 다음 날 00:00 으로 바꾸면 실패한다
 TC-K2.T7.e  다섯 DB 에 usage_daily 가 있다
   단언:  test:migrate --db sqlite,mysql,mariadb,pg,d1 → usage_daily (key_id, day) 기본 키, cost_usd DECIMAL(12,6)·SQLite REAL, 같은 (key_id, day) 두 번 저장은 갱신 1행
   검출:  한 DB 의 0002 마이그레이션이 빠져 그 조합에서 1분 분배가 "no such table usage_daily" 로 멈추는 것
@@ -1182,19 +1185,20 @@ TC-K3.T4.b  ruleset 필수 검사가 이 잡을 포함한다
 
 # K4 — 키 수명주기와 회원 키 API 🔒 (K3 필요)
 
-**브랜치** `p2/k4`.
+**브랜치** `k4/keys-api` (실행판을 쓸 때 정한 이름은 `p2/k4`).
 **outputs** `apps/server/src/routes/**`, `apps/server/test/routes/**`, `apps/server/test/contract/routes/**`. 라우터를 거는 `apps/server/src/app.ts`는 공용 파일이라 넣지 않는다.
 
-### ☐ K4.T1 — 발급 `POST /api/me/keys`
+### ☑ K4.T1 — 발급 `POST /api/me/keys`
 선행 없음 · 산출 `apps/server/src/routes/keys.ts` · 되돌리기 커밋 1개
 
 【작업】
 1. 경로는 `/api/me/keys` (0절 G-S5.9 제약). 회원 세션 필요. 확인(계획서 5.2 1번): 회원 status `active`, `emailVerified`, 키 수(활성 + 비활성, 삭제 제외) < `user.max_keys ?? app_settings.default_max_keys`, 남은 한도 > 0 (한도 NULL 이면 통과). 순서: `createKey(이름)` → `setKeyActive(false)` → 예산(K2 계산) → `setKeyActive(true)` → `api_keys` 행 → `rebalanceMember` → 원문을 응답에 한 번. 2~5 중 실패 → `deleteKey`로 되돌리고 502, 되돌리기도 실패 → `key.rollback` 작업. 이름 `m_<회원 id 앞 8자리>_<키 id 앞 8자리>`, DB 에는 `omniroute_key_id`와 끝 4자리만. 최대 개수 경쟁은 DB 한 문장 조건(D1 은 대화형 트랜잭션이 없으므로 조건부 INSERT 또는 batch)으로 막는다. 커밋.
+   구현 (`routes/issue.ts`): 최대 개수 판정을 OmniRoute 호출 앞에 두려고 `api_keys` 행을 createKey 앞에서 자리 행(`omniroute_key_id = pending-<id>`, disabled·member)으로 먼저 넣는다. SQLite·D1 은 조건부 INSERT 한 문장, MySQL·Postgres 는 회원 행 `FOR UPDATE` 트랜잭션 안에서 세고 넣는다. 예산 단계는 행을 disabled·limit 으로 바꾼 뒤 `rebalanceMember` 하나로 한다 (분배가 limit 키에 예산을 건 뒤 켠다 — 예산이 성공한 뒤에만 켠다). 남은 한도 확인은 저장값만으로 0 이면 OmniRoute 를 부르지 않고, 아니면 그 회원 키의 오늘 창 분석(읽기) 한 번을 부른다.
 
 【테스트】
 ```
 TC-K4.T1.a  발급 순서가 계획서 5.2 와 같다
-  단언:  가짜 어댑터 호출 기록 == [createKey, setKeyActive(false), setBudget, setKeyActive(true)], 응답 201 에 원문 1회. 예산 단계(setBudget·rebalanceMember)가 성공한 뒤에만 setKeyActive(true) — rebalanceMember 는 반영 실패면 던진다 (K2 리뷰 M4, TC-K2.T4.c)
+  단언:  가짜 어댑터 호출 기록 == [createKey, setKeyActive(false), setBudget, setKeyActive(true)], 응답 201 에 원문 1회·Cache-Control no-store (리뷰 L1). 예산이 성공한 뒤에만 켠다: 예산 단계(setBudget·rebalanceMember)가 성공한 뒤에만 setKeyActive(true) — rebalanceMember 는 반영 실패면 던진다 (K2 리뷰 M4, TC-K2.T4.c). 대조: setBudget 실패 → setKeyActive(true) 0건
   검출:  createKey 직후 켜진 채로 예산을 거는 순서라, 예산 단계가 실패하면 한도 없는 키가 켜진 채 남는 것
 TC-K4.T1.b  2~5 단계 어디서 실패해도 만든 키를 지운다
   단언:  실패 위치 셋(끄기·예산·켜기) 각각 → deleteKey 1건, api_keys 행 0, 응답 502
@@ -1203,7 +1207,7 @@ TC-K4.T1.c  되돌리기도 실패하면 큐에 넣고 켜진 채 남지 않는�
   단언:  예산 실패 + deleteKey 가 OmniRouteError 503 → key.rollback 작업 1개, 그 키는 isActive=false 상태(끄기 단계까지만 진행)
   검출:  되돌리기 실패를 로그만 남겨 OmniRoute 에 매핑 없는 키가 남고 정합성 점검이 알리기만 해 영원히 남는 것
 TC-K4.T1.d  거부 조건은 OmniRoute 를 부르지 않는다
-  단언:  pending → 403, suspended → 403, emailVerified false → 403, 남은 한도 0 → 409 limit_exhausted, 최대 개수 → 409 max_keys. 각 경우 OmniRoute 호출 0
+  단언:  pending → 403, suspended → 403, emailVerified false → 403, 남은 한도 0 → 409 limit_exhausted, 최대 개수 → 409 max_keys. 각 경우 OmniRoute 호출 0. 남은 한도 0 을 오늘 창으로만 알 수 있으면 분석(읽기) 1건만, 키 쓰기 호출 0
   검출:  확인 전에 createKey 를 불러 거부된 요청마다 OmniRoute 에 키가 생기고 지워지는 것
 TC-K4.T1.e  최대 개수는 기본 2, 비활성 포함, 삭제 제외, 줄여도 기존 키 유지
   단언:  max_keys NULL(시드 default_max_keys 2) → 2 개 201, 3번째 409 · 1개 끄고도 409 · 1개 삭제 → 201 · max_keys 3 → 3번째 201 · 3→1 → 기존 3개 그대로, 새 발급 409
@@ -1220,15 +1224,25 @@ TC-K4.T1.h  OmniRoute 키 이름에 개인정보가 없다
 TC-K4.T1.i  목록은 남은 발급 가능 개수를 준다
   단언:  GET /api/me/keys → { keys[], remainingSlots }, 키 1(최대 2) → remainingSlots 1, 원문 필드 없음
   검출:  4단계 화면이 남은 개수를 프런트에서 따로 세어 서버 규칙(비활성 포함)과 어긋나는 것
+TC-K4.T1.j  오래된 자리 행은 정합성 점검이 지운다 (K4 보안 리뷰 M2)
+  단언:  created_at 이 10분(STALE_SLOT_MS 600,000)보다 오래된 pending- 자리 행 → reconcile 1회 → 행 0. 대조: 5분 된 자리 행은 그대로
+  검출:  createKey 앞에서 죽은 발급의 자리 행이 최대 개수 한 칸을 영원히 차지해 회원이 키를 더 받지 못하는 것
+TC-K4.T1.k  createKey 직후 죽어 남은 매핑 없는 m_ 키는 끄고 2분 뒤 지운다 (K4 보안 리뷰 M2)
+  단언:  10분 넘은 자리 행과 이름 m_<회원8>_<자리 행8> 이 맞는 매핑 없는 키 → setKeyActive(false), key.delete next_run_at == 지금 + 120,000ms, 행 0, alert.unknown_m_key 0. 대조: 10분 안 된 자리 행의 키·id 가 안 맞는 m_ 키는 끄지 않고 알리기만. 끄기 실패면 행을 남겨 다음 점검이 다시 본다
+  검출:  정합성 점검이 알리기만 해(Q6) 회원 앱이 만든 키가 예산 없이 켜진 채 남는 것
+TC-K4.T1.l  자리 잡기 reserveSlot 을 직접 10건 동시에 불러도 최대 개수를 넘지 않는다 (K4 보안 리뷰 시험 보강)
+  단언:  HTTP·앞 확인 없이 연결 둘에서 reserveSlot 10건 (최대 2) → true 정확히 2, 옛 키를 뺀 재발급 자리는 1 (sqlite·mysql·mariadb·pg·d1)
+  검출:  앞 확인(liveKeyCount)이 경쟁을 우연히 막아 TC-K4.T1.f 는 초록인데 조건부 INSERT·행 잠금이 빠져 있는 것
 ```
 
 【통과】
-- [ ] G-K4.1 ~ G-K4.9 통과
+- [x] G-K4.1 ~ G-K4.9 통과
+- [x] G-K4.31 · 32 · 35 · 36 통과
 
 ### ☐ K4.T2 — 이름 변경·끄기·켜기·재발급·삭제 (폐기)
 v5.6 에서 폐기 (V18·V19). `regenerate`와 바로 `DELETE`는 옛 원문 키를 최대 60초 동안 예산·기록 없이 통과시킨다. 재발급·삭제 방식을 바꾼 K4.T7 이 대신한다. TC-K4.T2.a~e 는 쓰지 않는다.
 
-### ☐ K4.T7 — 이름 변경·끄기·켜기·재발급·삭제 (v5.6)
+### ☑ K4.T7 — 이름 변경·끄기·켜기·재발급·삭제 (v5.6)
 선행 K4.T1 · 산출 `apps/server/src/routes/keys.ts` · 되돌리기 커밋 1개
 
 【작업】
@@ -1243,23 +1257,26 @@ TC-K4.T7.b  삭제는 바로 끄고, 행을 남기고, DELETE 는 2분 뒤다 (V
   단언:  DELETE → 응답 전 setKeyActive(false) 1건·deleteKey 0건, state deleted, deleted_at 설정, key.delete 작업 next_run_at == 끈 시각 + 120,000ms, 다음 분배의 분석 apiKeyIds 에 그 id 포함
   검출:  행을 지워 그 키의 이번 달 사용액이 회원 합계에서 빠지는 것, 바로 DELETE 해 옛 원문 키가 60초 동안 예산·기록 없이 통과하는 것
 TC-K4.T7.c  재발급은 새 키 + 옛 키 삭제이고 한도를 초기화하지 않는다 (V19 의존)
-  단언:  재발급 → 어댑터 호출 == [createKey, setKeyActive(false), setBudget, setKeyActive(true), setKeyActive(false) (옛 키)], regenerate 경로 호출 0, 응답 새 원문, 옛 행 state deleted, 다음 분배 분석 apiKeyIds 에 옛 id·새 id 둘 다
+  단언:  재발급 → 어댑터 호출 == [createKey, setKeyActive(false), setBudget, setKeyActive(true), setKeyActive(false) (옛 키)], regenerate 경로 호출 0, 응답 새 원문(Cache-Control no-store, 리뷰 L1), 옛 행 state deleted, 다음 분배 분석 apiKeyIds 에 옛 id·새 id 둘 다
   검출:  OmniRoute regenerate 를 써 옛 원문 키가 60초 동안 통과하거나(V19 oldKeyStatus 200), 옛 id 를 버려 사용액이 0 에서 시작하는 것
 TC-K4.T7.d  남의 키는 404 이고 OmniRoute 를 부르지 않는다
   단언:  회원 B 세션으로 A 키에 disable·enable·regenerate·DELETE·PATCH → 모두 404, OmniRoute 0
   검출:  키 id 만으로 조회해 다른 회원 키를 끄거나 재발급해 원문을 가져가는 것
 TC-K4.T7.e  회원이 끈 키는 회원이 켤 수 있다
-  단언:  disable(member) → enable → 200, setKeyActive(true) 1건. admin 이 끈 키 → enable 403, limit 으로 꺼진 키 → enable 409 limit_exhausted
-  검출:  관리자가 끈 키나 한도 때문에 꺼진 키를 회원이 다시 켜는 것
+  단언:  disable(member) → enable → 200, setKeyActive(true) 1건. admin 이 끈 키 → enable 403, limit 으로 꺼진 키 → enable 409 limit_exhausted, 이메일 미인증 회원 → enable 403 email_unverified (리뷰 L2)
+  검출:  관리자가 끈 키나 한도 때문에 꺼진 키를 회원이 다시 켜는 것, 발급 조건(이메일 인증)을 켜기로 비켜 가는 것
 TC-K4.T7.f  재발급도 발급 조건을 본다
   단언:  최대 2·키 2개에서 재발급 → 201 (옛 키를 빼고 셈), 남은 한도 0 → 409 limit_exhausted·OmniRoute 0
   검출:  재발급을 발급 조건 없이 열어 한도를 다 쓴 회원이 새 키를 받거나, 최대 개수에 막혀 키를 교체하지 못하는 것
+TC-K4.T7.g  발급 중인 자리 행은 회원이 바꾸지 못한다 (K4 보안 리뷰 M1)
+  단언:  발급 도중 GET → 그 행 state issuing(remainingSlots 에 듦), enable·disable·PATCH·regenerate·DELETE → 409 issuing, pending- id 로 OmniRoute 호출 0·alert.key_missing 0, 발급은 201. 예산 단계 전에 행이 바뀌면 → 409·[createKey, setKeyActive(false), deleteKey]·행 0. K3 markMissing 은 pending- id 에 쓰지 않는다
+  검출:  목록으로 얻은 자리 행 id 로 enable 해 pending- id 에 예산·켜기를 보내고(404 → 거짓 alert.key_missing), 조건 없는 UPDATE 가 active·limit 모순 상태를 만드는 것
 ```
 
 【통과】
-- [ ] G-K4.10 ~ G-K4.14 · G-K4.28 통과
+- [x] G-K4.10 ~ G-K4.14 · G-K4.28 · G-K4.30 통과
 
-### ☐ K4.T3 — 관리자 한도·최대 개수 API
+### ☑ K4.T3 — 관리자 한도·최대 개수 API
 선행 K4.T1 · 산출 `apps/server/src/routes/admin-limits.ts` · 되돌리기 커밋 1개
 
 【작업】
@@ -1268,7 +1285,7 @@ TC-K4.T7.f  재발급도 발급 조건을 본다
 【테스트】
 ```
 TC-K4.T3.a  관리자만 바꾸고, 바꾸면 즉시 분배한다
-  단언:  회원 세션 → 403, 세션 없음 → 401, 관리자 → 200 + rebalanceMember 1회 + audit_log(action limits.update) 1행
+  단언:  회원 세션 → 403, 세션 없음 → 401, 관리자 → 200 + rebalanceMember 1회 + audit_log(action limits.update) 1행. 한도를 null 로 바꾸면 clearBudget 1건 (리뷰 시험 보강)
   검출:  회원이 자기 한도를 올리는 것, 또는 한도를 내려도 1분 분배까지 옛 예산이 남는 것
 TC-K4.T3.b  잘못된 값은 400 이다
   단언:  -1 · NaN · "5" · 1e13 · 0.0000001 · maxKeys 1.5 · maxKeys -1 → 각각 400, DB 변화 0
@@ -1276,9 +1293,9 @@ TC-K4.T3.b  잘못된 값은 400 이다
 ```
 
 【통과】
-- [ ] G-K4.15 · G-K4.16 통과
+- [x] G-K4.15 · G-K4.16 통과
 
-### ☐ K4.T4 — 변경 API 의 CSRF 와 발급 요청 수 제한
+### ☑ K4.T4 — 변경 API 의 CSRF 와 발급 요청 수 제한
 선행 K4.T1 · 산출 `apps/server/src/routes/guard.ts` · 되돌리기 커밋 1개
 
 【작업】
@@ -1290,14 +1307,20 @@ TC-K4.T4.a  다른 출처의 변경 요청은 403 이다
   단언:  Origin https://evil.example 로 POST /api/me/keys · DELETE /api/me/keys/:id → 403, OmniRoute 0. Origin 없음 → 403. 같은 출처 → 정상
   검출:  SameSite=Lax 쿠키만 믿어, 같은 사이트의 다른 하위 도메인 페이지가 회원 키를 발급·삭제하는 것
 TC-K4.T4.b  발급 요청 수 제한을 넘으면 429 다 (Q4 의존)
-  단언:  같은 회원이 1시간 안에 발급·재발급 11번(최대 개수 넉넉히) → 11번째 429·OmniRoute 호출 없음, 다른 인스턴스(같은 DB)에서도 같은 계산. 같은 IP 의 회원 넷이 합쳐 31번 → 31번째 429 (sqlite·mysql·pg)
+  단언:  같은 회원이 1시간 안에 발급·재발급 11번(최대 개수 넉넉히) → 11번째 429·OmniRoute 호출 없음, 다른 인스턴스(같은 DB)에서도 같은 계산. 같은 IP 의 회원 넷이 합쳐 31번 → 31번째 429 (sqlite·mysql·mariadb·pg)
   검출:  인스턴스 메모리로 세어 인스턴스 수만큼 한도가 늘거나, 발급·삭제 반복으로 OmniRoute 에 키 생성 요청을 퍼붓는 것
+TC-K4.T4.c  키 변경 요청은 회원당 분당 30회까지다 (K4 보안 리뷰 L3)
+  단언:  이름 변경 30번 → 200, 31번째부터 disable·enable·regenerate·DELETE·PATCH → 429 too_many_requests, OmniRoute 호출 0. 다른 회원은 200
+  검출:  켜기·끄기·삭제를 끝없이 보내 회원 하나가 OmniRoute 호출과 작업 큐를 채우는 것
+TC-K4.T4.d  발급 요청 수 제한의 IP 칸은 IPv6 를 /64 로 묶는다 (K4 보안 리뷰 L4)
+  단언:  ipBucket: 같은 /64 의 다른 표기·주소 → 같은 칸, 다른 /64 → 다른 칸, ::ffff:a.b.c.d == a.b.c.d. 같은 /64 의 주소 30개로 회원 셋이 30번 → 넷째 회원 31번째 429, 다른 /64 는 201
+  검출:  IPv6 회선이 /64 안에서 주소를 바꿔 IP 당 제한을 비켜 가는 것
 ```
 
 【통과】
-- [ ] G-K4.17 · G-K4.18 통과
+- [x] G-K4.17 · G-K4.18 · G-K4.33 · G-K4.34 통과
 
-### ☐ K4.T5 — 실제 OmniRoute 로 수명주기 (계약)
+### ☑ K4.T5 — 실제 OmniRoute 로 수명주기 (계약)
 선행 K4.T1 · K4.T3 · K4.T4 · K4.T7 · 산출 `apps/server/test/contract/routes/**` · 되돌리기 커밋 1개
 
 【작업】
@@ -1314,9 +1337,9 @@ TC-K4.T5.b  남은 한도 0 인 회원은 발급이 막히고 OmniRoute 에 키�
 ```
 
 【통과】
-- [ ] G-K4.19 · G-K4.20 통과
+- [x] G-K4.19 · G-K4.20 통과
 
-### ☐ K4.T6 — K4 CI 잡과 봉인
+### ◐ K4.T6 — K4 CI 잡과 봉인
 선행 K4.T1 · K4.T3 ~ K4.T5 · K4.T7 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
 
 【작업】
@@ -1350,15 +1373,21 @@ TC-K4.T6.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-K4.28 | TC-K4.T7.f 재발급 조건 | `pnpm -C apps/server test -t "TC-K4.T7.f"` | 통과 = 1 |
 | G-K4.15 · 16 | TC-K4.T3.a · b | `pnpm -C apps/server test -t "TC-K4.T3.<x>"` | 각 통과 = 1 |
 | G-K4.17 | TC-K4.T4.a CSRF | `pnpm -C apps/server test -t "TC-K4.T4.a"` | 통과 = 1 |
-| G-K4.18 | TC-K4.T4.b 발급 요청 수 제한 | [L] `pnpm -C apps/server test:db -t "TC-K4.T4.b" --db sqlite,mysql,pg` | 통과 = 3 |
+| G-K4.18 | TC-K4.T4.b 발급 요청 수 제한 | [L] `pnpm -C apps/server test:db -t "TC-K4.T4.b" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
 | G-K4.19 | TC-K4.T5.a 발급·끄기·삭제 | [L] `pnpm test:contract -t "TC-K4.T5.a"` | 통과 = 1, 끈 뒤 첫 요청 403, 삭제 뒤 첫 요청 403 |
 | G-K4.20 | TC-K4.T5.b 한도 0 발급 거부 | [L] `pnpm test:contract -t "TC-K4.T5.b"` | 통과 = 1 |
 | G-K4.21 | 발급 순서 (5.2 의 2~5번) 기대값 | grep `"createKey", "setKeyActive\(false\)", "setBudget", "setKeyActive\(true\)"` in `apps/server/test/routes` | == 1 |
 | G-K4.22 | 원문 키 저장 칼럼 없음 | grep `\b(key_raw\|raw_key\|secret_key)\b` in `packages/db/src/schema` | == 0 |
 | G-K4.23 | 어댑터 밖 관리 호출 0 (1단계 G-S5.9 와 같은 규칙) | grep `/api/(keys\|usage)` in `apps packages`, `packages/omniroute/**` 제외 | == 0 |
-| G-K4.24 | 시드 기본값 (최대 키 2, 월 한도 $5) | grep `default_limit_usd: 5,` · `default_max_keys: 2,` in `packages/db/src/seed.ts` | 각 == 1 |
+| G-K4.24 · 29 | 시드 기본값 (최대 키 2, 월 한도 $5) | grep `default_max_keys: 2,` · `default_limit_usd: 5,` in `packages/db/src/seed.ts` | 각 == 1 |
 | G-K4.25 | 타입 검사 | `pnpm -r typecheck` | 종료코드 0 |
 | G-K4.26 | TC-K4.T6.a CI 단계 잡 | grep `^\s+run: node scripts/gate\.mjs K4\b` in ci.yml | == 1 |
+| G-K4.30 | TC-K4.T7.g 발급 중인 자리 행 (리뷰 M1) | `pnpm -C apps/server test -t "TC-K4.T7.g"` | 통과 = 1 |
+| G-K4.31 · 32 | TC-K4.T1.j · k 죽은 발급 정리 (리뷰 M2) | `pnpm -C apps/server test -t "TC-K4.T1.<x>"` | 각 통과 = 1 |
+| G-K4.33 · 34 | TC-K4.T4.c · d 변경 요청 수·IPv6 /64 (리뷰 L3·L4) | `pnpm -C apps/server test -t "TC-K4.T4.<x>"` | 각 통과 = 1 |
+| G-K4.35 | TC-K4.T1.l 자리 잡기 직접 동시 (Node DB 넷) | [L] `pnpm -C apps/server test:db -t "TC-K4.T1.l" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
+| G-K4.36 | TC-K4.T1.l 자리 잡기 직접 동시 (D1) | [L] `pnpm -C apps/server test:workers -t "TC-K4.T1.l"` | 통과 = 1 |
+| G-K4.37 ~ 45 | 재현 빨강 TC-K4.T1.c · T7.g · T1.j · T1.k · T1.a · T7.c · T7.e · T4.c · T4.d | `node scripts/check-red.mjs --check G-K4.3 · 30 · 31 · 32 · 1 · 12 · 14 · 33 · 34 --since seal:K3` | 종료코드 0 |
 | G-K4.27 | ruleset · TC-K4.T6.b | `node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere` | 종료코드 0 |
 
 `node scripts/gate.mjs K4 --seal`
