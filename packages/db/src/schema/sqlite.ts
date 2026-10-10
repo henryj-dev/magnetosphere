@@ -142,6 +142,7 @@ export const omnirouteJobs = sqliteTable("omniroute_jobs", {
   lastError: text("last_error"),
   nextRunAt: integer("next_run_at", { mode: "timestamp_ms" }).notNull(),
   doneAt: integer("done_at", { mode: "timestamp_ms" }),
+  failedAt: integer("failed_at", { mode: "timestamp_ms" }),
 }, (table) => [
   index("idx_omniroute_jobs_due").on(table.doneAt, table.nextRunAt),
 ]);
@@ -151,6 +152,7 @@ export const jobLeases = sqliteTable("job_leases", {
   name: text("name").primaryKey(),
   holder: text("holder").notNull(),
   lockedUntil: integer("locked_until", { mode: "timestamp_ms" }).notNull(),
+  fence: integer("fence").default(0).notNull(),
 });
 
 // 감사 기록

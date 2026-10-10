@@ -142,6 +142,7 @@ export const omnirouteJobs = pgTable("omniroute_jobs", {
   lastError: text("last_error"),
   nextRunAt: timestamp("next_run_at").notNull(),
   doneAt: timestamp("done_at"),
+  failedAt: timestamp("failed_at"),
 }, (table) => [
   index("idx_omniroute_jobs_due").on(table.doneAt, table.nextRunAt),
 ]);
@@ -151,6 +152,7 @@ export const jobLeases = pgTable("job_leases", {
   name: varchar("name", { length: 64 }).primaryKey(),
   holder: varchar("holder", { length: 255 }).notNull(),
   lockedUntil: timestamp("locked_until").notNull(),
+  fence: integer("fence").default(0).notNull(),
 });
 
 // 감사 기록

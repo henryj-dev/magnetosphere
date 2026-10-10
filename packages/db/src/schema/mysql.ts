@@ -148,6 +148,7 @@ export const omnirouteJobs = mysqlTable("omniroute_jobs", {
   lastError: text("last_error"),
   nextRunAt: datetime("next_run_at", { fsp: 3 }).notNull(),
   doneAt: datetime("done_at", { fsp: 3 }),
+  failedAt: datetime("failed_at", { fsp: 3 }),
 }, (table) => [
   index("idx_omniroute_jobs_due").on(table.doneAt, table.nextRunAt),
 ]);
@@ -157,6 +158,7 @@ export const jobLeases = mysqlTable("job_leases", {
   name: varcharBin("name", { length: 64 }).primaryKey(),
   holder: varcharBin("holder", { length: 255 }).notNull(),
   lockedUntil: datetime("locked_until", { fsp: 3 }).notNull(),
+  fence: int("fence").default(0).notNull(),
 });
 
 // 감사 기록

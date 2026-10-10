@@ -221,7 +221,7 @@ export const TABLES: Record<string, Table> = {
       keyPreview: { name: "key_preview", kind: "string", length: 16, notNull: true, doc: "끝 4자리" },
       label: { name: "label", kind: "string", length: 255 },
       state: { name: "state", kind: "string", length: 16, notNull: true, doc: "active | disabled | deleted" },
-      disabledReason: { name: "disabled_reason", kind: "string", length: 16, doc: "member | admin | user_status" },
+      disabledReason: { name: "disabled_reason", kind: "string", length: 16, doc: "member | admin | user_status | limit (남은 한도 0, 계획서 v5.6 Q1)" },
       syncState: { name: "sync_state", kind: "string", length: 16, notNull: true, default: "synced", doc: "synced | pending | failed" },
       budgetUsd: { name: "budget_usd", kind: "usd", doc: "마지막으로 OmniRoute 에 건 월 예산" },
       createdAt: { name: "created_at", kind: "timestamp", notNull: true },
@@ -241,8 +241,9 @@ export const TABLES: Record<string, Table> = {
       lastError: { name: "last_error", kind: "text" },
       nextRunAt: { name: "next_run_at", kind: "timestamp", notNull: true },
       doneAt: { name: "done_at", kind: "timestamp" },
+      failedAt: { name: "failed_at", kind: "timestamp", doc: "4번째 재시도 실패 시각 (계획서 v5.6 Q3). 지금 − failed_at > 30분이면 오래 실패" },
     },
-    // 실행할 작업 찾기: done_at IS NULL AND next_run_at <= now
+    // 실행할 작업 찾기: done_at IS NULL AND failed_at IS NULL AND next_run_at <= now
     indexes: [{ name: "idx_omniroute_jobs_due", columns: ["doneAt", "nextRunAt"] }],
   },
   jobLeases: {
@@ -253,6 +254,7 @@ export const TABLES: Record<string, Table> = {
       name: { name: "name", kind: "string", length: 64, exact: true, primaryKey: true, doc: "budget_rebalance, reconcile, ..." },
       holder: { name: "holder", kind: "string", length: 255, exact: true, notNull: true },
       lockedUntil: { name: "locked_until", kind: "timestamp", notNull: true },
+      fence: { name: "fence", kind: "integer", notNull: true, default: 0, doc: "펜싱 토큰. 잡을 때마다 1 씩 는다. 쓰기는 이 값이 그대로일 때만 한다 (K1.T2)" },
     },
   },
   auditLog: {
