@@ -181,14 +181,21 @@ export async function runKeys(ctx) {
     const total = await settledTotal();
     timings.overspendTotal = total;
     check(burst.every((x) => x.rejected) && total <= OVERSPEND_MAX + 1e-12, `TC-K5.T2.b 몰아 쓴 뒤 총 사용액 ${total.toFixed(6)} ≤ ${OVERSPEND_MAX.toFixed(6)} (성공 요청 ${ok}건, 두 키 모두 거부)`);
-    // 반응 시간: 분배가 두 키를 끄는 것을 탐침으로 본다
+    // 반응 시간: 분배가 두 키를 끄는 것을 탐침으로 본다.
+    // 꺼진 키는 보통 403 permission_denied 다. 키 검증 캐시(60초)가 식은 뒤 꺼진 키는 401 AUTH_002 로 거부된다
+    // (amd64 CI 실측: 예산 차단 429 응답은 캐시를 다시 채우지 않는다). 그때는 OmniRoute 키 목록(어댑터)에서 꺼졌는지 확인한다
+    const authInvalid = (p) => p.status === 401 && p.json?.error?.code === "AUTH_002";
+    const offInOmniRoute = async (k) => {
+      const ork = db.keys(memberId).find((r) => r.id === k.id)?.ork;
+      return (await omni.listKeys()).find((x) => x.id === ork)?.isActive === false;
+    };
     const offAt = new Map();
     while (offAt.size < keys.length && Date.now() - t0 <= REACT_MS + 10_000) {
       for (const k of keys.filter((x) => !offAt.has(x))) {
         const p = await infer(v1, k.secret, false);
-        if (permissionDenied(p)) {
+        if (permissionDenied(p) || (authInvalid(p) && (await offInOmniRoute(k)))) {
           offAt.set(k, Date.now());
-          log(`키 ${name(k)} 꺼짐 (탐침 403 permission_denied, T0 + ${Date.now() - t0}ms)`);
+          log(`키 ${name(k)} 꺼짐 (탐침 ${p.status} ${p.json?.error?.code}, T0 + ${Date.now() - t0}ms)`);
         } else if (p.status !== 400 && !isBudgetBlocked(p.status, p.json)) throw new Error(`탐침 응답이 예상과 다르다 ${p.status} ${JSON.stringify(p.json)}`);
       }
       await sleep(1000);
