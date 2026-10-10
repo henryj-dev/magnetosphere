@@ -17,7 +17,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # main 에서는 앞 실행을 취소하지 않는다. 봉인 커밋의 단계 게이트 결과가 남아야 한다 (K0.T3, check-ci-matrix [concurrency])
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   FORCE_COLOR: "0"

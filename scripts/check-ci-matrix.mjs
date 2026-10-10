@@ -22,6 +22,7 @@
 //   s1       S1 은 확인용 코드가 S7.T2 에서 지워져 봉인 커밋에서만 돈다. `--root <봉인 커밋 작업 트리> S1` 스텝이 있다 [s1].
 //   위생     모든 워크플로: 모든 `uses:` 가 40자리 커밋 SHA [pin], 최상위 permissions 가 contents: read 하나 [permissions],
 //            push·pull_request 둘 다 걸려 있고 branches·paths 거르개가 없다 [trigger].
+//            최상위 concurrency.cancel-in-progress 가 true 가 아니고, 식이면 main 을 뺀다 (github.ref != 'refs/heads/main') [concurrency].
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -89,6 +90,12 @@ function hygiene(doc, name, add) {
         if (cfg && typeof cfg === "object" && k in cfg) add("trigger", `${name}: on.${ev}.${k} 거르개로 일부 변경에서 워크플로가 돌지 않는다`);
       }
     }
+  }
+  // main 에서는 앞 실행을 취소하지 않는다 (K0.T3, S7 리뷰 L5). 커밋 둘이 연달아 main 에 들어가면 앞 커밋(봉인 커밋)의
+  // CI 결과가 취소돼 남지 않는다. cancel-in-progress 는 false 이거나, main 을 빼는 식(github.ref != 'refs/heads/main')이어야 한다
+  const cancel = doc?.concurrency && typeof doc.concurrency === "object" ? doc.concurrency["cancel-in-progress"] : undefined;
+  if (cancel === true || (typeof cancel === "string" && !/^\$\{\{\s*github\.ref\s*!=\s*'refs\/heads\/main'\s*\}\}$/.test(cancel.trim()))) {
+    add("concurrency", `${name}: concurrency.cancel-in-progress (${JSON.stringify(cancel)}) 가 main 에서도 앞 실행을 취소한다`);
   }
   for (const [job, def] of Object.entries(doc?.jobs ?? {})) {
     for (const s of def?.steps ?? []) {
