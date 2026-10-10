@@ -49,18 +49,39 @@ async function failFiveTimes(id: string, calls: { n: number }) {
   return { seen, handlers };
 }
 
+/** 고정 씨앗 의사 난수 (0 이상 1 미만). 시험이 실패하면 같은 씨앗으로 다시 재현한다 */
+function seeded(seed: number) {
+  let x = seed >>> 0 || 1;
+  return () => ((x = (Math.imul(x, 1664525) + 1013904223) >>> 0) / 2 ** 32);
+}
+
 describe("TC-K1.T3.a 재시도 간격은 1분·2분·10분·30분이다 (Q2 의존)", () => {
-  it("늘 실패하는 핸들러, 가짜 시계 → 실패 시각 대비 next_run_at 차이 60000·120000·600000·1800000ms, 4번째 재시도 실패 뒤 next_run_at 그대로·failed_at 설정", async () => {
-    const id = await enqueue(h, "budget.set", { omnirouteKeyId: "k", monthlyUsd: 1 }, { now: T0 });
-    const calls = { n: 0 };
-    const { seen } = await failFiveTimes(id, calls);
-    expect(calls.n).toBe(5);
-    expect(seen.slice(0, 4).map((s) => s.next.getTime() - s.at.getTime())).toEqual([60_000, 120_000, 600_000, 1_800_000]);
-    expect(seen.slice(0, 4).every((s) => s.failedAt === null)).toBe(true);
-    // 다섯 번째 시도(4번째 재시도)의 실패: next_run_at 은 그 시도 전 값, failed_at 은 실패 시각
-    expect(seen[4].next.getTime()).toBe(seen[4].at.getTime());
-    expect(seen[4].failedAt?.getTime()).toBe(seen[4].at.getTime());
-    expect((await jobRow(id)).attempts).toBe(5);
+  it("1분 경계 tick 에 0~20초 지연을 섞어도 시도는 0·1·3·13·43분 경계에 돌고, next_run_at − 실패 시각 = 60000·120000·600000·1800000ms", async () => {
+    // 실행기는 1분 경계마다 깨지만 깨는 시각이 0~20초 늦을 수 있다 (타이머·Cron 지연). 실패 시각 = 그 tick 시각 (핸들러는 바로 실패)
+    for (let seed = 1; seed <= 20; seed++) {
+      const rand = seeded(seed);
+      const id = await enqueue(h, "budget.set", { omnirouteKeyId: "k", monthlyUsd: 1 }, { now: T0 });
+      const tried: number[] = [];
+      const gaps: number[] = [];
+      let failedAt = 0;
+      const handlers = all(async () => {
+        throw new Error("OmniRoute 가 응답하지 않는다");
+      });
+      for (let minute = 0; minute <= 45; minute++) {
+        const tick = new Date(T0.getTime() + minute * 60_000 + Math.floor(rand() * 20_000));
+        const before = (await jobRow(id)).attempts;
+        await runDue(h, handlers, tick, { clock: () => tick.getTime() });
+        const r = await jobRow(id);
+        if (r.attempts === before) continue;
+        tried.push(minute);
+        if (r.failedAt) failedAt = r.failedAt.getTime();
+        else gaps.push(r.nextRunAt.getTime() - tick.getTime());
+      }
+      expect(tried, `씨앗 ${seed}`).toEqual([0, 1, 3, 13, 43]);
+      expect(gaps, `씨앗 ${seed}`).toEqual([60_000, 120_000, 600_000, 1_800_000]);
+      expect(failedAt, `씨앗 ${seed}: 4번째 재시도 실패 뒤 failed_at`).toBeGreaterThan(0);
+      await h.db.delete(h.schema.omnirouteJobs).where(eq(h.schema.omnirouteJobs.id, id));
+    }
   });
 });
 
