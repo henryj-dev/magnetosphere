@@ -1,12 +1,12 @@
 // K1.T3 작업 큐 (SQLite 파일 DB, 가짜 시계 = runDue 에 넘기는 now). 네 DB 동시 실행기는 concurrency.db.test.ts.
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { OmniRouteError } from "@magnetosphere/omniroute";
 import { acquireLease, LeaseLostError } from "@magnetosphere/runtime/lease";
 import { connectNode } from "@magnetosphere/runtime/node";
 import type { DbHandle } from "@magnetosphere/runtime/types";
-import { ACTIONS, DUE_GRACE_MS, enqueue, isLongFailed, runDue, type Handler, type Handlers } from "../../src/queue/index.ts";
+import { ACTIONS, CLAIM_MS, DUE_GRACE_MS, enqueue, isLongFailed, RETRY_DELAYS_MS, runDue, type Handler, type Handlers } from "../../src/queue/index.ts";
 import { makeTestEnv, type TestEnv } from "../helpers.ts";
 
 const T0 = new Date("2026-10-01T00:00:00.000Z");
@@ -193,5 +193,34 @@ describe("TC-K1.T3.i 임대를 잃어 끊긴 실행은 재시도 횟수를 쓰�
     const r = await jobRow(id);
     expect({ attempts: r.attempts, nextRunAt: r.nextRunAt.getTime(), lastError: r.lastError, failedAt: r.failedAt }).toEqual({ attempts: 0, nextRunAt: T0.getTime(), lastError: null, failedAt: null });
     expect((await jobRow(other)).attempts).toBe(0);
+  });
+});
+
+describe("TC-K1.T3.l 실패 처리가 계속 실패해도 OmniRoute 호출을 끝없이 되풀이하지 않는다", () => {
+  it("attempts 가 RETRY_DELAYS_MS 길이 + 2 를 넘으면 핸들러 없이 실패 처리만 시도하고 경보, 알림 저장이 돌아오면 failed", async () => {
+    const keyId = await keyRow();
+    const j = h.schema.omnirouteJobs;
+    const id = await enqueue(h, "key.apply_state", { keyId }, { now: T0 });
+    // 실패 처리를 이미 두 번 못 쓴 작업 (마지막 시도 뒤 차지만 남았다)
+    await h.db.update(j).set({ attempts: RETRY_DELAYS_MS.length + 2 }).where(eq(j.id, id));
+    const calls: string[] = [];
+    const handlers = all(async (_p, { job }) => {
+      calls.push(job.id);
+      throw new Error("OmniRoute 가 응답하지 않는다");
+    });
+    const alarms: string[] = [];
+    await h.db.run(sql.raw("ALTER TABLE audit_log RENAME TO audit_log_off"));
+    try {
+      const r = await runDue(h, handlers, T0, { onAlarm: (jobId: string) => void alarms.push(jobId), onError: () => {} } as never);
+      expect(r).toMatchObject({ failed: 0, errors: 1 });
+    } finally {
+      await h.db.run(sql.raw("ALTER TABLE audit_log_off RENAME TO audit_log"));
+    }
+    expect(calls, "핸들러(OmniRoute 호출)를 다시 부르지 않는다").toEqual([]);
+    expect(alarms).toEqual([id]);
+    expect((await jobRow(id)).failedAt).toBeNull();
+    await runDue(h, handlers, new Date(T0.getTime() + CLAIM_MS));
+    expect(calls).toEqual([]);
+    expect((await jobRow(id)).failedAt).toBeInstanceOf(Date);
   });
 });
