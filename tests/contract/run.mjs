@@ -14,6 +14,7 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { composeUp } from "../../scripts/compose-up.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "../..");
@@ -34,7 +35,7 @@ if (spawnSync("docker", ["info"], { stdio: "ignore" }).status !== 0) {
   console.error("test:contract: docker 를 쓸 수 없다 (docker info 실패). 계약 테스트에는 docker 가 필요하다.");
   process.exit(1);
 }
-const up = spawnSync("docker", ["compose", "-f", COMPOSE, "up", "-d", "--wait"], { stdio: "inherit" });
+const up = composeUp(COMPOSE);
 if (up.status !== 0) {
   console.error(`test:contract: 계약 환경을 띄우지 못했다 (docker compose 종료코드 ${up.status}).`);
   process.exit(1);
