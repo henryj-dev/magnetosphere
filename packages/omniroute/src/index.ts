@@ -15,6 +15,7 @@ import type { z } from "zod";
 import {
   accessTokenSchema,
   analyticsSchema,
+  budgetReadSchema,
   budgetSchema,
   callLogsSchema,
   createdKeySchema,
@@ -281,6 +282,15 @@ export function createClient(o: ConnectOptions & { credential: Credential }) {
       if (r.budget.monthlyLimitUsd !== 0) {
         throw new OmniRouteFormatError("POST", "/api/usage/budget", [{ code: "custom", path: ["budget"], message: `월 예산이 풀리지 않았다: ${JSON.stringify(r.budget)}`, input: r.budget }]);
       }
+    },
+
+    /**
+     * 키 하나의 월 예산 읽기 (GET /api/usage/budget?apiKeyId=). 0 은 무제한이다 (V20). 회원 앱 동작은 이 값을 읽지 않고
+     * 우리 DB 의 budget_usd 를 쓴다 — 시험이 OmniRoute 에 실제로 걸린 예산을 교차 확인할 때 쓴다 (K5 리뷰 L2)
+     */
+    async getBudget(id: string): Promise<{ monthlyUsd: number; resetInterval: "daily" | "weekly" | "monthly" }> {
+      const r = await req({ method: "GET", path: `/api/usage/budget?${new URLSearchParams({ apiKeyId: requireId(id) })}` }, budgetReadSchema);
+      return { monthlyUsd: r.budget.monthlyLimitUsd, resetInterval: r.budget.resetInterval };
     },
 
     /**

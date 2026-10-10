@@ -225,3 +225,18 @@ describe("TC-K3.T3.l 키 목록이 total 보다 적으면 형식 오류로 끝�
     expect((await list({ keys: [key], total: 1 })).map((k) => k.id)).toEqual(["k1"]);
   });
 });
+
+describe("K5 리뷰 L2 getBudget 은 키 하나의 월 예산을 읽는다", () => {
+  it("GET /api/usage/budget?apiKeyId=k1 → { monthlyUsd, resetInterval }. 형식이 다르면 OmniRouteFormatError, 잘못된 id 는 보내지 않는다", async () => {
+    const ok = { budget: { dailyLimitUsd: 0, weeklyLimitUsd: 0, monthlyLimitUsd: 0.0123, resetInterval: "monthly" }, totalCostMonth: 0 };
+    const { fetch, sent } = fakeFetch({ "GET /api/usage/budget": { body: ok } });
+    const c = createClient({ baseUrl: "http://omni.test", credential: { token: "t" }, fetch });
+    expect(await c.getBudget("k1")).toEqual({ monthlyUsd: 0.0123, resetInterval: "monthly" });
+    expect(sent[0].method).toBe("GET");
+    expect(new URL(sent[0].url).searchParams.get("apiKeyId")).toBe("k1");
+    await expect(c.getBudget("../x")).rejects.toThrow(TypeError);
+    expect(sent).toHaveLength(1);
+    const bad = fakeFetch({ "GET /api/usage/budget": { body: { budget: { monthlyLimitUsd: "0.01", resetInterval: "monthly" } } } });
+    await expect(createClient({ baseUrl: "http://omni.test", credential: { token: "t" }, fetch: bad.fetch }).getBudget("k1")).rejects.toThrow(OmniRouteFormatError);
+  });
+});

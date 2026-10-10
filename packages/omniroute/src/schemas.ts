@@ -59,6 +59,14 @@ export const budgetSchema = z.object({
   }),
 });
 
+/** GET /api/usage/budget?apiKeyId= (3.8.51). 쓰는 값만 본다 */
+export const budgetReadSchema = z.object({
+  budget: z.object({
+    monthlyLimitUsd: z.number(),
+    resetInterval: z.enum(["daily", "weekly", "monthly"]),
+  }),
+});
+
 // 비용은 음수일 수 없다. 음수가 오면 남은 한도 계산이 한도를 늘린다 (S5 보안 리뷰 L4)
 const money = z.number().finite().nonnegative();
 const count = z.number().int().nonnegative();
