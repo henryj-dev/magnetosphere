@@ -392,7 +392,46 @@ export const GATES = {
     waivable: false,
     strictTests: true,
     outputs: ["apps/server/src/limits/**", "apps/server/test/limits/**", "apps/server/test/contract/limits/**"],
-    checks: [],
+    checks: [
+      // K2.T1 남은 한도 계산 (순수 함수)
+      { id: "G-K2.1", how: "test", desc: "TC-K2.T1.a 계산식이 계획서 5.3 과 같다", cmd: 'pnpm -C apps/server test -t "TC-K2.T1.a"', expectPassed: 1 },
+      { id: "G-K2.2", how: "test", desc: "TC-K2.T1.b 한도를 넘긴 회원은 남은 0·끄기 (Q1)", cmd: 'pnpm -C apps/server test -t "TC-K2.T1.b"', expectPassed: 1 },
+      { id: "G-K2.3", how: "test", desc: "TC-K2.T1.c 한도 NULL 은 예산 없음", cmd: 'pnpm -C apps/server test -t "TC-K2.T1.c"', expectPassed: 1 },
+      { id: "G-K2.4", how: "test", desc: "TC-K2.T1.d 남은 0·사용액 0 키는 끄기 대상 (Q1)", cmd: 'pnpm -C apps/server test -t "TC-K2.T1.d"', expectPassed: 1 },
+      { id: "G-K2.5", how: "test", desc: "TC-K2.T1.e 부동소수 오차로 남은 한도가 생기지 않음", cmd: 'pnpm -C apps/server test -t "TC-K2.T1.e"', expectPassed: 1 },
+      // K2.T2 달 경계와 시간대 (V20 UTC, Q5)
+      { id: "G-K2.6", how: "test", desc: "TC-K2.T2.a 달 경계 창 시작 = 매달 1일 00:00 UTC (V20)", cmd: 'pnpm -C apps/server test -t "TC-K2.T2.a"', expectPassed: 1 },
+      { id: "G-K2.7", how: "test", desc: "TC-K2.T2.b 새 달 첫 실행은 지난달 사용액을 넣지 않음", cmd: 'pnpm -C apps/server test -t "TC-K2.T2.b"', expectPassed: 1 },
+      { id: "G-K2.24", how: "test", desc: "TC-K2.T2.c 달 바뀜은 저장한 마지막 실행 달로 판단 (Q5)", cmd: 'pnpm -C apps/server test -t "TC-K2.T2.c"', expectPassed: 1 },
+      // K2.T6 1분 분배 (오늘 창 + 지난 날 저장, v5.7)
+      { id: "G-K2.8", how: "test", desc: "TC-K2.T6.a 활성 키가 없는 회원은 OmniRoute 호출 없음", cmd: 'pnpm -C apps/server test -t "TC-K2.T6.a"', expectPassed: 1 },
+      { id: "G-K2.9", how: "test", desc: "TC-K2.T6.b 예산이 바뀐 키만 setBudget", cmd: 'pnpm -C apps/server test -t "TC-K2.T6.b"', expectPassed: 1 },
+      { id: "G-K2.10", how: "test", desc: "TC-K2.T6.c 분석 형식 오류면 예산을 하나도 바꾸지 않음", cmd: 'pnpm -C apps/server test -t "TC-K2.T6.c"', expectPassed: 1 },
+      { id: "G-K2.11", how: "test", requires: ["local-services"], desc: "TC-K2.T6.d 두 키로 나눠 써도 회원 한도에서 둘 다 막힘 (계약)", cmd: 'pnpm test:contract -t "TC-K2.T6.d"', expectPassed: 1 },
+      { id: "G-K2.12", how: "test", requires: ["local-services"], desc: "TC-K2.T6.e 삭제한 키 사용액이 새 키 몫을 줄임 (계약, V18)", cmd: 'pnpm test:contract -t "TC-K2.T6.e"', expectPassed: 1 },
+      { id: "G-K2.13", how: "test", requires: ["local-services"], desc: "TC-K2.T6.f 사용액 0 키도 한도 도달 뒤 꺼짐 (계약, Q1)", cmd: 'pnpm test:contract -t "TC-K2.T6.f"', expectPassed: 1 },
+      { id: "G-K2.25", how: "test", requires: ["local-services"], desc: "TC-K2.T6.j limit 키만 다시 켜기 (계약, Q1)", cmd: 'pnpm test:contract -t "TC-K2.T6.j"', expectPassed: 1 },
+      { id: "G-K2.14", how: "test", requires: ["local-services"], desc: "TC-K2.T6.g 초과 폭 ≤ 한도 × 2 + 0.004878 (계약)", cmd: 'pnpm test:contract -t "TC-K2.T6.g"', expectPassed: 1 },
+      { id: "G-K2.15", how: "cmd", requires: ["local-services"], desc: "TC-K2.T6.h 분배 소요 (보통 ≤ 30,000ms · 날이 바뀐 첫 분배 ≤ 55,000ms, V15)", cmd: "node tests/bench/analytics.mjs --rebalance --assert" },
+      { id: "G-K2.26", how: "test", desc: "TC-K2.T6.k 1분 분배는 오늘 창 하나만 (V15)", cmd: 'pnpm -C apps/server test -t "TC-K2.T6.k"', expectPassed: 1 },
+      // K2.T7 지난 날 저장 usage_daily·날 확정·하루 대조 (v5.7)
+      { id: "G-K2.27", how: "test", desc: "TC-K2.T7.a 날이 바뀐 첫 분배가 어제를 확정 저장 (V15)", cmd: 'pnpm -C apps/server test -t "TC-K2.T7.a"', expectPassed: 1 },
+      { id: "G-K2.28", how: "test", desc: "TC-K2.T7.b 하루 한 번 대조가 저장값을 덮고 차이를 알림 (V15)", cmd: 'pnpm -C apps/server test -t "TC-K2.T7.b"', expectPassed: 1 },
+      { id: "G-K2.29", how: "test", desc: "TC-K2.T7.c 대조가 제한 시간에 걸리면 날 단위로 나눔", cmd: 'pnpm -C apps/server test -t "TC-K2.T7.c"', expectPassed: 1 },
+      { id: "G-K2.30", how: "test", requires: ["local-services"], desc: "TC-K2.T7.d 저장 합 + 오늘 == 한 달 (계약, 오차 1e-9)", cmd: 'pnpm test:contract -t "TC-K2.T7.d"', expectPassed: 1 },
+      { id: "G-K2.31", how: "test", requires: ["local-services"], desc: "TC-K2.T7.e usage_daily 다섯 DB", cmd: 'pnpm -C packages/db test:migrate -t "TC-K2.T7.e" --db sqlite,mysql,mariadb,pg,d1', expectPassed: 5 },
+      // K2.T4 즉시 분배 진입점
+      { id: "G-K2.16", how: "test", desc: "TC-K2.T4.a 즉시 분배는 그 회원 키 전부(삭제 포함)로 분석", cmd: 'pnpm -C apps/server test -t "TC-K2.T4.a"', expectPassed: 1 },
+      { id: "G-K2.17", how: "test", desc: "TC-K2.T4.b 늦게 끝난 옛 계산이 새 계산을 덮지 않음", cmd: 'pnpm -C apps/server test -t "TC-K2.T4.b"', expectPassed: 1 },
+      // 공통
+      { id: "G-K2.18", how: "grep", desc: "어댑터 밖 OmniRoute 관리 호출 0", pattern: "/api/(keys|usage)", in: ["apps", "packages"], exclude: ["packages/omniroute/**"], op: "==", limit: 0 },
+      { id: "G-K2.19", how: "cmd", desc: "타입 검사", cmd: "pnpm -r typecheck" },
+      // K2.T5 CI 단계 잡과 ruleset 필수 검사
+      { id: "G-K2.20", how: "grep", desc: "TC-K2.T5.a CI 단계 잡 (K2)", pattern: "^\\s+run: node scripts/gate\\.mjs K2\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
+      { id: "G-K2.22", how: "test", desc: "TC-K2.T6.i 분배 1분 등록·TC-K1.T4.b wrangler crons == JOBS crons", cmd: 'pnpm -C apps/server test -t "TC-K2.T6.i" && pnpm -C apps/server test -t "TC-K1.T4.b"', expectPassed: 2 },
+      { id: "G-K2.23", how: "grep", desc: "1분 주기 상수", pattern: 'name: "budget_rebalance", cron: "\\* \\* \\* \\* \\*"', in: ["apps/server/src/jobs.ts"], op: "==", limit: 1 },
+      { id: "G-K2.21", how: "cmd", desc: "TC-K2.T5.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
+    ],
   },
   K3: {
     needs: ["K2"],

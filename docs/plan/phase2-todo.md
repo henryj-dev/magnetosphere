@@ -730,12 +730,12 @@ TC-K1.T5.b  ruleset 필수 검사가 이 잡을 포함한다
 
 ---
 
-# K2 — 회원 단위 한도 분배 🔒 (K1 필요)
+# K2 — 회원 단위 한도 분배 🔓 (K1 필요)
 
 **브랜치** `p2/k2`.
 **outputs** `apps/server/src/limits/**`, `apps/server/test/limits/**`, `apps/server/test/contract/limits/**` (새 경로만). 어댑터(`packages/omniroute/src`)를 고쳐야 하면 고치되 `outputs`에는 넣지 않는다 (0절). V12 결과는 "분배 유지"다 (계획서 v5.6 5.3). V15 결정(v5.7)으로 이 단계가 새 테이블 `usage_daily`를 만든다: 스키마(`packages/db/src/schema/**`, 기존 파일)와 마이그레이션 `packages/db/migrations/*/0002_*`(새 경로)는 이 단계 `outputs` 글롭 밖이다. 잠긴 단계라 `outputs`를 넓힐 수 없으므로 `--assert-order`는 이 경로를 지키지 않고, 순서는 K1 봉인(R1)이 지킨다.
 
-### ☐ K2.T1 — 남은 한도 계산 (순수 함수)
+### ☑ K2.T1 — 남은 한도 계산 (순수 함수)
 선행 없음 · 산출 `apps/server/src/limits/compute.ts`, `apps/server/test/limits/**` · 되돌리기 커밋 1개
 
 【작업】
@@ -763,7 +763,7 @@ TC-K2.T1.e  부동소수 오차로 남은 한도가 생기지 않는다
 【통과】
 - [ ] G-K2.1 ~ G-K2.5 통과
 
-### ☐ K2.T2 — 달 경계와 시간대
+### ☑ K2.T2 — 달 경계와 시간대
 선행 K2.T1 · 산출 `apps/server/src/limits/month.ts` · 되돌리기 커밋 1개
 
 【작업】
@@ -788,20 +788,20 @@ TC-K2.T2.c  달 바뀜은 저장한 마지막 실행 달로 판단한다 (Q5 의
 ### ☐ K2.T3 — 1분 분배 작업 (폐기)
 v5.7 에서 폐기 (V15). 매분 이번 달 전체를 분석으로 부르는 방식은 기록 300,000건에서 CI x64 p95 5.6~6.4초라 느리다. 오늘 창 + 지난 날 저장(K2.T7)으로 바꾼 K2.T6 이 대신한다. TC-K2.T3.a~j 는 TC-K2.T6.a~j 로 옮겼다 (GATE 행 번호는 그대로).
 
-### ☐ K2.T7 — 지난 날 저장 `usage_daily`·날 확정·하루 대조 (v5.7)
+### ☑ K2.T7 — 지난 날 저장 `usage_daily`·날 확정·하루 대조 (v5.7)
 선행 K2.T2 · 산출 `packages/db/src/schema/**`, `packages/db/migrations/{sqlite,mysql,pg}/0002_*`, `apps/server/src/limits/daily.ts`, `apps/server/test/limits/**`, `apps/server/test/contract/limits/**` · 되돌리기 커밋 1개
 
 【작업】
 1. 공통 정의에 `usage_daily(key_id, day, cost_usd DECIMAL(12,6), updated_at, PK(key_id, day))`를 더하고 세 벌 생성·마이그레이션 `0002_*`를 만든다 (계획서 v5.7 5.9). `0002_*`는 K2 `outputs`(잠긴 단계라 못 고침) 밖이라 `--assert-order`가 지키지 않는다. 순서는 K1 봉인(R1)이 지킨다.
-2. `apps/server/src/limits/daily.ts`: `storedSpent(keyIds, month)` = 이번 달 1일~어제 합. `confirmDays(now)`: `app_settings.usage_daily_confirmed`가 어제보다 이르면 (1) 어제 창(어제 00:00 ~ 오늘 00:00 UTC)을 한 번 불러 매핑된 키의 어제 값을 저장하고 (2) 이번 달 1일 ~ 오늘 00:00 을 다시 불러 저장값을 덮는다(대조). 키·날마다 |새 값 − 저장값| > 0.000001 이 하나라도 있으면 `audit_log` `alert.usage_drift`(차이 난 키·날 수, 합계 차이) 1행. 대조 호출이 어댑터 제한 시간에 걸리면 대조를 멈추고 다음 실행부터 날 단위로 나눠 하루씩 부른다 (진행한 날을 `app_settings`에 남김). 펜싱 아래에서 쓴다. 커밋.
+2. `apps/server/src/limits/daily.ts`: `storedSpent(keyIds, month)` = 이번 달 1일~어제 합. `confirmDays(now)`: `app_settings.usage_daily_confirmed`(확정·대조를 마지막으로 한 날 = 그 실행의 오늘)가 오늘보다 이르면 (1) 어제 창(어제 00:00 ~ 어제 23:59:59.999 UTC)을 한 번 불러 매핑된 키의 어제 값을 저장하고 (2) 이번 달 1일 ~ 어제 23:59:59.999 를 다시 불러 저장값을 덮는다(대조). 창 끝이 23:59:59.999 인 이유: OmniRoute 3.8.51 분석은 `timestamp >= startDate AND timestamp <= endDate`(양 끝 포함)라, 끝을 오늘 00:00 으로 주면 자정 정각 기록이 어제 저장값과 오늘 창에 두 번 든다 (K2 구현 때 이미지 소스로 확인). 한 번 호출의 `byApiKey`는 키별 합계라 날짜별 값이 없다: 합계가 저장 합과 다른 키의 날짜별 저장값을 비율대로 새 합계에 맞춘다(저장 합 0 이면 어제에 둔다). 회원 사용액은 합만 쓴다. 키·날마다 |새 값 − 저장값| > 0.000001 이 하나라도 있으면 `audit_log` `alert.usage_drift`(차이 난 키·날 수, 합계 차이) 1행. 대조 호출이 어댑터 제한 시간에 걸리면 대조를 멈추고 다음 실행부터 날 단위로 나눠 하루씩 부른다 (진행한 날을 `app_settings`에 남김). 펜싱 아래에서 쓴다. 커밋.
 
 【테스트】
 ```
 TC-K2.T7.a  날이 바뀐 첫 분배가 어제를 확정 저장한다 (V15 의존)
-  단언:  가짜 어댑터·시계, usage_daily_confirmed "2026-04-09", now 2026-04-10T00:01Z → 어제 창 호출 1건(startDate 04-09T00:00Z, endDate 04-10T00:00Z), usage_daily 에 매핑 키의 04-09 행, usage_daily_confirmed "2026-04-09"→"2026-04-10" 기준으로 갱신. 같은 날 두 번째 실행 → 어제 창·대조 호출 0건
+  단언:  가짜 어댑터·시계, usage_daily_confirmed "2026-04-09", now 2026-04-10T00:01Z → 어제 창 호출 1건(startDate 04-09T00:00Z, endDate 04-09T23:59:59.999Z — 분석 창 끝은 포함이다), usage_daily 에 매핑 키의 04-09 행, usage_daily_confirmed "2026-04-09"→"2026-04-10" 기준으로 갱신. 같은 날 두 번째 실행 → 어제 창·대조 호출 0건
   검출:  날 확정을 매분 다시 해 1분 분배가 하루 창 두 개를 부르거나, 확정을 빠뜨려 어제 몫이 회원 사용액에서 통째로 빠지는 것
 TC-K2.T7.b  하루 한 번 대조가 저장값을 덮고 차이를 알린다 (V15 의존)
-  단언:  저장값 04-03 키 A 0.010000, 가짜 대조 응답 0.012000 (가격표 변경) → 대조 호출 1건(startDate 04-01T00:00Z, endDate 04-10T00:00Z), 저장값 0.012000, audit_log "alert.usage_drift" 1행(키·날 1, 합계 0.002). 차이 없으면 alert 0행
+  단언:  저장값 04-03 키 A 0.010000, 가짜 대조 응답 0.012000 (가격표 변경) → 대조 호출 1건(startDate 04-01T00:00Z, endDate 04-09T23:59:59.999Z), 저장값 0.012000, audit_log "alert.usage_drift" 1행(키·날 1, 합계 0.002). 차이 없으면 alert 0행
   검출:  가격표가 바뀌어도 지난 날 저장값이 그 달 끝까지 옛 값으로 남거나, 차이를 조용히 덮어 운영자가 한도 계산이 바뀐 것을 모르는 것
 TC-K2.T7.c  대조가 제한 시간에 걸리면 날 단위로 나눈다
   단언:  대조 첫 호출이 AbortSignal 시간 초과 → 그 실행 저장값 변화 0, 다음 실행부터 하루 창 호출로 나눠 진행, 9일 치를 다 맞추면 한 번 호출로 돌아감
@@ -817,7 +817,7 @@ TC-K2.T7.e  다섯 DB 에 usage_daily 가 있다
 【통과】
 - [ ] G-K2.27 ~ G-K2.31 통과
 
-### ☐ K2.T6 — 1분 분배 작업 (v5.7: 오늘 창 + 지난 날 저장)
+### ☑ K2.T6 — 1분 분배 작업 (v5.7: 오늘 창 + 지난 날 저장)
 선행 K2.T2 · K2.T7 · 산출 `apps/server/src/limits/rebalance.ts`, `packages/omniroute/src/**`(필터 없는 분석 호출), `apps/server/test/contract/limits/**` · 되돌리기 커밋 1개
 
 【작업】
@@ -841,10 +841,10 @@ TC-K2.T6.e  삭제한 키의 사용액이 새 키의 남은 몫을 줄인다 (�
   단언:  한도 0.02, 키 A 요청 3건(0.014633) → A 삭제 → 키 B 발급·분배 → B 예산 == 0.02 − 0.014633 (오차 1e-6)
   검출:  분석 apiKeyIds 에 삭제 키를 빼 B 가 한도 전액을 새로 받는 것
 TC-K2.T6.f  사용액 0 키도 회원 한도 도달 뒤 꺼진다 (계약, Q1 의존)
-  단언:  한도 0.01, 키 A 요청 3건 → 키 C(사용액 0) 분배 1회 → A·C 다음 요청 403 permission_denied, api_keys 두 행 disabled_reason "limit"
+  단언:  한도 0.01, 키 A 요청 3건 → 키 C(사용액 0) 분배 1회 → A 다음 요청 403 permission_denied, C 는 거부(한 번도 쓰지 않은 채 꺼진 키는 OmniRoute 3.8.51 이 401 AUTH_002 로 거부한다, K2 계약 실측), listKeys 에서 A·C isActive false, api_keys 두 행 disabled_reason "limit"
   검출:  Q1 공백 그대로 예산 0(무제한)이 걸리거나 예산을 아예 안 걸어 C 로 한도 밖 사용이 계속되는 것
 TC-K2.T6.j  남은 한도가 다시 생기면 limit 으로 꺼진 키만 켠다 (계약, Q1 의존)
-  단언:  f 뒤 회원이 직접 끈 키 D(disabled_reason member) 추가 → 한도 0.05 로 올림 → 분배 1회 → A·C 다음 요청 200, D 403. 어댑터 호출 순서는 키마다 [setBudget, setKeyActive(true)]
+  단언:  f 뒤 회원이 직접 끈 키 D(disabled_reason member) 추가 → 한도 0.05 로 올림 → 분배 1회 → A·C 다음 요청 200, D 거부(쓴 적 없는 꺼진 키라 401 AUTH_002 또는 403)·listKeys isActive false. 어댑터 호출 순서는 키마다 [setBudget, setKeyActive(true)]
   검출:  새 달·한도 상향 뒤에도 limit 키가 꺼진 채 남거나, 회원이 끈 키까지 켜거나, 예산 없이 먼저 켜 1분 동안 한도 밖 사용이 열리는 것
 TC-K2.T6.g  초과 폭은 한도 × 동시에 쓰는 키 수 안이다 (계약)
   단언:  한도 0.02, 키 2개를 동시에 막힐 때까지(isBudgetBlocked 또는 403) 쓰기 → 회원 총 사용액 ≤ 0.02 × 2 + 요청 1건 비용(0.004878)
@@ -864,11 +864,11 @@ TC-K2.T6.k  1분 분배는 오늘 창 하나만 부른다 (V15 의존)
 - [ ] G-K2.8 ~ G-K2.15 · G-K2.22 · G-K2.23 · G-K2.25 · G-K2.26 통과
 - [ ] G-K2.18 통과 (어댑터 밖 OmniRoute 관리 호출 0)
 
-### ☐ K2.T4 — 즉시 분배 진입점
+### ☑ K2.T4 — 즉시 분배 진입점
 선행 K2.T6 · 산출 `apps/server/src/limits/member.ts` · 되돌리기 커밋 1개
 
 【작업】
-1. `rebalanceMember(userId)`: 그 회원 키 전부(삭제 포함)의 `storedSpent` + 그 키 id 로 오늘 창 분석 한 번(v5.7 5.3) → 계산 → 예산. 발급·재발급 직후와 관리자 한도 변경 직후(K4)가 부른다. 1분 작업과 같은 임대를 잡지 않고 회원 단위 펜싱(`budget_usd` 갱신 조건)으로 겹침을 막는다. 커밋.
+1. `rebalanceMember(userId)`: 그 회원 키 전부(삭제 포함)의 `storedSpent` + 그 키 id 로 오늘 창 분석 한 번(v5.7 5.3) → 계산 → 예산. 발급·재발급 직후와 관리자 한도 변경 직후(K4)가 부른다. 1분 작업과 같은 임대를 잡지 않고 회원 단위 펜싱(`budget_usd` 갱신 조건)으로 겹침을 막는다. 갱신 조건은 `api_keys.budget_at`(그 예산·limit 끄기를 계산한 분석 시각, K2.T7 의 0002 에 함께 넣음)이 비었거나 내 분석 시각보다 이를 때다. 커밋.
 
 【테스트】
 ```
@@ -883,7 +883,7 @@ TC-K2.T4.b  즉시 분배와 1분 분배가 겹쳐도 옛 계산이 새 계산�
 【통과】
 - [ ] G-K2.16 · G-K2.17 통과
 
-### ☐ K2.T5 — K2 CI 잡과 봉인
+### ◐ K2.T5 — K2 CI 잡과 봉인
 선행 K2.T1 · K2.T2 · K2.T4 · K2.T6 · K2.T7 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
 
 【작업】
