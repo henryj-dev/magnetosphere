@@ -236,6 +236,7 @@ export const TABLES: Record<string, Table> = {
       createdAt: { name: "created_at", kind: "timestamp", notNull: true },
       deletedAt: { name: "deleted_at", kind: "timestamp" },
       budgetAt: { name: "budget_at", kind: "timestamp", doc: "budget_usd·limit 끄기를 계산한 분석 시각. 이보다 이른 분석으로 계산한 쓰기는 0행이다 (K2.T4)" },
+      budgetMonth: { name: "budget_month", kind: "string", length: 7, doc: "budget_usd 를 OmniRoute 에 건 달 (UTC YYYY-MM). 새 달 첫 분배가 중간에 멈춰도 이미 건 키는 건너뛴다 (K2 리뷰 M2)" },
     },
     indexes: [{ name: "idx_api_keys_user", columns: ["userId"] }],
   },

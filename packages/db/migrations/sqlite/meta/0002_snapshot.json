@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7a305ba4-369e-4931-b09a-d9a8cc517730",
+  "id": "4c3b20b8-db69-45eb-9a7a-7df3cf4b665f",
   "prevId": "8e304f14-2a69-4ded-9517-dd901307ee91",
   "tables": {
     "account": {
@@ -211,6 +211,13 @@
         "budget_at": {
           "name": "budget_at",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "budget_month": {
+          "name": "budget_month",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

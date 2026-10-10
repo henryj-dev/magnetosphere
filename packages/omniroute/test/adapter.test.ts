@@ -201,3 +201,14 @@ describe("K2.T6 필터 없는 분석 호출 (1분 분배의 오늘 창, 계획�
     expect([...q.keys()].sort()).toEqual(["endDate", "startDate"]);
   });
 });
+
+describe("K2 리뷰 M3 clearBudget 은 월 예산 0(무제한)을 보낸다", () => {
+  it("clearBudget(id) → POST 본문 monthlyLimitUsd 0·resetInterval monthly. setBudget 은 0 을 계속 TypeError", async () => {
+    const { fetch, sent } = fakeFetch({ "POST /api/usage/budget": { body: { success: true, apiKeyId: "k1", budget: { monthlyLimitUsd: 0, resetInterval: "monthly" } } } });
+    const c = createClient({ baseUrl: "http://omni.test", credential: { token: "t" }, fetch });
+    await expect(c.setBudget("k1", { monthlyUsd: 0 })).rejects.toThrow(TypeError);
+    expect(sent).toHaveLength(0);
+    await c.clearBudget("k1");
+    expect(JSON.parse(String(sent[0].body))).toMatchObject({ apiKeyId: "k1", monthlyLimitUsd: 0, resetInterval: "monthly" });
+  });
+});

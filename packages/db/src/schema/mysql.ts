@@ -136,6 +136,7 @@ export const apiKeys = mysqlTable("api_keys", {
   createdAt: datetime("created_at", { fsp: 3 }).notNull(),
   deletedAt: datetime("deleted_at", { fsp: 3 }),
   budgetAt: datetime("budget_at", { fsp: 3 }),
+  budgetMonth: varchar("budget_month", { length: 7 }),
 }, (table) => [
   index("idx_api_keys_user").on(table.userId),
 ]);

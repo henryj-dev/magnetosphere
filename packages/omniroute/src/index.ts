@@ -256,6 +256,25 @@ export function createClient(o: ConnectOptions & { credential: Credential }) {
     },
 
     /**
+     * 키의 월 예산을 푼다 (무제한). OmniRoute 는 한도 0 을 "한도 없음"으로 본다 (V20 zeroIsUnlimited).
+     * 회원 한도가 무제한(NULL)으로 바뀐 경우에만 부른다 (K2 리뷰 M3, apps 에서는 분배의 무제한 전환 경로 한 곳, G-K2 grep).
+     * 남은 한도 0 인 회원을 막는 데 쓰지 않는다. 그때는 setKeyActive(false) 다.
+     */
+    async clearBudget(id: string): Promise<void> {
+      const r = await req(
+        {
+          method: "POST",
+          path: "/api/usage/budget",
+          body: { apiKeyId: requireId(id), dailyLimitUsd: 0, weeklyLimitUsd: 0, monthlyLimitUsd: 0, resetInterval: "monthly" },
+        },
+        budgetSchema,
+      );
+      if (r.budget.monthlyLimitUsd !== 0) {
+        throw new OmniRouteFormatError("POST", "/api/usage/budget", [{ code: "custom", path: ["budget"], message: `월 예산이 풀리지 않았다: ${JSON.stringify(r.budget)}`, input: r.budget }]);
+      }
+    },
+
+    /**
      * 키별 사용량 (스트리밍 포함, 0단계 추가 1). startDate·endDate 는 ISO 시각으로 보낸다 (날짜만 보내면 0 이 나온다).
      * OmniRoute 는 timestamp >= startDate AND timestamp <= endDate 로 거른다 (양 끝 포함, 3.8.51).
      * apiKeyIds 를 빼면 모든 키다 (1분 분배의 오늘 창, 계획서 v5.7 5.3). 주면 비어 있지 않아야 한다 — 빈 목록을 "전체"로 읽으면

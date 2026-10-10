@@ -130,6 +130,7 @@ export const apiKeys = pgTable("api_keys", {
   createdAt: timestamp("created_at").notNull(),
   deletedAt: timestamp("deleted_at"),
   budgetAt: timestamp("budget_at"),
+  budgetMonth: varchar("budget_month", { length: 7 }),
 }, (table) => [
   index("idx_api_keys_user").on(table.userId),
 ]);

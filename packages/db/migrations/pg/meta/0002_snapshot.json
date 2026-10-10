@@ -1,5 +1,5 @@
 {
-  "id": "b072efc4-c4fa-44b2-877b-633d264f2585",
+  "id": "ad6f3ac2-e8ec-4235-b558-db59aa83d30a",
   "prevId": "a3e29ad5-3957-4f31-a308-85ed83fbf37e",
   "version": "7",
   "dialect": "postgresql",
@@ -199,6 +199,12 @@
         "budget_at": {
           "name": "budget_at",
           "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "budget_month": {
+          "name": "budget_month",
+          "type": "varchar(7)",
           "primaryKey": false,
           "notNull": false
         }

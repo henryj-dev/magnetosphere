@@ -6,4 +6,5 @@ CREATE TABLE "usage_daily" (
 	CONSTRAINT "usage_daily_key_id_day_pk" PRIMARY KEY("key_id","day")
 );
 --> statement-breakpoint
-ALTER TABLE "api_keys" ADD COLUMN "budget_at" timestamp;
+ALTER TABLE "api_keys" ADD COLUMN "budget_at" timestamp;--> statement-breakpoint
+ALTER TABLE "api_keys" ADD COLUMN "budget_month" varchar(7);

@@ -130,6 +130,7 @@ export const apiKeys = sqliteTable("api_keys", {
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
   budgetAt: integer("budget_at", { mode: "timestamp_ms" }),
+  budgetMonth: text("budget_month"),
 }, (table) => [
   index("idx_api_keys_user").on(table.userId),
 ]);

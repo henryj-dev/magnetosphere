@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "a960d4aa-b785-43e7-a132-89fab8ced26c",
+  "id": "49b6a4b8-fc75-408d-b8f0-06769c5bd85a",
   "prevId": "dc88fa2b-cae4-4ee7-b916-1aa43d3d4321",
   "tables": {
     "account": {
@@ -218,6 +218,13 @@
         "budget_at": {
           "name": "budget_at",
           "type": "datetime(3)",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "budget_month": {
+          "name": "budget_month",
+          "type": "varchar(7)",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

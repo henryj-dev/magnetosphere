@@ -6,4 +6,5 @@ CREATE TABLE `usage_daily` (
 	PRIMARY KEY(`key_id`, `day`)
 );
 --> statement-breakpoint
-ALTER TABLE `api_keys` ADD `budget_at` integer;
+ALTER TABLE `api_keys` ADD `budget_at` integer;--> statement-breakpoint
+ALTER TABLE `api_keys` ADD `budget_month` text;
