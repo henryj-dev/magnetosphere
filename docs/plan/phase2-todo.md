@@ -1599,7 +1599,7 @@ TC-K6.T3.c  1·2단계 봉인이 모두 유효하고 처음 커밋부터 순서 
 
 【테스트】
 ```
-TC-K6.T4.a  done_at 이 30일 넘은 작업만 지운다 (네 DB)
+TC-K6.T4.a  done_at 이 30일 넘은 작업만 지운다 (네 DB, Workers + D1)
   단언:  done_at = now − 30일 − 1초 · now − 30일 + 1초 · failed_at 만 90일 전 · 둘 다 60일 전 · 미완료 → pruneDone == 1, 남은 행 = 뒤 넷. 다른 실행기가 임대를 가져간 뒤 옛 임대로 pruneDone → 0, 60일 전 끝난 행 남음
   검출:  실패 작업까지 지워 오래 실패 화면(7단계)과 alert.job_failed 의 대상이 사라지는 것, 임대를 잃은 실행기가 펜싱 없이 지우는 것, timestamp 비교가 DB 방언마다 달라 30일 안 작업을 지우는 것
 TC-K6.T4.c  한 번에 최대 500행만 지운다 (네 DB, K6 리뷰 L1)
@@ -1612,6 +1612,7 @@ TC-K6.T4.b  1분 작업 큐 실행기가 정리를 부른다
 
 【통과】
 - [x] G-K6.10 ~ G-K6.13, G-K6.19 · G-K6.20 통과
+- (K6 리뷰 L2) TC-K6.T4.a·c 를 Workers + D1 에서도 돈다: 시험 Worker `apps/server/test/queue/prune-wrangler.jsonc`·`prune-worker.ts` 를 wrangler dev 로 띄워 운영과 같은 `pruneDone` 을 로컬 D1 에 부른다 (`prune.workers.test.ts`, G-K4.7·G-K4.36 과 같은 방식). G-K6.21. 음성 대조 (커밋 안 함): `PRUNE_BATCH` 600 과 `failed_at IS NULL` 제거를 함께 → D1 의 TC-K6.T4.a·c 둘 다 실패
 - K6 리뷰 L1 음성 대조 (커밋 안 함): `PRUNE_BATCH` 600 → TC-K6.T4.c 네 DB 실패. MySQL 의 파생 테이블 감싸기 제거(다른 DB 와 같은 IN 부분 질의) → MySQL·MariaDB 의 TC-K6.T4.a·c 실패
 - 음성 대조 (커밋 안 함): `failed_at IS NULL` 조건 제거 · 펜싱 제거 · 보존 29일 → TC-K6.T4.a 네 DB 모두 실패. `queueJob` 에서 호출 제거 → TC-K6.T4.b 실패
 
@@ -1661,6 +1662,7 @@ TC-K6.T5.b  S6 조합 불일치 음성 대조는 [combo-set] 로 잡힌다 (K6 �
 | G-K6.18 | TC-K6.T2.a 운영 문서 fail-closed 지연 | grep `fail-closed` in `deploy/README.md` | == 1 |
 | G-K6.19 | TC-K6.T4.c 한 번에 500행 (네 DB) | [L] `pnpm -C apps/server test:db -t "TC-K6.T4.c" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
 | G-K6.20 | 재현 빨강 TC-K6.T4.c | `node scripts/check-red.mjs --check G-K6.19 --since seal:K5` | 종료코드 0 |
+| G-K6.21 | TC-K6.T4.a·c Workers + D1 | [L] `pnpm -C apps/server test:workers -t "TC-K6.T4.[ac] Workers"` | 통과 = 2 |
 
 `node scripts/gate.mjs K6 --seal`
 
