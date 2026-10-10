@@ -150,3 +150,25 @@ describe("TC-K1.T3.e last_error 에 비밀 값이 없다", () => {
     }
   });
 });
+
+describe("TC-K1.T3.h 망가진 payload 는 곧바로 failed 로 두고 큐를 끊지 않는다", () => {
+  it("payload 가 JSON 이 아닌 작업 → 핸들러 호출 없이 failed_at·attempts 1·sync_state failed·alert 1행, 같은 tick 의 다음 작업은 돈다", async () => {
+    const keyId = await keyRow();
+    const j = h.schema.omnirouteJobs;
+    const broken = randomUUID();
+    await h.db.insert(j).values({ id: broken, action: "key.apply_state", payload: "{broken", keyId, attempts: 0, nextRunAt: T0 });
+    const good = await enqueue(h, "key.rollback", { omnirouteKeyId: "k" }, { runAt: new Date(T0.getTime() + 1) });
+    const calls: string[] = [];
+    const result = await runDue(h, all(async (_p, { job }) => void calls.push(job.id)), new Date(T0.getTime() + 1));
+    expect(calls).toEqual([good]);
+    expect(result).toMatchObject({ done: 1, failed: 1, errors: 0 });
+    const r = await jobRow(broken);
+    expect({ attempts: r.attempts, failed: r.failedAt instanceof Date, lastError: r.lastError }).toEqual({ attempts: 1, failed: true, lastError: "payload JSON 아님" });
+    const [key] = await h.db.select({ syncState: h.schema.apiKeys.syncState }).from(h.schema.apiKeys).where(eq(h.schema.apiKeys.id, keyId));
+    expect(key.syncState).toBe("failed");
+    const alerts = await h.db.select().from(h.schema.auditLog).where(eq(h.schema.auditLog.action, "alert.job_failed"));
+    expect(alerts.map((a: { target: string }) => a.target)).toEqual([broken]);
+    // 다음 tick 에도 다시 집지 않는다
+    expect(await runDue(h, all(async () => {}), new Date(T0.getTime() + 24 * 3600_000))).toMatchObject({ done: 0, failed: 0 });
+  });
+});
