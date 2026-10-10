@@ -551,7 +551,7 @@ export const GATES = {
       { id: "G-K4.16", how: "test", desc: "TC-K4.T3.b 잘못된 한도·최대 개수는 400, DB 변화 0", cmd: 'pnpm -C apps/server test -t "TC-K4.T3.b"', expectPassed: 1 },
       // K4.T4 CSRF 와 발급 요청 수 제한
       { id: "G-K4.17", how: "test", desc: "TC-K4.T4.a 다른 출처의 변경 요청은 403", cmd: 'pnpm -C apps/server test -t "TC-K4.T4.a"', expectPassed: 1 },
-      { id: "G-K4.18", how: "test", requires: ["local-services"], desc: "TC-K4.T4.b 발급 요청 수 제한 회원 10·IP 30 /시간, 넘으면 429 (Q4, 세 DB)", cmd: 'pnpm -C apps/server test:db -t "TC-K4.T4.b" --db sqlite,mysql,pg', expectPassed: 3 },
+      { id: "G-K4.18", how: "test", requires: ["local-services"], desc: "TC-K4.T4.b 발급 요청 수 제한 회원 10·IP 30 /시간, 넘으면 429 (Q4, 네 DB)", cmd: 'pnpm -C apps/server test:db -t "TC-K4.T4.b" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
       // K4.T5 실제 OmniRoute 로 수명주기 (계약)
       { id: "G-K4.19", how: "test", requires: ["local-services"], desc: "TC-K4.T5.a 발급·끄기·켜기·삭제 (계약, V11·V18)", cmd: 'pnpm test:contract -t "TC-K4.T5.a"', expectPassed: 1 },
       { id: "G-K4.20", how: "test", requires: ["local-services"], desc: "TC-K4.T5.b 남은 한도 0 회원 발급 거부 (계약)", cmd: 'pnpm test:contract -t "TC-K4.T5.b"', expectPassed: 1 },
@@ -562,6 +562,23 @@ export const GATES = {
       { id: "G-K4.24", how: "grep", desc: "시드 기본값 최대 키 2", pattern: "default_max_keys: 2,", in: ["packages/db/src/seed.ts"], op: "==", limit: 1 },
       { id: "G-K4.29", how: "grep", desc: "시드 기본값 월 한도 $5", pattern: "default_limit_usd: 5,", in: ["packages/db/src/seed.ts"], op: "==", limit: 1 },
       { id: "G-K4.25", how: "cmd", desc: "타입 검사", cmd: "pnpm -r typecheck" },
+      // K4 보안 리뷰 고침 (M1·M2·L1~L4, 시험 보강)
+      { id: "G-K4.30", how: "test", desc: "TC-K4.T7.g 발급 중인 자리 행은 회원이 바꾸지 못한다 (리뷰 M1)", cmd: 'pnpm -C apps/server test -t "TC-K4.T7.g"', expectPassed: 1 },
+      { id: "G-K4.31", how: "test", desc: "TC-K4.T1.j 오래된 자리 행은 정합성 점검이 지운다 (리뷰 M2)", cmd: 'pnpm -C apps/server test -t "TC-K4.T1.j"', expectPassed: 1 },
+      { id: "G-K4.32", how: "test", desc: "TC-K4.T1.k 죽은 발급의 매핑 없는 m_ 키는 끄고 2분 뒤 지운다 (리뷰 M2)", cmd: 'pnpm -C apps/server test -t "TC-K4.T1.k"', expectPassed: 1 },
+      { id: "G-K4.33", how: "test", desc: "TC-K4.T4.c 키 변경 요청은 회원당 분당 30회 (리뷰 L3)", cmd: 'pnpm -C apps/server test -t "TC-K4.T4.c"', expectPassed: 1 },
+      { id: "G-K4.34", how: "test", desc: "TC-K4.T4.d 발급 IP 칸은 IPv6 /64 (리뷰 L4)", cmd: 'pnpm -C apps/server test -t "TC-K4.T4.d"', expectPassed: 1 },
+      { id: "G-K4.35", how: "test", requires: ["local-services"], desc: "TC-K4.T1.l 자리 잡기 직접 동시 10건 (Node 네 DB)", cmd: 'pnpm -C apps/server test:db -t "TC-K4.T1.l" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-K4.36", how: "test", requires: ["local-services"], desc: "TC-K4.T1.l 자리 잡기 직접 동시 10건 (Workers + D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-K4.T1.l"', expectPassed: 1 },
+      { id: "G-K4.37", how: "cmd", desc: "재현 빨강: TC-K4.T1.c 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K4.3 --since seal:K3" },
+      { id: "G-K4.38", how: "cmd", desc: "재현 빨강: TC-K4.T7.g 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K4.30 --since seal:K3" },
+      { id: "G-K4.39", how: "cmd", desc: "재현 빨강: TC-K4.T1.j 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K4.31 --since seal:K3" },
+      { id: "G-K4.40", how: "cmd", desc: "재현 빨강: TC-K4.T1.k 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K4.32 --since seal:K3" },
+      { id: "G-K4.41", how: "cmd", desc: "재현 빨강: TC-K4.T1.a 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K4.1 --since seal:K3" },
+      { id: "G-K4.42", how: "cmd", desc: "재현 빨강: TC-K4.T7.c 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K4.12 --since seal:K3" },
+      { id: "G-K4.43", how: "cmd", desc: "재현 빨강: TC-K4.T7.e 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K4.14 --since seal:K3" },
+      { id: "G-K4.44", how: "cmd", desc: "재현 빨강: TC-K4.T4.c 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K4.33 --since seal:K3" },
+      { id: "G-K4.45", how: "cmd", desc: "재현 빨강: TC-K4.T4.d 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K4.34 --since seal:K3" },
       // K4.T6 CI 단계 잡과 ruleset 필수 검사
       { id: "G-K4.26", how: "grep", desc: "TC-K4.T6.a CI 단계 잡 (K4)", pattern: "^\\s+run: node scripts/gate\\.mjs K4\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
       { id: "G-K4.27", how: "cmd", desc: "TC-K4.T6.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
