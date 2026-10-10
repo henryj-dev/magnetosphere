@@ -86,15 +86,20 @@ export async function renewLease(h: DbHandle, lease: Lease, ttlMs: number, now: 
 /**
  * 쓰기 조건: 이 임대가 아직 내 것이다 (같은 이름의 fence 가 그대로다). DB 쓰기의 where 에 and 로 붙인다.
  * 임대를 잃은 쪽의 쓰기는 0행이 된다 (TC-K1.T2.b).
+ * 서브쿼리는 임대 행을 공유 잠금으로 읽는다 (K1 리뷰 #7):
+ *   - Postgres FOR SHARE: READ COMMITTED 의 일반 읽기는 문장 시작 스냅숏을 본다. 그 사이 다른 인스턴스가 임대를 가져가
+ *     커밋해도 옛 fence 로 참이 될 수 있다. FOR SHARE 는 진행 중인 임대 UPDATE 를 기다린 뒤 최신 행으로 다시 판정하고,
+ *     내 쓰기가 끝날 때까지 임대를 가져가는 UPDATE 를 막는다.
+ *   - MySQL·MariaDB LOCK IN SHARE MODE: 같은 이유. FOR SHARE 는 MySQL 8 만 받고 MariaDB 10.11 은 문법 오류라, 둘 다 받는
+ *     옛 문법을 쓴다 (MySQL 8 은 FOR SHARE 의 별칭으로 받는다).
+ *   - SQLite·D1: 쓰기가 DB 하나에서 직렬화되므로(쓰기 잠금 하나) 잠금 절이 없고 필요도 없다.
  */
 export function fenced(h: DbHandle, lease: Lease): SQL {
   const t = h.schema.jobLeases;
-  return exists(
-    h.db
-      .select({ one: sql`1` })
-      .from(t)
-      .where(and(eq(t.name, lease.name), eq(t.holder, lease.holder), eq(t.fence, lease.fence))),
-  );
+  const mine = and(eq(t.name, lease.name), eq(t.holder, lease.holder), eq(t.fence, lease.fence));
+  if (h.provider === "pg") return sql`exists (select 1 from ${t} where ${mine} for share)`;
+  if (h.provider === "mysql") return sql`exists (select 1 from ${t} where ${mine} lock in share mode)`;
+  return exists(h.db.select({ one: sql`1` }).from(t).where(mine));
 }
 
 /** p 가 ms 안에 끝나지 않으면 fallback 으로 끝낸다 (p 는 계속 돌지만 기다리지 않는다) */
