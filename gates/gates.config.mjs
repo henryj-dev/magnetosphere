@@ -625,6 +625,9 @@ export const GATES = {
       { id: "G-K6.11", how: "test", desc: "TC-K6.T4.b 1분 작업 큐 실행기가 정리를 부른다", cmd: 'pnpm -C apps/server test -t "TC-K6.T4.b"', expectPassed: 1 },
       { id: "G-K6.12", how: "cmd", desc: "재현 빨강: TC-K6.T4.a 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K6.10 --since seal:K5" },
       { id: "G-K6.13", how: "cmd", desc: "재현 빨강: TC-K6.T4.b 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K6.11 --since seal:K5" },
+      // K6.T5 키 시나리오 누락은 S6 조합 불일치(combo-set)와 다른 코드 [keys-scenario] (K5 리뷰 L4)
+      { id: "G-K6.15", how: "cmd", desc: "TC-K6.T5.a 키 시나리오 누락 음성 대조는 [keys-scenario] 로만 잡힌다", cmd: "node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-guard/e2e-keys-missing.yml --expect 6 --expect-fail" },
+      { id: "G-K6.16", how: "cmd", desc: "재현 빨강: TC-K6.T5.a 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K6.15 --since seal:K5" },
       { id: "G-K6.14", how: "grep", desc: "TC-K6.T2.a 운영 문서에 비용은 추정치", pattern: "추정", in: ["deploy/README.md"], op: ">=", limit: 1 },
     ],
   },
