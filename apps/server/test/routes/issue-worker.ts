@@ -2,11 +2,12 @@
 //   - 세션: 쿠키 mg_test_session=<회원 id> (가짜 인증). 라우터는 회원 id 만 세션에서 얻고 나머지는 D1 에서 읽는다.
 //   - OmniRoute: isolate 하나에 하나 있는 가짜 어댑터 (키 이름·켜짐만 기억한다). 호출은 어댑터 함수 이름으로 적는다 (G-S5.9).
 //   POST /__test/member {maxKeys, limitUsd} → { id }   시험 회원
+//   POST /__test/reserve {userId, n, max}       → { reserved } 자리 잡기만 n 건 동시에
 //   GET  /__test/omniroute                    → { keys: [{ name, isActive }], creates }
 import { connectWorkers, type WorkersEnv } from "@magnetosphere/runtime/workers";
 import type { Analytics } from "@magnetosphere/omniroute";
 import { createApp, type Services } from "../../src/app.ts";
-import type { KeysClient } from "../../src/routes/issue.ts";
+import { reserveSlot, type KeysClient } from "../../src/routes/issue.ts";
 
 const keys = new Map<string, { name: string; isActive: boolean }>();
 let creates = 0;
@@ -48,6 +49,13 @@ export default {
       const id = crypto.randomUUID();
       await db.db.insert(db.schema.user).values({ id, name: "d1", email: `d1-${id}@example.com`, emailVerified: true, maxKeys: b.maxKeys, monthlyLimitUsd: b.limitUsd });
       return Response.json({ id });
+    }
+    if (url.pathname === "/__test/reserve" && req.method === "POST") {
+      // 자리 잡기만 n 건 동시에 (TC-K4.T1.l)
+      const b = (await req.json()) as { userId: string; n: number; max: number };
+      const now = new Date();
+      const r = await Promise.all(Array.from({ length: b.n }, () => reserveSlot(db, { id: crypto.randomUUID(), userId: b.userId, label: null, createdAt: now }, b.max)));
+      return Response.json({ reserved: r.filter(Boolean).length });
     }
     if (url.pathname === "/__test/omniroute") return Response.json({ keys: [...keys.values()], creates });
     const services: Services = {

@@ -41,3 +41,17 @@ describe("TC-K4.T1.f Workers + D1 동시 발급", () => {
     expect([list.keys.length, list.remainingSlots]).toEqual([2, 0]);
   });
 });
+
+describe("TC-K4.T1.l Workers + D1 자리 잡기 직접 동시", () => {
+  it("reserveSlot 10건 동시 (최대 2) → 2건만 잡힌다", async () => {
+    const persistTo = mkdtempSync(path.join(tmpdir(), "mg-keys-d1-"));
+    cleanups.push(() => rmSync(persistTo, { recursive: true, force: true }));
+    const mig = wrangler(["d1", "migrations", "apply", "DB", "--local", "--config", CONFIG, "--persist-to", persistTo]);
+    expect(mig.code, `${mig.out}${mig.err}`).toBe(0);
+    const d = await startWranglerDev({ config: CONFIG, persistTo, vars: {} });
+    cleanups.push(() => d.close());
+    const { id } = (await (await fetch(`${d.baseUrl}/__test/member`, { method: "POST", body: JSON.stringify({ maxKeys: 2, limitUsd: 5 }) })).json()) as { id: string };
+    const r = (await (await fetch(`${d.baseUrl}/__test/reserve`, { method: "POST", body: JSON.stringify({ userId: id, n: 10, max: 2 }) })).json()) as { reserved: number };
+    expect(r.reserved).toBe(2);
+  });
+});

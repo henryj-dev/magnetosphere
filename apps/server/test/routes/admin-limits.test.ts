@@ -19,7 +19,7 @@ const userRow = async (id: string) => {
 };
 
 describe("TC-K4.T3.a 관리자만 바꾸고, 바꾸면 즉시 분배한다", () => {
-  it("회원 세션 → 403, 세션 없음 → 401, 관리자 → 200 + rebalanceMember 1회 + audit_log(limits.update) 1행", async () => {
+  it("회원 세션 → 403, 세션 없음 → 401, 관리자 → 200 + rebalanceMember 1회 + audit_log(limits.update) 1행, null 로 바꾸면 clearBudget", async () => {
     const admin = await addUser(e.h, { role: "admin" });
     const member = await addUser(e.h, { limitUsd: 5 });
     const k = await seedKey(e, member, { budgetUsd: 5 });
@@ -45,6 +45,12 @@ describe("TC-K4.T3.a 관리자만 바꾸고, 바꾸면 즉시 분배한다", () 
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ actorId: admin, target: member, ip: "198.51.100.7" });
     expect(JSON.parse(rows[0].detail)).toEqual({ before: { monthlyLimitUsd: 5, maxKeys: null }, after: { monthlyLimitUsd: 2, maxKeys: 3 } });
+    // 무제한(null)으로 바꾸면 즉시 분배가 건 예산을 푼다 (clearBudget)
+    const r2 = await call(e, "PATCH", path, { user: admin, body: { monthlyLimitUsd: null } });
+    expect(r2.json).toEqual({ user: { id: member, monthlyLimitUsd: null, maxKeys: 3 }, rebalanced: true });
+    expect(e.om.of("clearBudget")).toEqual([{ fn: "clearBudget", id: k.ork }]);
+    expect(e.om.keys.get(k.ork)?.budget).toBeNull();
+    expect(await audit()).toHaveLength(2);
   });
 });
 
