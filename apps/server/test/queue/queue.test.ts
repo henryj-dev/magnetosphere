@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { OmniRouteError } from "@magnetosphere/omniroute";
+import { acquireLease, LeaseLostError } from "@magnetosphere/runtime/lease";
 import { connectNode } from "@magnetosphere/runtime/node";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import { ACTIONS, DUE_GRACE_MS, enqueue, isLongFailed, runDue, type Handler, type Handlers } from "../../src/queue/index.ts";
@@ -170,5 +171,27 @@ describe("TC-K1.T3.h 망가진 payload 는 곧바로 failed 로 두고 큐를 �
     expect(alerts.map((a: { target: string }) => a.target)).toEqual([broken]);
     // 다음 tick 에도 다시 집지 않는다
     expect(await runDue(h, all(async () => {}), new Date(T0.getTime() + 24 * 3600_000))).toMatchObject({ done: 0, failed: 0 });
+  });
+});
+
+describe("TC-K1.T3.i 임대를 잃어 끊긴 실행은 재시도 횟수를 쓰지 않는다", () => {
+  it("핸들러 도중 임대를 다른 실행기가 가져가 신호가 끊김 → 그 작업 attempts 0·next_run_at 원래 값·last_error 없음, 다음 작업은 집지 않는다", async () => {
+    const lease = (await acquireLease(h, "omniroute_jobs", "A", 55_000, T0))!;
+    const id = await enqueue(h, "budget.set", { omnirouteKeyId: "k", monthlyUsd: 1 }, { now: T0 });
+    const other = await enqueue(h, "budget.set", { omnirouteKeyId: "k2", monthlyUsd: 1 }, { runAt: new Date(T0.getTime() + 1) });
+    const ac = new AbortController();
+    const calls: string[] = [];
+    const handlers = all(async (_p, { job, signal }) => {
+      calls.push(job.id);
+      // 하트비트가 늦은 사이 다른 실행기(B)가 만료된 임대를 가져갔다 → 하트비트 실패로 신호가 끊긴다
+      await acquireLease(h, "omniroute_jobs", "B", 55_000, new Date(T0.getTime() + 60_000));
+      ac.abort(new LeaseLostError(lease));
+      signal?.throwIfAborted();
+    });
+    await runDue(h, handlers, new Date(T0.getTime() + 1), { lease, signal: ac.signal });
+    expect(calls).toEqual([id]);
+    const r = await jobRow(id);
+    expect({ attempts: r.attempts, nextRunAt: r.nextRunAt.getTime(), lastError: r.lastError, failedAt: r.failedAt }).toEqual({ attempts: 0, nextRunAt: T0.getTime(), lastError: null, failedAt: null });
+    expect((await jobRow(other)).attempts).toBe(0);
   });
 });
