@@ -4,9 +4,10 @@
 
 실행판(1단계)은 [`../plan/phase1-todo.md`](../plan/phase1-todo.md) 다.
 2단계 실행판은 [`../plan/phase2-todo.md`](../plan/phase2-todo.md) 다.
-상태: 초안 v5.5 (설계 검토 1회 + S1 확인 + S2 리뷰 + S4 보안 리뷰 반영)
+상태: 초안 v5.6 (설계 검토 1회 + S1 확인 + S2 리뷰 + S4 보안 리뷰 + K0 확인 반영)
 
 변경 이력
+- v5.6: K0 확인(`../verify/` V12·V13·V15·V18·V19·V20)과 설계 공백 결정 반영. Q1 남은 한도가 0 이면 키를 끈다(`disabled_reason` `limit`, 한도가 다시 생기면 자동으로 켬, 목표 상태 입력에 남은 한도). Q2 재시도 간격 1분·2분·10분·30분 (실행기 최소 주기 1분). Q3 4번째 재시도 실패 → 작업 `failed`·키 `sync_state` `failed`, 정합성 점검이 계속 다시 맞추고 `failed` 30분이 지나면 "오래 실패". Q4 키 발급 요청 수 제한 회원당 1시간 10회·IP 당 1시간 30회 (429). Q5 1분 분배가 달 바뀜을 스스로 판단 (월간 cron 없음). Q6 "관리자에게 알린다" = `audit_log` action `alert.<종류>`. 확인 결과로 재발급은 `regenerate` 대신 새 키 발급 + 옛 키 삭제, 삭제는 끄고 60초가 지난 뒤 `DELETE` (V18·V19), 쿼터 풀 공동 예산은 쓰지 않고 분배 유지 (V12), 월 기준은 UTC (V20). 확인 15번(분석 API 성능)은 기준을 넘어 5.3 의 1분 분배 분석 호출 방식이 아직 열려 있다.
 - v5.5: S4 보안 리뷰 반영. Workers 조합의 요청 수 제한 저장소도 DB(`rate_limit`)로 바꾼다 (KV 아님).
 - v5.4: S2 리뷰 반영. Docker 조합의 요청 수 제한 저장소를 Better Auth `rateLimit` storage `"database"`(`rate_limit` 테이블)로 확정하고, 스키마를 바꾸는 Better Auth 옵션을 스키마 생성기와 공유한다. MySQL 계열 시각은 `DATETIME(3)`, 토큰·식별자 칼럼은 `utf8mb4_bin`.
 - v5.3: S1 Better Auth 확인 반영 (V17·V26). SQLite 드라이버를 libsql로 고정, Drizzle 어댑터 `transaction: true` 필수, 권한 칼럼 입력 차단의 실제 동작.
@@ -294,16 +295,23 @@ Compose 설치용 스크립트(`./setup.sh` 또는 `npx <이름> init`)가 `.env
 4. 예산 설정 (5.3의 계산식)
 5. `PATCH isActive=true`
 6. 원문을 화면에 한 번만 표시
-- 2~5 중 하나라도 실패하면 만든 키를 `DELETE`로 되돌리고 오류를 보여준다. 되돌리기도 실패하면 작업 큐에 넣는다.
+- 2~5 중 하나라도 실패하면 만든 키를 `DELETE`로 되돌리고 오류를 보여준다. 되돌리기도 실패하면 작업 큐에 넣는다. (원문이 회원에게 가기 전이라 아래 "삭제"의 60초 규칙이 필요 없다.)
+- 발급·재발급 요청 수 제한: 회원당 1시간 10회, 클라이언트 IP 당 1시간 30회. 넘으면 `429` (7장, Q4). 저장소는 `rate_limit` 테이블 (여러 인스턴스 공유).
 
 그 밖의 동작
 | 동작 | OmniRoute 호출 |
 |---|---|
 | 이름 변경 | 없음 (우리 DB만) |
 | 끄기·켜기 | `PATCH isActive` (켜기는 목표 상태가 활성일 때만, 5.7) |
-| 재발급 | `POST /api/keys/{id}/regenerate` (같은 id·누적 지출 유지 여부는 8장 확인 19번) |
-| 삭제 | `DELETE /api/keys/{id}`. 매핑은 `deleted_at`만 남기고 지우지 않는다 |
-| 회원 정지·탈퇴 | 5.7의 목표 상태 계산으로 모든 키 끄기·삭제 |
+| 재발급 | 새 키 발급(위 순서) + 옛 키 삭제(아래). `regenerate`는 쓰지 않는다 (아래 이유) |
+| 삭제 | 즉시 `PATCH isActive=false`, 끈 뒤 60초가 지나면 `DELETE /api/keys/{id}` (작업 큐 `key.delete`, 끈 시각 + 2분). 매핑은 `deleted_at`만 남기고 지우지 않는다 |
+| 회원 정지·탈퇴 | 5.7의 목표 상태 계산으로 모든 키 끄기·삭제 (삭제는 위 순서) |
+
+삭제·재발급 순서의 이유 (8장 확인 18·19번, OmniRoute 3.8.51 실측)
+- `DELETE`와 `regenerate` 직후 최대 60초 동안 옛 원문 키가 그대로 통과한다 (키 검증 캐시). 그 요청은 키 id 없이 기록돼 회원 사용액에도, 예산에도 잡히지 않는다. 예산 차단 중인 키도, 꺼 둔 키도 `regenerate`하면 옛 원문 키가 다시 통과한다.
+- `PATCH isActive=false`는 바로 막는다(403, 확인 11번). 끈 상태로 60초가 지나면 옛 원문 키는 401 이고, 그 뒤 `DELETE`해도 다시 열리지 않는다.
+- 그래서 삭제는 "끄기 → 60초 이상 기다림 → `DELETE`"이고, 재발급은 같은 id 를 살리는 `regenerate` 대신 새 id 의 키를 발급하고 옛 키를 같은 순서로 지운다. 옛 id 의 사용액은 삭제한 키처럼 회원 사용액에 남는다 (5.3).
+- 재발급은 발급과 같은 조건을 본다(남은 한도 > 0 등). 최대 개수는 지울 옛 키를 빼고 센다.
 
 - OmniRoute 키 이름은 `m_<회원 id 앞 8자리>_<키 id 앞 8자리>`. 이메일 같은 개인정보를 넣지 않는다.
 - 원문 키는 저장하지 않는다. `omniroute_key_id`와 끝 4자리만 둔다.
@@ -316,22 +324,27 @@ OmniRoute 예산은 키 단위다. 회원이 키를 여러 개 가져도 회원 
 ```
 회원 이번 달 사용액 = analytics(apiKeyIds = 회원의 모든 키, 삭제한 키 포함, 이번 달).totalCost
 남은 한도         = max(월 한도 − 회원 이번 달 사용액, 0)
-키별 월 예산       = 그 키의 이번 달 사용액 + 남은 한도
+남은 한도 > 0 이면  키별 월 예산 = 그 키의 이번 달 사용액 + 남은 한도
+남은 한도 = 0 이면  회원의 키를 끈다 (disabled_reason = limit, 5.7)
 ```
-- 각 키는 "남은 한도"만큼만 더 쓸 수 있다. 어느 키로 쓰든 회원 전체가 한도에 닿으면 모든 키의 남은 몫이 0이 된다.
-- 삭제한 키의 사용액도 회원 사용액에 들어가므로, 키를 지우고 다시 받아도 한도가 초기화되지 않는다 (전제: 삭제한 키 기록이 분석에 남음, 8장 확인 18번).
+- 각 키는 "남은 한도"만큼만 더 쓸 수 있다. 어느 키로 쓰든 회원 전체가 한도에 닿으면 모든 키를 끈다.
+- 남은 한도 0 에서 예산 대신 키를 끄는 이유 (Q1, 8장 확인 20번): OmniRoute 는 예산 0 을 무제한으로 보고, 사용액 > 예산일 때만 막는다(같으면 요청 하나가 더 통과한다). 그래서 "키 사용액 + 0" 예산으로는 사용액 0 인 키를 막지 못하고, 사용액이 있는 키도 한 번 더 통과한다. 끄기는 바로 막는다 (확인 11번).
+- 남은 한도가 다시 0보다 커지면(새 달, 관리자가 한도를 올림) `limit` 때문에 꺼진 키만 예산을 먼저 건 뒤 다시 켠다. 회원·관리자가 끈 키는 그대로 둔다.
+- 삭제한 키의 사용액도 회원 사용액에 들어가므로, 키를 지우고 다시 받아도 한도가 초기화되지 않는다 (삭제한 키 기록이 분석에 남는다, 확인 18번).
 - 월 한도가 비어 있으면(무제한) 예산을 걸지 않는다.
+- 달은 UTC 로 자른다. OmniRoute 월 예산도 매달 1일 00:00 UTC 에 초기화된다 (확인 20번).
 
 실행 시점
 - 키 발급·재발급 직후, 관리자가 한도를 바꾼 직후
-- 1분마다 전체 회원 (활성 키가 있는 회원만)
-- 매달 1일 0시(기준 시간대는 8장 확인 20번) 새 달 기준으로 다시 계산
+- 1분마다 전체 회원 (활성 키가 있는 회원과 `limit` 때문에 꺼진 키가 있는 회원)
+- 새 달: 1분 분배가 `app_settings`에 남긴 마지막 실행 달(UTC)과 지금 달을 비교해, 바뀌었으면 그 실행에서 새 달 기준으로 다시 계산한다 (`limit`으로 꺼진 키 다시 켜기 포함). 월간 cron 은 따로 두지 않는다 (Q5. `cronIntervalMinutes`가 "0 0 1 * *"를 받지 않는다)
+- 1분 분배의 분석 호출 방식은 아직 정하지 않았다. 기록 300,000·키 300 에서 필터 없는 한 달 호출이 p95 6.4초(CI x64)로 기준 5초를 넘는다 (확인 15번, `../verify/V15.json`의 선택지). 정하기 전에는 2단계 K1 을 열지 않는다
 
 한계 (문서에 적는다)
 - OmniRoute 지출은 60초마다 기록되고 예산 조정도 1분 주기라, 짧은 시간에 몰아 쓰면 한도를 넘을 수 있다. 최악의 경우 대략 "남은 한도 × 동시에 쓰는 키 수"까지 넘는다. 최대 키 개수가 이 폭을 제한한다.
 - 비용은 OmniRoute 가격표 추정치 기준이다.
 
-OmniRoute 키 그룹·쿼터 풀에 공동 예산이 있으면(8장 확인 12번) 그 기능으로 바꿔 분배 작업을 없앤다.
+OmniRoute 쿼터 풀 일정 예산은 배정된 키 여럿의 소비를 합쳐 막는다(8장 확인 12번). 하지만 풀은 제공자 연결 하나에 묶여 다른 제공자로 가는 요청을 합치지 못하고, 창이 달력 월이 아닌 슬라이딩이며, 3.8.51 은 차단을 본문 없는 500 으로 낸다. 회원 한도로 쓰지 않고 분배를 유지한다. 키 그룹(`/api/keys/groups`)은 모델 허용·차단 전용이다.
 
 ### 5.4 사용량 조회
 
@@ -339,7 +352,7 @@ OmniRoute 키 그룹·쿼터 풀에 공동 예산이 있으면(8장 확인 12번
 |---|---|
 | 내 사용량 | `GET /api/usage/analytics?apiKeyIds=<회원의 키 id들, 삭제한 키 포함>&startDate&endDate` → `summary`, `dailyTrend`, `byModel` |
 | 키별 사용량 | 같은 응답의 `byApiKey` |
-| 최근 요청 | `GET /api/usage/call-logs` (키 필터는 8장 확인 13번) → 완료 기록만 |
+| 최근 요청 | `GET /api/usage/call-logs?apiKey=<키 id>` → 완료 기록만. `apiKey`는 이름·id 부분 일치라 어댑터가 `apiKeyId`로 다시 정확히 거른다 (확인 13번) |
 | 전체 현황 | `GET /api/usage/analytics` → `byApiKey`를 매핑으로 회원 단위로 묶음 |
 
 - 회원에게 보내는 필드는 허용 목록으로 거른다: 시각, 모델, 상태, 입력·출력·캐시 토큰, 소요 시간. `account`, `connectionId`, `provider`, `error` 원문은 운영자 계정·제공자 정보가 드러날 수 있어 보내지 않는다.
@@ -368,21 +381,29 @@ OmniRoute 키 그룹·쿼터 풀에 공동 예산이 있으면(8장 확인 12번
 키가 OmniRoute에서 켜져 있어야 하는지는 여러 값으로 정해진다. 이를 한 함수로 계산한다.
 
 ```
+입력: 키 state·disabled_reason, 회원 status, 회원 남은 한도(5.3, 월 한도가 비어 있으면 무제한)
 목표 = 삭제됨     (키 state = deleted 또는 회원 status = deleted)
-     | 꺼짐       (회원 status ∈ {pending, suspended} 또는 키 state = disabled)
+     | 꺼짐       (회원 status ≠ active
+                   또는 키가 회원·관리자 때문에 꺼짐 (disabled_reason ∈ {member, admin})
+                   또는 남은 한도 = 0)
      | 켜짐       (그 밖)
 ```
-- `api_keys.disabled_reason`(`member` 회원이 끔 / `admin` 관리자가 끔 / `user_status` 회원 상태 때문)을 기록한다. 회원 정지를 풀면 `user_status` 때문에 꺼진 키만 다시 켠다.
-- 한도는 키를 끄지 않고 예산으로 막으므로, 달이 바뀌어도 다시 켤 일이 없다.
+- `api_keys.disabled_reason`(`member` 회원이 끔 / `admin` 관리자가 끔 / `user_status` 회원 상태 때문 / `limit` 남은 한도 0 때문)을 기록한다. 회원 정지를 풀면 `user_status` 때문에 꺼진 키만, 남은 한도가 다시 0보다 커지면 `limit` 때문에 꺼진 키만 다시 켠다 (켜기 전에 예산을 먼저 건다, 5.3).
+- 남은 한도가 0보다 큰 회원의 키는 키를 끄지 않고 키별 예산으로 막는다 (5.3).
+- 삭제됨의 반영은 "끄기 → 끈 뒤 60초가 지나면 `DELETE`"다 (5.2).
 
 반영
-- 회원 정지·키 끄기는 요청을 받은 즉시 OmniRoute에 반영한다. 실패하면 작업 큐에서 10초, 30초, 2분, 10분 간격으로 재시도한다.
+- 회원 정지·키 끄기·삭제의 끄기는 요청을 받은 즉시 OmniRoute에 반영한다. 실패하면 작업 큐에서 1분, 2분, 10분, 30분 간격으로 재시도한다 (Q2. 작업 실행기는 Node 타이머·Workers Cron 모두 최소 주기가 1분이라 1분보다 짧은 간격을 지킬 수 없다). 첫 시도는 요청 안에서 바로 한다.
+- 4번째 재시도도 실패하면 작업을 `failed`로, 그 키의 `sync_state`를 `failed`로 두고 관리자에게 알린다 (`alert.job_failed`, Q3). 정합성 점검이 `failed` 키도 목표 상태로 계속 다시 맞춘다. `failed`로 30분이 지난 작업을 "오래 실패"로 본다 (관리 화면, 7단계).
 - 반영이 끝나기 전까지 화면에 "반영 중"을 표시한다. 정지는 반영이 끝나야 "완료"로 본다.
 
 정합성 점검 (5분마다)
-- OmniRoute 키 목록을 읽어, 모든 키의 실제 상태를 목표 상태와 비교해 맞춘다. 회원 상태도 함께 본다.
-- 매핑에 없는 `m_` 접두사 키 → 관리자에게 알린다 (자동 삭제 안 함).
+- OmniRoute 키 목록을 읽어, 모든 키의 실제 상태를 목표 상태와 비교해 맞춘다. 회원 상태와 남은 한도도 함께 본다.
+- 매핑에 없는 `m_` 접두사 키 → 관리자에게 알린다 (`alert.unknown_m_key`, 자동 삭제 안 함).
 - 오래 실패한 작업은 관리자 화면에 띄운다.
+
+관리자 알림 (Q6)
+- "관리자에게 알린다"는 `audit_log`에 action `alert.<종류>` 행을 쓰는 것이다 (`alert.unknown_m_key`, `alert.manage_scope_key`, `alert.job_failed`). `target`에 키·작업 id, `detail`에 OmniRoute 오류 코드·상태(비밀 값 제외). 알림을 보는 화면은 7단계다.
 
 ### 5.8 관리 토큰 범위
 
@@ -390,7 +411,7 @@ OmniRoute 키 그룹·쿼터 풀에 공동 예산이 있으면(8장 확인 12번
 - **한계 (V10 실측)**: OmniRoute 3.8.51에서 `write` 토큰은 회원 키에 `scopes: ["manage"]`를 붙일 수 있고, 그 키로 `admin` 토큰을 만들 수 있다. 회원 앱이 뚫리면 결국 제공자 연결까지 넘어갈 수 있다는 뜻이라, `write` 범위는 실수 방지일 뿐 침해 시 피해를 줄여 주지 못한다. 문서(SECURITY.md)에 이 한계를 그대로 적는다.
 - 대응
   - 회원 앱은 OmniRoute 키의 `scopes`를 절대 쓰지 않는다. 어댑터의 키 수정 함수는 `isActive`·이름만 보낸다 (5.6).
-  - 정합성 점검(5.7)이 `m_` 키 중 `scopes`에 `manage`·`admin`이 있는 것을 찾으면 그 키를 끄고 관리자에게 알린다.
+  - 정합성 점검(5.7)이 `m_` 키 중 `scopes`에 `manage`·`admin`이 있는 것을 찾으면 그 키를 끄고 관리자에게 알린다 (`alert.manage_scope_key`).
   - OmniRoute 쪽에 "`write` 토큰이 키 범위를 올리지 못하게" 해 달라는 보고를 올린다 (공개 준비 단계).
 
 ### 5.9 데이터 모델
@@ -409,7 +430,8 @@ Better Auth 테이블(`user`, `session`, `account`, `verification`, `ssoProvider
 
 CREATE TABLE app_settings (
   key        TEXT PRIMARY KEY,           -- signup_mode, allowed_domains, default_limit_usd, default_max_keys,
-                                         -- signup_requires_approval, daily_signup_cap, public_base_url, ...
+                                         -- signup_requires_approval, daily_signup_cap, public_base_url,
+                                         -- budget_rebalance_month (1분 분배의 마지막 실행 달, UTC "YYYY-MM", 5.3), ...
   value      TEXT NOT NULL,              -- JSON
   updated_at TEXT NOT NULL,
   updated_by TEXT
@@ -445,7 +467,7 @@ CREATE TABLE api_keys (
   key_preview      TEXT NOT NULL,        -- 끝 4자리
   label            TEXT,
   state            TEXT NOT NULL,        -- active | disabled | deleted
-  disabled_reason  TEXT,                 -- member | admin | user_status
+  disabled_reason  TEXT,                 -- member | admin | user_status | limit
   sync_state       TEXT NOT NULL DEFAULT 'synced',  -- synced | pending | failed
   budget_usd       REAL,                 -- 마지막으로 OmniRoute에 건 월 예산
   created_at       TEXT NOT NULL,
@@ -460,7 +482,8 @@ CREATE TABLE omniroute_jobs (
   attempts    INTEGER NOT NULL DEFAULT 0,
   last_error  TEXT,
   next_run_at TEXT NOT NULL,
-  done_at     TEXT
+  done_at     TEXT,
+  failed_at   TEXT                       -- 4번째 재시도 실패 시각 (5.7). 지금 − failed_at > 30분이면 오래 실패
 );
 
 CREATE TABLE job_leases (                -- 여러 인스턴스에서 주기 작업 중복 실행 방지
@@ -518,7 +541,7 @@ OmniRoute 노출
 - 역할 변경·정지·IdP 삭제 때 세션 무효화 (4.5).
 
 요청 수 제한
-- 로그인·가입·비밀번호 재설정·키 발급에 요청 수 제한을 건다.
+- 로그인·가입·비밀번호 재설정·키 발급에 요청 수 제한을 건다. 키 발급·재발급은 회원당 1시간 10회, 클라이언트 IP 당 1시간 30회 (넘으면 `429`, 5.2).
 - Caddy 뒤에서 클라이언트 IP를 바르게 얻도록 신뢰할 프록시와 IP 헤더를 설정한다 (Better Auth `advanced.ipAddress`, 런타임 어댑터). 설정하지 않으면 모든 요청이 Caddy IP 하나로 묶여 제한이 엉뚱하게 걸린다. Workers는 `CF-Connecting-IP`.
 
 회귀 테스트로 옮길 공격 시나리오 (0단계·검토에서 나온 것)
@@ -529,6 +552,7 @@ OmniRoute 노출
 - 가입 요청에 `role`·`status`·`monthly_limit_usd` 넣기
 - 이메일 없는 관리자 초대 링크 생성
 - 키 삭제 후 재발급으로 한도 초기화
+- 키 삭제·재발급 직후 옛 원문 키로 예산·기록 밖 사용 (확인 18·19번)
 - 키 없는 `/v1` 요청, 허용 목록 밖 `/v1` 경로
 
 운영 안내 (README)
@@ -556,18 +580,20 @@ OmniRoute 노출
 - Better Auth 6~9: `../research/phase0-better-auth.md`
 - 검토 후 실측: 키 없는 `/v1`은 Docker 이미지 기본값으로 `401`, `/v1/management/…`는 `/api/v1/management/…` 별칭이며 회원 키로는 `403`
 
+**확인 끝 (2단계 K0, `../verify/`)**
+- 12. 공동 예산: 쿼터 풀 일정 예산이 키 여럿의 소비를 합쳐 막는다. 연결 하나·슬라이딩 창·차단 응답 500 이라 회원 한도로 쓰지 않는다 (5.3)
+- 13. call-logs 키 거르기: `apiKey` 하나, 이름·id 부분 일치. 어댑터가 다시 정확히 거른다 (5.4)
+- 15. 분석 API 성능: 회원 하나 p95 0.2~0.6초로 기준 안, 필터 없는 한 달 호출은 p95 6.4초(CI x64)로 기준 5초를 넘는다 → 5.3 실행 시점 결정이 남아 있다 (설계를 막음)
+- 18. 삭제한 키 기록은 분석에 남는다. 다만 `DELETE` 직후 60초 동안 옛 원문 키가 기록 없이 통과한다 → 삭제는 끄고 60초 뒤 (5.2)
+- 19. `regenerate`는 같은 id·지출·예산을 유지하지만 옛 원문 키가 60초 동안 기록 없이 통과한다 → 재발급은 새 키 + 옛 키 삭제 (5.2)
+- 20. 월 예산은 UTC, 매달 1일 00:00 초기화. 올리고 내리면 다음 요청부터. 사용액 > 예산일 때만 막고 0 은 무제한 → 남은 한도 0 이면 키를 끈다 (5.3, 5.7)
+
 **확인 남음 (1단계 초반)**
 
 OmniRoute
 10. `oma_live_` 토큰으로 키 생성·예산·분석·키 목록 API가 통하는 최소 범위. `INITIAL_PASSWORD`로 토큰을 자동 발급하는 API 흐름.
 11. `PATCH isActive=false`가 즉시 요청을 막는지.
-12. 키 그룹·쿼터 풀에 여러 키 공동 예산이 있는지 (있으면 5.3 분배 작업을 대체).
-13. call-logs를 API 키로 거르는 쿼리 파라미터.
-15. 분석 API가 기록 수십만 건, 키 수백 개에서 얼마나 걸리는지 (5.3이 1분마다 호출).
 16. Caddy 허용 목록에 넣을 경로와 Claude Code·Codex·Cursor 실제 동작.
-18. 삭제한 키의 기록이 `apiKeyIds` 필터 분석에 계속 잡히는지 (5.3 한도 초기화 방지의 전제).
-19. `regenerate`가 같은 id와 누적 지출을 유지하는지.
-20. 월 예산의 기준 시간대와 초기화 시점, 달 중간에 예산 값을 바꿀 때 동작.
 21. 운영 환경 필수 비밀 값 목록 (`OMNIROUTE_WS_BRIDGE_SECRET` 등).
 24. Workers 조합에서 회원 앱이 OmniRoute 관리 API에 닿는 방식 (Caddy 비밀 헤더 + Tunnel)과 그 보안성.
 

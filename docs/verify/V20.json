@@ -20,7 +20,7 @@
     "실측: GET /api/usage/budget periodStartAt 1790812800000 (2026-10-01T00:00Z), nextResetAt 1793491200000 (2026-11-01T00:00Z)",
     "packages/omniroute/test/contract/verify/v20.contract.ts (TC-K0.T10.a·b·c)"
   ],
-  "blocking": true,
+  "blocking": false,
   "was_blocking": true,
-  "resolved_in": null
+  "resolved_in": "v5.6"
 }

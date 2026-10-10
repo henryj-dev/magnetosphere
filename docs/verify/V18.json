@@ -20,7 +20,7 @@
     "실측: 끄기(PATCH isActive=false) → 403 → 65초 뒤 401 → DELETE → 바로 401 (2초 뒤도 401)",
     "packages/omniroute/test/contract/verify/v18.contract.ts (TC-K0.T8.a)"
   ],
-  "blocking": true,
+  "blocking": false,
   "was_blocking": true,
-  "resolved_in": null
+  "resolved_in": "v5.6"
 }

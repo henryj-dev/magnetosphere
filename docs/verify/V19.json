@@ -19,7 +19,7 @@
     "실측: 끄기(403) → regenerate → 옛 원문 키 200, 새 원문 키(꺼진 상태) 401",
     "packages/omniroute/test/contract/verify/v19.contract.ts (TC-K0.T9.a)"
   ],
-  "blocking": true,
+  "blocking": false,
   "was_blocking": true,
-  "resolved_in": null
+  "resolved_in": "v5.6"
 }

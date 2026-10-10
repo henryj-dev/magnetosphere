@@ -37,7 +37,7 @@
     "GET /api/quota/pools 200 ({pools:[],total:0}), /api/budget-groups·/api/key-groups·/api/teams·/api/budgets 404 unknown_route",
     "packages/omniroute/test/contract/verify/v12.contract.ts (TC-K0.T5.a)"
   ],
-  "blocking": true,
+  "blocking": false,
   "was_blocking": true,
-  "resolved_in": null
+  "resolved_in": "v5.6"
 }
