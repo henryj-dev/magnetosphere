@@ -194,6 +194,7 @@ export function keyRoutes(services: () => Promise<Services>) {
     if (row.state === "disabled" && row.disabledReason === "admin") return c.json({ error: "disabled_by_admin" }, 403);
     if (row.state === "disabled" && row.disabledReason === "limit") return c.json({ error: "limit_exhausted" }, 409);
     if (m.status !== "active") return c.json({ error: "member_inactive" }, 403);
+    if (!m.emailVerified) return c.json({ error: "email_unverified" }, 403);
     const client = await clientOf(c, s);
     if (client instanceof Response) return client;
     let result;
