@@ -142,8 +142,13 @@ export const omnirouteJobs = sqliteTable("omniroute_jobs", {
   lastError: text("last_error"),
   nextRunAt: integer("next_run_at", { mode: "timestamp_ms" }).notNull(),
   doneAt: integer("done_at", { mode: "timestamp_ms" }),
+  failedAt: integer("failed_at", { mode: "timestamp_ms" }),
+  generation: integer("generation").default(0).notNull(),
+  interrupts: integer("interrupts").default(0).notNull(),
+  keyId: text("key_id"),
 }, (table) => [
   index("idx_omniroute_jobs_due").on(table.doneAt, table.nextRunAt),
+  index("idx_omniroute_jobs_key").on(table.keyId, table.doneAt),
 ]);
 
 // 여러 인스턴스에서 주기 작업 중복 실행 방지 (임대 잠금)
@@ -151,6 +156,8 @@ export const jobLeases = sqliteTable("job_leases", {
   name: text("name").primaryKey(),
   holder: text("holder").notNull(),
   lockedUntil: integer("locked_until", { mode: "timestamp_ms" }).notNull(),
+  fence: integer("fence").default(0).notNull(),
+  lastSlot: integer("last_slot"),
 });
 
 // 감사 기록

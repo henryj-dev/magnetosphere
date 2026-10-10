@@ -1,7 +1,8 @@
 // Node 런타임 어댑터 (Docker 조합 — SQLite·MySQL·MariaDB·Postgres, 계획서 3.2).
 // - db(): DATABASE_URL 형식(file:·libsql:, mysql:·mariadb:, postgres:·postgresql:)으로 고른다. 프로세스에 풀 하나.
 //   세션 시간대를 항상 UTC 로 맞춘다. DB 기본값(created_at 의 now())이 서버 시간대를 따르기 때문이다 (TC-S4.T1.d).
-// - schedule(): 프로세스 안 타이머. 주기 경계마다 job_leases 임대를 잡은 인스턴스 하나만 돈다.
+// - schedule(): 프로세스 안 타이머. 주기 경계마다 job_leases 임대를 잡은 인스턴스 하나만 돈다. 작업 중에는 하트비트로
+//   임대를 늘리고, 늘리지 못하면 작업 신호를 끊는다 (runLeased, K1.T2). 같은 인스턴스에서 앞 경계 작업이 아직 돌면 건너뛴다.
 // - clientIp(): 소켓 상대 주소 + 신뢰 프록시 (packages/auth resolveClientIp). Request 에는 소켓이 없으므로
 //   listen() 이 요청마다 상대 주소를 묶어 둔다. listen() 을 거치지 않은 요청은 null 이다.
 import { randomUUID } from "node:crypto";
@@ -10,8 +11,25 @@ import type { AddressInfo } from "node:net";
 import { createAdaptorServer } from "@hono/node-server";
 import { findInvalidTrustedProxies, getIPFromHeader } from "@better-auth/core/utils/ip";
 import { resolveClientIp } from "@magnetosphere/auth";
-import { acquireLease } from "./lease.ts";
+import { runLeased } from "./lease.ts";
 import { assertClientIp, cronIntervalMinutes, type DbHandle, type Job, type Runtime } from "./types.ts";
+
+/** schedule() 이 쓰는 시계. 기본은 실제 시계(타이머는 unref). 시험이 경계를 가짜 시계로 넘긴다 (TC-K1.T4.d) */
+export interface Clock {
+  now(): number;
+  setTimeout(fn: () => void, ms: number): unknown;
+  clearTimeout(timer: unknown): void;
+}
+
+const realClock: Clock = {
+  now: () => Date.now(),
+  setTimeout(fn, ms) {
+    const t = setTimeout(fn, ms);
+    t.unref();
+    return t;
+  },
+  clearTimeout: (t) => clearTimeout(t as NodeJS.Timeout),
+};
 
 export interface NodeRuntimeOptions {
   /** 환경 변수 (기본 process.env). DATABASE_URL 을 여기서 읽는다 */
@@ -20,6 +38,8 @@ export interface NodeRuntimeOptions {
   trustedProxies?: readonly string[];
   /** 임대 holder 이름. 기본은 프로세스마다 무작위 */
   instanceId?: string;
+  /** schedule() 의 시계 (기본 실제 시계) */
+  clock?: Clock;
   /** 주기 작업 예외 (기본 console.error) */
   onJobError?: (name: string, e: unknown) => void;
   /**
@@ -84,7 +104,8 @@ export function createNodeRuntime(opts: NodeRuntimeOptions = {}): NodeRuntime {
       console.warn(`[runtime] 신뢰 프록시가 아닌 ${peer} 가 X-Forwarded-For 를 보냈다. 무시하고 상대 주소로 센다. 프록시 뒤라면 TRUSTED_PROXIES 를 확인하라 (이 경고는 한 번만 나온다)`));
   let warnedUntrusted = false;
   const peers = new WeakMap<Request, string>();
-  const timers = new Set<NodeJS.Timeout>();
+  const clock = opts.clock ?? realClock;
+  const timers = new Set<unknown>();
   let handle: Promise<DbHandle> | undefined;
 
   const db = () => {
@@ -100,25 +121,37 @@ export function createNodeRuntime(opts: NodeRuntimeOptions = {}): NodeRuntime {
     db,
     schedule(name: string, cron: string, fn: Job) {
       const period = cronIntervalMinutes(cron) * 60_000;
-      // 다음 경계까지 임대를 잡는다. 경계 직전에 풀려야 다음 경계에서 어느 인스턴스든 잡는다
+      // 처음 잡을 때 다음 경계 직전까지 임대를 잡고, 작업 중에는 하트비트가 ttl 만큼씩 늘린다.
+      // 끝나면 runLeased 가 만료를 처음 값으로 되돌려 다음 경계에서 어느 인스턴스든 잡는다
       const ttl = period - 5_000;
-      const tick = async () => {
+      let running = false;
+      // boundary: 이 tick 이 예약된 경계 시각. 경계 번호는 이것으로 정한다 (지금 시각을 반올림하지 않는다, K1 재검토)
+      const tick = async (boundary: number) => {
+        // 앞 경계의 작업이 아직 돈다 (내 임대라 다시 잡힌다). 이 인스턴스에서 겹쳐 돌리지 않는다
+        if (running) return;
+        running = true;
         try {
-          if (await acquireLease(await db(), name, holder, ttl)) await fn();
+          const h = await db();
+          await runLeased(h, name, holder, ttl, (signal, lease) => fn({ db: h, lease, signal }), clock.now, boundary / period);
         } catch (e) {
           onJobError(name, e);
+        } finally {
+          running = false;
         }
       };
-      // 인스턴스마다 같은 경계(분 단위)에 깨어나 임대를 다툰다
-      const first = setTimeout(() => {
-        timers.delete(first);
-        void tick();
-        const every = setInterval(() => void tick(), period);
-        every.unref();
-        timers.add(every);
-      }, period - (Date.now() % period));
-      first.unref();
-      timers.add(first);
+      // 인스턴스마다 같은 경계(분 단위)에 깨어나 임대를 다툰다. 다음 경계는 예약했던 경계 + 주기다 (타이머가 조금 일찍 울려도
+      // 같은 경계를 다시 예약하지 않는다). 그 시각이 이미 지났으면(절전 등) 지금 다음 경계로 건너뛴다
+      const nextBoundary = (now: number) => now - (now % period) + period;
+      const arm = (boundary: number) => {
+        const t = clock.setTimeout(() => {
+          timers.delete(t);
+          const now = clock.now();
+          arm(boundary + period > now ? boundary + period : nextBoundary(now));
+          void tick(boundary);
+        }, Math.max(0, boundary - clock.now()));
+        timers.add(t);
+      };
+      arm(nextBoundary(clock.now()));
     },
     rateLimitStore: () => ({ storage: "database" }),
     secret: (name) => env[name],
@@ -140,7 +173,7 @@ export function createNodeRuntime(opts: NodeRuntimeOptions = {}): NodeRuntime {
       if (peer) peers.set(to, peer);
     },
     async close() {
-      for (const t of timers) clearTimeout(t);
+      for (const t of timers) clock.clearTimeout(t);
       timers.clear();
       if (handle) await (await handle).close();
       handle = undefined;

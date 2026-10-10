@@ -1,11 +1,12 @@
-// 런타임 어댑터 TC 가운데 DB 가 필요 없는 것 (pnpm test).
+// 런타임 어댑터 TC 가운데 DB 서버가 필요 없는 것 (pnpm test). 임대가 필요한 주기 작업은 SQLite 파일 DB 를 쓴다.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
-import { createNodeRuntime, listen } from "../src/node.ts";
+import { describe, expect, it, onTestFinished } from "vitest";
+import { connectNode, createNodeRuntime, listen } from "../src/node.ts";
 import { assertClientIp, cronIntervalMinutes } from "../src/types.ts";
 import { createWorkersRuntime } from "../src/workers.ts";
+import { createTestDb } from "./dbs.ts";
 
 const ok = () => new Response("ok");
 
@@ -83,16 +84,22 @@ describe("런타임 어댑터 공통", () => {
   });
 
   it("Workers 주기 작업: 등록한 cron 의 작업만 돌고, 실패는 모아서 드러낸다", async () => {
-    const rt = createWorkersRuntime({});
+    // 작업은 임대 아래에서 돈다 (K1.T2). workerd 없이 SQLite 연결을 넘긴다
+    const db = await createTestDb("sqlite");
+    const rt = createWorkersRuntime({}, { connect: () => connectNode(db.url) });
+    onTestFinished(async () => {
+      await rt.close();
+      await db.drop();
+    });
     const ran: string[] = [];
     rt.schedule("rebalance", "* * * * *", async () => void ran.push("rebalance"));
     rt.schedule("reconcile", "*/5 * * * *", async () => void ran.push("reconcile"));
     rt.schedule("broken", "*/5 * * * *", async () => {
       throw new Error("x");
     });
-    await rt.runScheduled("* * * * *");
+    await rt.runScheduled("* * * * *", Date.UTC(2026, 9, 1, 0, 5));
     expect(ran).toEqual(["rebalance"]);
-    await expect(rt.runScheduled("*/5 * * * *")).rejects.toThrow(/1개 실패/);
+    await expect(rt.runScheduled("*/5 * * * *", Date.UTC(2026, 9, 1, 0, 5))).rejects.toThrow(/1개 실패/);
     expect(ran).toEqual(["rebalance", "reconcile"]);
   });
 

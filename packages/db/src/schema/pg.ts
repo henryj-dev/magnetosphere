@@ -142,8 +142,13 @@ export const omnirouteJobs = pgTable("omniroute_jobs", {
   lastError: text("last_error"),
   nextRunAt: timestamp("next_run_at").notNull(),
   doneAt: timestamp("done_at"),
+  failedAt: timestamp("failed_at"),
+  generation: integer("generation").default(0).notNull(),
+  interrupts: integer("interrupts").default(0).notNull(),
+  keyId: varchar("key_id", { length: 36 }),
 }, (table) => [
   index("idx_omniroute_jobs_due").on(table.doneAt, table.nextRunAt),
+  index("idx_omniroute_jobs_key").on(table.keyId, table.doneAt),
 ]);
 
 // 여러 인스턴스에서 주기 작업 중복 실행 방지 (임대 잠금)
@@ -151,6 +156,8 @@ export const jobLeases = pgTable("job_leases", {
   name: varchar("name", { length: 64 }).primaryKey(),
   holder: varchar("holder", { length: 255 }).notNull(),
   lockedUntil: timestamp("locked_until").notNull(),
+  fence: integer("fence").default(0).notNull(),
+  lastSlot: bigint("last_slot", { mode: "number" }),
 });
 
 // 감사 기록
