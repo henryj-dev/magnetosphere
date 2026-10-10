@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { holdLease } from "@magnetosphere/runtime/lease";
 import { connectNode } from "@magnetosphere/runtime/node";
 import type { DbHandle } from "@magnetosphere/runtime/types";
+import { KeyConflictError, requestEnable } from "../../src/keys/apply.ts";
 import { reconcile } from "../../src/keys/reconcile.ts";
 import { omnirouteHandlers } from "../../src/queue/handlers.ts";
 import { enqueue, runDue } from "../../src/queue/index.ts";
@@ -141,5 +142,82 @@ describe("TC-K3.T3.h 작업 큐가 남긴 어긋남(다시 읽기 상한·늦게
     expect(om.keys.get("ork-flip")?.isActive).toBe(want);
     expect(om.keys.get("ork-late")?.isActive).toBe(false);
     expect([(await keyOf(flipId)).syncState, (await keyOf(lateId)).syncState]).toEqual(["synced", "synced"]);
+  });
+});
+
+describe("TC-K3.T3.i manage 범위 키는 꺼진 이유와 상관없이 admin 으로 고정한다 (리뷰 #1, V10)", () => {
+  it("회원이 끈 키(member)에 scopes [manage] → reconcile → disabled_reason admin, 회원 켜기 요청 409", async () => {
+    const { keyIds } = await addMember(h, null, [{ ork: "ork-mm", state: "disabled", reason: "member" }]);
+    const keyId = keyIds["ork-mm"];
+    const om = fakeKeys();
+    om.add("ork-mm", { isActive: false, scopes: ["manage"] });
+    await reconcile({ db: h, client: () => om.client(), now: T0 });
+    expect(await keyOf(keyId)).toMatchObject({ state: "disabled", disabledReason: "admin" });
+    expect(await alertsOf("alert.manage_scope_key")).toHaveLength(1);
+    await expect(requestEnable(h, keyId, "member", { client: () => om.client(), now: T0 })).rejects.toBeInstanceOf(KeyConflictError);
+    expect(om.of("setKeyActive")).toEqual([]);
+  });
+});
+
+describe("TC-K3.T3.j 점검은 시간 예산 안에서 멈추고 다음 실행이 이어 가며, 끊겨도 꺼진 키의 알림은 남는다 (리뷰 #2)", () => {
+  it("어긋난 키 다섯·한 실행에 셋 → 두 실행이면 다섯 모두 맞춤. manage 키를 끈 뒤 임대를 잃어도 alert.manage_scope_key 가 남는다", async () => {
+    const { keyIds } = await addMember(
+      h,
+      null,
+      ["k1", "k2", "k3", "k4", "k5"].map((ork) => ({ ork, state: "disabled" as const, reason: "member" })),
+    );
+    const om = fakeKeys();
+    for (const id of Object.keys(keyIds)) om.add(id, { isActive: true });
+    // 시계는 읽을 때마다 100ms 간다. 시간 예산 350ms 면 한 실행에 키 셋
+    let t = T0.getTime();
+    const clock = () => (t += 100);
+    const first = await reconcile({ db: h, client: () => om.client(), now: T0, clock, budgetMs: 350 });
+    expect(first.stopped).toBe(true);
+    const second = await reconcile({ db: h, client: () => om.client(), now: T0, clock, budgetMs: 350 });
+    expect(second.stopped).toBe(false);
+    expect([...om.keys.values()].map((k) => [k.id, k.isActive])).toEqual(["k1", "k2", "k3", "k4", "k5"].map((id) => [id, false]));
+
+    // 끊김: manage 키를 끈 다음 키에서 임대를 잃는다
+    const om2 = fakeKeys();
+    om2.add("a-manage", { name: "m_deadbeef_00000001", isActive: true, scopes: ["manage"] });
+    const b = await addMember(h, null, [{ ork: "b-key", state: "disabled", reason: "member" }, { ork: "c-key", state: "disabled", reason: "member" }]);
+    void b;
+    om2.add("b-key", { isActive: true });
+    om2.add("c-key", { isActive: true });
+    const ac = new AbortController();
+    om2.before = (call) => {
+      if (call.fn === "setKeyActive" && call.id === "b-key") ac.abort(new Error("임대를 잃었다"));
+    };
+    await expect(reconcile({ db: h, client: () => om2.client(), now: T0, signal: ac.signal })).rejects.toThrow();
+    expect(om2.keys.get("a-manage")?.isActive).toBe(false);
+    expect((await alertsOf("alert.manage_scope_key")).map((a: { target: string }) => a.target)).toEqual(["a-manage"]);
+  });
+});
+
+describe("TC-K3.T3.m 옛 목록 값으로 synced 를 적지 않는다 (리뷰 #4)", () => {
+  it("sync_state pending·목표 off 키, 목록은 isActive false(옛 값)지만 실제는 켜짐 → reconcile 이 setKeyActive(false) 를 부른다", async () => {
+    const { keyIds } = await addMember(h, null, [{ ork: "ork-stale", state: "disabled", reason: "member" }]);
+    const keyId = keyIds["ork-stale"];
+    await h.db.update(k()).set({ syncState: "pending" }).where(eq(k().id, keyId));
+    const om = fakeKeys();
+    om.add("ork-stale", { isActive: true });
+    const stale = () => ({ ...om.client(), listKeys: async () => [{ id: "ork-stale", name: "m_x", isActive: false, scopes: [] }] });
+    await reconcile({ db: h, client: stale as never, now: T0 });
+    expect(om.seq()).toEqual(["setKeyActive(false)"]);
+    expect(om.keys.get("ork-stale")?.isActive).toBe(false);
+    expect((await keyOf(keyId)).syncState).toBe("synced");
+  });
+});
+
+describe("TC-K3.T3.n disabled 인데 이유가 없는 키는 alert.key_stuck 을 하루 한 번 남긴다 (리뷰 #8)", () => {
+  it("state disabled·disabled_reason NULL 키 → reconcile 두 번(같은 날) → alert.key_stuck 1행(target 그 키), 켜지 않는다", async () => {
+    const { keyIds } = await addMember(h, null, [{ ork: "ork-stuck", state: "disabled", reason: null }]);
+    void keyIds;
+    const om = fakeKeys();
+    om.add("ork-stuck", { isActive: false });
+    await reconcile({ db: h, client: () => om.client(), now: T0 });
+    await reconcile({ db: h, client: () => om.client(), now: new Date(T0.getTime() + 5 * 60_000) });
+    expect((await alertsOf("alert.key_stuck")).map((a: { target: string }) => a.target)).toEqual(["ork-stuck"]);
+    expect(om.of("setKeyActive")).toEqual([]);
   });
 });

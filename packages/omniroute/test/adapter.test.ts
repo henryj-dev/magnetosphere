@@ -212,3 +212,16 @@ describe("K2 리뷰 M3 clearBudget 은 월 예산 0(무제한)을 보낸다", ()
     expect(JSON.parse(String(sent[0].body))).toMatchObject({ apiKeyId: "k1", monthlyLimitUsd: 0, resetInterval: "monthly" });
   });
 });
+
+describe("TC-K3.T3.l 키 목록이 total 보다 적으면 형식 오류로 끝낸다 (V28, fail-closed)", () => {
+  it("keys 1개·total 2 → OmniRouteFormatError, total 이 없어도 오류. 대조: keys 1개·total 1 이면 그대로", async () => {
+    const key = { id: "k1", name: "m_1", isActive: true, scopes: [] };
+    const list = (body: unknown) => {
+      const { fetch } = fakeFetch({ "GET /api/keys": { body } });
+      return createClient({ baseUrl: "http://omni.test", credential: { token: "oma_live_x" }, fetch }).listKeys();
+    };
+    await expect(list({ keys: [key], total: 2 })).rejects.toThrow(OmniRouteFormatError);
+    await expect(list({ keys: [key] })).rejects.toThrow(OmniRouteFormatError);
+    expect((await list({ keys: [key], total: 1 })).map((k) => k.id)).toEqual(["k1"]);
+  });
+});

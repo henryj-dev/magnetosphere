@@ -138,3 +138,22 @@ describe("TC-K3.T2.e 삭제는 끄기 먼저, DELETE 는 끈 뒤 2분이 지나�
     expect((await keyOf(keyId)).state).toBe("deleted");
   });
 });
+
+describe("TC-K3.T2.i OmniRoute 에서 사라진 키 하나가 회원의 다른 키 켜기를 막지 않는다 (리뷰 #6)", () => {
+  it("월 한도 5 회원, 켤 키 A·사라진 키 B(setBudget 404) → A 는 켜지고, B 는 sync_state missing·alert.key_missing 하루 한 번", async () => {
+    await writeSetting(h, CONFIRMED_KEY, "2026-04-10", T0);
+    const { keyIds } = await addMember(h, 5, [{ ork: "ork-A", state: "disabled", reason: "user_status" }, { ork: "ork-B" }]);
+    const om = fakeKeys();
+    om.add("ork-A", { isActive: false });
+    om.before = (call) => {
+      if (call.id === "ork-B") throw new OmniRouteError("POST", "/budget", 404, null, "not found");
+    };
+    const r = await applyKey(h, keyIds["ork-A"], { client: () => om.client(), now: T0 });
+    expect(r).toMatchObject({ target: "on", syncState: "synced" });
+    expect(om.keys.get("ork-A")?.isActive).toBe(true);
+    expect((await keyOf(keyIds["ork-B"])).syncState).toBe("missing");
+    await applyKey(h, keyIds["ork-A"], { client: () => om.client(), now: new Date(T0.getTime() + 60_000) });
+    const alerts = (await h.db.select().from(h.schema.auditLog)).filter((a: { action: string }) => a.action === "alert.key_missing");
+    expect(alerts.map((a: { target: string }) => a.target)).toEqual(["ork-B"]);
+  });
+});
