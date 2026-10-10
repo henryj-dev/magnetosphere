@@ -1,6 +1,7 @@
 # TC-K5.T3.a 음성 대조: 매트릭스가 키 시나리오(--scenario keys)를 빠뜨리고, K5 잡은 --skip-ids 로 여섯 시나리오를 뺀다
-# 그러면 완료 기준 E2E(G-K5.3~8)가 CI 에서 하나도 돌지 않는다
-# expect: combo-set
+# 그러면 완료 기준 E2E(G-K5.3~8)가 CI 에서 하나도 돌지 않는다. S6 조합 불일치(combo-set)와 다른 코드로 잡아야
+# 매트릭스 조합이 어긋난 다른 이유로 이 음성 대조가 통과하지 않는다 (K5 리뷰 L4, TC-K6.T5.a)
+# expect: keys-scenario
 name: ci
 on:
   push:

@@ -12,7 +12,8 @@
 //   matrix   E2E 매트릭스 잡이 하나이고 matrix.combo 가 --expect 개, 게이트 설정 S6 의 `pnpm e2e --combo <조합>` 검사와 같은 집합이다
 //            [combo-count·combo-set·matrix-shape]. include·exclude 로 조합을 바꾸지 않는다 [matrix-shape].
 //            게이트 설정 K5 에 `pnpm e2e --combo <조합> --scenario keys` 검사(2단계 완료 기준 E2E, G-K5.3~8)가 있으면 그 조합 집합도
-//            matrix.combo 와 같아야 하고, 매트릭스 잡에 `pnpm e2e --combo ${{ matrix.combo }} --scenario keys` 명령 줄이 있어야 한다 [combo-set].
+//            matrix.combo 와 같아야 하고, 매트릭스 잡에 `pnpm e2e --combo ${{ matrix.combo }} --scenario keys` 명령 줄이 있어야 한다 [keys-scenario].
+//            S6 조합 불일치(combo-set)와 코드를 나눠, 키 시나리오 음성 대조가 조합이 어긋난 다른 이유로 통과하지 않게 한다 (K5 리뷰 L4).
 //            K5 잡은 그 여섯을 --skip-ids 로 빼므로, 매트릭스 스텝이 빠지면 키 시나리오가 CI 에서 하나도 돌지 않는다 (K5.T3).
 //   stage    봉인 파일이 있는(면제 아닌) 단계 중 S1 을 뺀 모든 단계를 어떤 스텝이 `node scripts/gate.mjs <단계>` 로 돈다 [stage-missing]. --skip-requires 는 쓰지 않고
 //            [skip-requires], --skip-ids 로 뺄 수 있는 것은 매트릭스가 대신 도는 E2E 검사뿐이다 [skip-ids].
@@ -182,10 +183,10 @@ function check(doc, name, expect, gates) {
       const wantKeys = gates.keys.map((c) => c.combo);
       const missingKeys = combos.filter((c) => !wantKeys.includes(c));
       const extraKeys = wantKeys.filter((c) => !combos.includes(c));
-      if (missingKeys.length) add("combo-set", `${job}: 게이트 K5 키 시나리오에 없는 조합: ${missingKeys.join(", ")}`);
-      if (extraKeys.length) add("combo-set", `${job}: 게이트 K5 키 시나리오 조합이 매트릭스에 없다: ${extraKeys.join(", ")}`);
+      if (missingKeys.length) add("keys-scenario", `${job}: 게이트 K5 키 시나리오에 없는 조합: ${missingKeys.join(", ")}`);
+      if (extraKeys.length) add("keys-scenario", `${job}: 게이트 K5 키 시나리오 조합이 매트릭스에 없다: ${extraKeys.join(", ")}`);
       if (!commands.some((c) => c.job === job && /^pnpm e2e --combo "?\$\{\{\s*matrix\.combo\s*\}\}"? --scenario keys$/.test(c.line))) {
-        add("combo-set", `${job}: \`pnpm e2e --combo \${{ matrix.combo }} --scenario keys\` 명령 줄이 없다 — 게이트 K5 키 시나리오(${gates.keys.map((c) => c.id).join(", ")})가 CI 에서 돌지 않는다`);
+        add("keys-scenario", `${job}: \`pnpm e2e --combo \${{ matrix.combo }} --scenario keys\` 명령 줄이 없다 — 게이트 K5 키 시나리오(${gates.keys.map((c) => c.id).join(", ")})가 CI 에서 돌지 않는다`);
       }
     }
   }

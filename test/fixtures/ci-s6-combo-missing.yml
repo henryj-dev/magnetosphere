@@ -1,0 +1,25 @@
+# K6 리뷰 M2 음성 대조: E2E 매트릭스가 docker-sqlite 대신 게이트 S6 에 없는 조합(docker-mariadb)을 돈다. 개수는 6 그대로라
+# combo-count 로는 못 잡고, 키 시나리오 명령 줄은 있어 keys-scenario 의 "명령 줄 없음" 도 아니다. S6 조합 집합 검사 [combo-set] 만 잡는다.
+# ci-guard 폴더 밖에 둔다 (G-S7.1 은 ci-guard 폴더의 픽스처 수를 그대로 본다).
+# expect: combo-set
+name: ci
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        combo: [docker-mariadb, docker-mysql, docker-pg, workers-d1, workers-mysql, workers-pg]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: pnpm e2e --combo ${{ matrix.combo }}
+      - run: pnpm e2e --combo ${{ matrix.combo }} --scenario keys
+  p2-k5:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: node scripts/gate.mjs K5 --explain --skip-ids G-K5.3,G-K5.4,G-K5.5,G-K5.6,G-K5.7,G-K5.8
