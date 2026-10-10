@@ -159,6 +159,8 @@ async function main() {
     fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### 분석 API 측정 (확인 15번)\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\`\n`);
   }
 
+  // 한 줄 요약. 게이트는 실패한 검사 출력의 끝 30줄만 보여 주므로 결과 JSON 이 잘려도 이 줄은 남는다
+  console.error(`bench: 결과 ${JSON.stringify({ arch, records: result.dataset.records, keys: result.dataset.keys, fullMonth: fullMonth.ms, member: member.ms })}`);
   if (args.has("--assert")) {
     const problems = [];
     if (result.dataset.records !== RECORDS) problems.push(`분석 전체 totalRequests ${result.dataset.records} (기대 ${RECORDS})`);

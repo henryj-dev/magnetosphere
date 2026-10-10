@@ -1,0 +1,65 @@
+{
+  "item": "V15",
+  "question": "분석 API 가 기록 수십만 건(300,000), 키 수백 개(300)에서 얼마나 걸리는가 — 5.3 분배가 1분마다 부른다 (기준: 전체 키 한 달 p95 ≤ 5,000ms, 회원 하나 p95 ≤ 1,000ms, 10회씩)",
+  "answer": {
+    "dataset": {
+      "records": 300000,
+      "keys": 300
+    },
+    "fullMonth": {
+      "p95Ms": 6396,
+      "runs": 10
+    },
+    "member": {
+      "p95Ms": 577,
+      "runs": 10
+    },
+    "arch": "fullMonth 는 x64 (GitHub Actions ubuntu-latest, 다른 부하 없음), member 는 arm64 로컬 측정 다섯 번 중 가장 나쁜 값",
+    "runs": {
+      "x64 CI (run 38014182652)": {
+        "fullMonthP95Ms": 6396,
+        "memberWithinLimit": true
+      },
+      "arm64 local": {
+        "fullMonthP95Ms": [
+          5458,
+          3675,
+          6732,
+          13823,
+          6422,
+          9813
+        ],
+        "memberP95Ms": [
+          261,
+          230,
+          570,
+          577,
+          341,
+          337
+        ],
+        "hostLoadAvg": "8~18 (다른 프로그램)"
+      }
+    },
+    "decision": null,
+    "withinLimit": {
+      "fullMonth": false,
+      "member": true
+    },
+    "options": [
+      "A 기준을 고친다: 1분 작업 임대는 55초라 전체 호출 6~10초 + 예산 쓰기는 임대 안에 끝난다. 기준(5,000ms, 주기의 1/12)을 예: 15,000ms 로 바꾸고 G-K0.21·G-K0.18·TC-K2.T3.h 를 같이 고친다",
+      "B 창을 줄인다: 1분 분배는 오늘(UTC) 창만 부르고, 지난 날 몫은 키별로 저장해 두었다가 하루·가격표 변경 때 다시 계산한다 (오늘 2,537건 창: p95 765ms, 로컬). 분석 비용은 조회 시점 가격표로 계산돼 지난 날 몫이 가격표 동기화로 바뀔 수 있다",
+      "C 회원마다 부른다: 회원 하나 p95 0.2~0.6초. 회원 150명이면 한 번에 30~90초라 1분 주기를 넘는다 — 쓰려면 주기를 늘리거나 최근 쓴 회원만 고른다"
+    ]
+  },
+  "evidence": [
+    "tests/bench/analytics.mjs: 측정용 OmniRoute(127.0.0.1:20171, 계약 환경과 같은 digest, 볼륨 없음)에 키 300개를 관리 API 로 만들고, 진짜 요청 2건을 본뜬 usage_history 299,998 줄을 컨테이너 안 better-sqlite3 로 넣었다 (이번 달 UTC 1일부터 고르게). 분석 전체 totalRequests == 300,000, byApiKey 300 확인",
+    "분석 API 는 usage_history 만 읽고 비용을 조회 시점에 토큰 × 가격표로 계산한다 (app/api/usage/analytics/route.js). 직접 넣은 줄도 진짜 요청과 같게 집계된다",
+    "CI x64 (2026-10-10, ci run 38014182652, 잡 '장치·확인 (K0 게이트, OmniRoute 3.8.51)'): bench: 전체 키 한 달 p95 6396ms (기준 ≤ 5000). 회원 하나는 기준 안",
+    "로컬 arm64 (Docker 4 CPU·4GB, 호스트 부하 평균 8~18): 전체 p95 5458·3675·6732·13823·6422·9813ms, 회원 p95 261·230·570·577·341·337ms. 중앙값은 전체 약 3.5~6초",
+    "같은 데이터에서 오늘(UTC) 창만 부르면(2,537건) p95 765ms, 이번 달 창은 3,000~7,700ms (로컬)",
+    "필터 apiKeyIds 에 키 300개를 다 넣으면 오히려 느리다 (5.6~9.6초, 로컬) — IN (…) OR api_key_name IN (…)"
+  ],
+  "blocking": true,
+  "was_blocking": true,
+  "resolved_in": null
+}
