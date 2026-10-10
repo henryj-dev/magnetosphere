@@ -86,9 +86,10 @@ export async function enqueue(h: DbHandle, action: JobAction, payload: JobPayloa
   if (!ACTIONS.includes(action)) throw new TypeError(`모르는 작업: ${action}`);
   if (action === "key.delete" && !opts.runAt) throw new TypeError("key.delete 는 runAt(끈 시각 + KEY_DELETE_DELAY_MS)이 필요하다 (V18)");
   const keyId = typeof payload.keyId === "string" && payload.keyId !== "" ? payload.keyId : null;
+  // key.* 는 모두 대상 키가 있어야 한다. key_id 가 NULL 이면 delete 우선·키별 합치기·실패 표시가 조용히 빠진다 (K1 재검토)
+  if (action.startsWith("key.") && !keyId) throw new TypeError(`${action} 는 payload.keyId(api_keys.id)가 필요하다`);
   const t = h.schema.omnirouteJobs;
-  if (action === "key.apply_state") {
-    if (!keyId) throw new TypeError("key.apply_state 는 payload.keyId(api_keys.id)가 필요하다");
+  if (action === "key.apply_state" && keyId) {
     // 값은 싣지 않는다. 넣는 쪽이 준 active 등은 버린다 (실행할 때 다시 계산한다)
     payload = { keyId };
     const at = opts.runAt ?? opts.now ?? new Date();
