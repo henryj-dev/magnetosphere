@@ -649,4 +649,83 @@ export const GATES = {
       { id: "G-K6.21", how: "test", requires: ["local-services"], desc: "TC-K6.T4.a·c 끝난 작업 정리 (Workers + D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-K6.T4.[ac] Workers"', expectPassed: 2 },
     ],
   },
+
+  // ---------- 3단계 "회원·정책" (실행판 docs/plan/phase3-todo.md) ----------
+  // M0~M6 은 직렬이다. strictTests: test 검사마다 expectPassed(통과 수 ==)가 있어야 한다.
+  // outputs 는 그 단계가 처음 만드는 경로만 둔다 (이 설정을 넣을 때 모든 경로가 git log --all 0건).
+  // 3단계가 고칠 기존 파일(app.ts·routes/**·setup/**·packages/auth/src/index.ts·schema·seed)은 어느 outputs 에도 넣지 않는다.
+  // M1~M6 의 checks 는 그 단계를 시작할 때 실행판 GATE 표대로 채운다 (빈 단계는 gate 가 실행·봉인을 거부한다).
+  M0: {
+    needs: ["K6"],
+    waivable: false,
+    strictTests: true,
+    outputs: ["docs/verify/V29.json", "docs/verify/V30.json", "docs/verify/V31.json", "docs/verify/V32.json", "packages/auth/test/verify-p3/**"],
+    checks: [
+      // M0.T1 확인 결과 검사기 phase3 묶음
+      { id: "G-M0.1", how: "test", desc: "TC-M0.T1.a~c check-verify --set phase3 음성 대조", cmd: nodeTest("scripts/check-verify.test.mjs", "TC-M0.T1"), expectPassed: 3 },
+      { id: "G-M0.2", how: "cmd", desc: "확인 파일 넷 존재·모양", cmd: "node scripts/check-verify.mjs present --set phase3" },
+      { id: "G-M0.3", how: "cmd", desc: "설계를 막는 결과 없음", cmd: "node scripts/check-verify.mjs unblocked --set phase3" },
+      { id: "G-M0.4", how: "cmd", desc: "막았던 결과는 현재 계획서 버전을 가리킴", cmd: "node scripts/check-verify.mjs resolved --set phase3" },
+      // M0.T2~T5 확인 항목 (better-auth 1.7.7, 네 DB). 통과 수는 TC 수 × DB 4 (실행기 확인 전 값, 실행판 「코드 미확인」)
+      { id: "G-M0.5", how: "test", requires: ["local-services"], desc: "TC-M0.T2.a·b V29 가입 거부 훅", cmd: 'pnpm -C packages/auth test -t "TC-M0.T2"', expectPassed: 8 },
+      { id: "G-M0.6", how: "test", requires: ["local-services"], desc: "TC-M0.T3.a·b V30 세션 삭제 즉시성", cmd: 'pnpm -C packages/auth test -t "TC-M0.T3"', expectPassed: 8 },
+      { id: "G-M0.7", how: "test", requires: ["local-services"], desc: "TC-M0.T4.a·b V31 로그인 거부 훅", cmd: 'pnpm -C packages/auth test -t "TC-M0.T4"', expectPassed: 8 },
+      { id: "G-M0.8", how: "test", requires: ["local-services"], desc: "TC-M0.T5.a V32 기본으로 열린 회원 변경 경로", cmd: 'pnpm -C packages/auth test -t "TC-M0.T5"', expectPassed: 4 },
+      // M0.T6 계획서 개정 (질문 Q1~Q18)
+      { id: "G-M0.9", how: "grep", desc: "TC-M0.T6.a 계획서 v5.8 변경 이력이 질문 Q1~Q18 을 닫음", pattern: "^- v5\\.8: .*Q1\\b.*Q18\\b", in: ["docs/design/omniroute-member-layer.md"], op: "==", limit: 1 },
+      { id: "G-M0.10", how: "grep", desc: "계획서 상태 줄이 v5.8 이상", pattern: "^상태: 초안 v5\\.([8-9]|[1-9][0-9])", in: ["docs/design/omniroute-member-layer.md"], op: "==", limit: 1 },
+      { id: "G-M0.11", how: "grep", desc: "실행판에 미정 질문 0", pattern: "결정: 미정", in: ["docs/plan/phase3-todo.md"], op: "==", limit: 0 },
+      // M0.T7 CI 단계 잡·필수 검사
+      { id: "G-M0.12", how: "grep", desc: "TC-M0.T7.a CI 단계 잡 (M0)", pattern: "^\\s+run: node scripts/gate\\.mjs M0\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
+      { id: "G-M0.13", how: "cmd", desc: "TC-M0.T7.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
+      { id: "G-M0.14", how: "cmd", desc: "스크립트 테스트 전부", cmd: 'node --test --test-reporter=tap "scripts/*.test.mjs"' },
+    ],
+  },
+  M1: {
+    needs: ["M0"],
+    waivable: false,
+    strictTests: true,
+    outputs: [
+      "packages/db/migrations/*/0003_*",
+      "apps/server/src/settings/**", "apps/server/test/settings/**",
+      "apps/server/src/members/**", "apps/server/test/members/**",
+      "apps/server/src/audit/**", "apps/server/test/audit/**",
+    ],
+    checks: [],
+  },
+  M2: {
+    needs: ["M1"],
+    waivable: false,
+    strictTests: true,
+    outputs: ["apps/server/src/invites/**", "apps/server/test/invites/**"],
+    checks: [],
+  },
+  M3: {
+    needs: ["M2"],
+    waivable: false,
+    strictTests: true,
+    outputs: ["apps/server/src/signup/**", "apps/server/test/signup/**", "packages/auth/test/signup-policy/**"],
+    checks: [],
+  },
+  M4: {
+    needs: ["M3"],
+    waivable: false,
+    strictTests: true,
+    outputs: ["apps/server/src/admin/**", "apps/server/test/admin/**", "apps/server/src/sessions/**", "apps/server/test/sessions/**"],
+    checks: [],
+  },
+  M5: {
+    needs: ["M4"],
+    waivable: false,
+    strictTests: true,
+    outputs: ["tests/e2e/members/**"],
+    checks: [],
+  },
+  M6: {
+    needs: ["M5"],
+    waivable: false,
+    strictTests: true,
+    outputs: [],
+    checks: [],
+  },
 };
