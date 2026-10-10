@@ -150,8 +150,8 @@ TC-K0.T1.e  grep 검사의 ^·$ 는 줄의 시작·끝이다 (작업 중 추가)
 ```
 
 【통과】
-- [ ] G-K0.6 ~ G-K0.9 · G-K0.37 통과
-- [ ] G-K0.35 통과 (Red 커밋에서 TC-K0.T1.a 실패), G-K0.38 통과 (Red 커밋에서 TC-K0.T1.e 실패)
+- [x] G-K0.6 ~ G-K0.9 · G-K0.37 통과
+- [x] G-K0.35 통과 (Red 커밋에서 TC-K0.T1.a 실패), G-K0.38 통과 (Red 커밋에서 TC-K0.T1.e 실패)
 
 ### ☑ K0.T2 — CI 는 봉인된 단계만 단계 잡을 요구한다
 선행 없음 · 산출 `scripts/check-ci-matrix.mjs`(`--seal-dir`), `test/check-ci-matrix.test.mjs` · 되돌리기 커밋 1개 (`p2/plan`)
@@ -192,8 +192,8 @@ TC-K0.T3.b  실제 ci.yml 은 main 에서 취소하지 않는다
 ```
 
 【통과】
-- [ ] G-K0.11 통과
-- [ ] G-K0.36 통과 (Red 커밋에서 G-K0.11 실패)
+- [x] G-K0.11 통과
+- [x] G-K0.36 통과 (Red 커밋에서 G-K0.11 실패)
 
 ### ☑ K0.T4 — 확인 결과 검사기에 2단계 항목 묶음
 선행 없음 · 산출 `scripts/check-verify.mjs`, `scripts/check-verify.test.mjs` · 되돌리기 커밋 1개
@@ -221,8 +221,8 @@ TC-K0.T4.e  --set 없이 부르면 1단계 일곱 항목을 본다
 ```
 
 【통과】
-- [ ] G-K0.12 통과
-- [ ] `node --test --test-reporter=tap scripts/check-verify.test.mjs` 종료코드 0 (TC-S1.G.a~d 포함, G-K0.33)
+- [x] G-K0.12 통과
+- [x] `node --test --test-reporter=tap scripts/check-verify.test.mjs` 종료코드 0 (TC-S1.G.a~d 포함, G-K0.33)
 
 ### ☑ K0.T5 — V12 키 그룹·쿼터 풀 공동 예산
 선행 K0.T4 · 산출 `docs/verify/V12.json`, `packages/omniroute/test/contract/verify/v12.contract.ts` · 되돌리기 커밋 1개
@@ -240,7 +240,7 @@ TC-K0.T5.a  V12 관찰이 V12.json answer 와 같다 (V12 의존)
 ```
 
 【통과】
-- [ ] G-K0.16 통과
+- [x] G-K0.16 통과
 - [ ] G-K0.13 · G-K0.14 · G-K0.15 통과 (V12 포함)
 
 ### ☑ K0.T6 — V13 call-logs 를 키로 거르는 쿼리
@@ -257,9 +257,9 @@ TC-K0.T6.a  V13 관찰이 V13.json answer 와 같다 (V13 의존)
 ```
 
 【통과】
-- [ ] G-K0.17 통과
+- [x] G-K0.17 통과
 
-### ☑ K0.T7 — V15 분석 API 성능 (5.3 이 1분마다 부른다)
+### ◐ K0.T7 — V15 분석 API 성능 (5.3 이 1분마다 부른다)
 선행 K0.T4 · 산출 `docs/verify/V15.json`, `tests/bench/analytics.mjs`, `tests/bench/docker-compose.yml` · 되돌리기 커밋 1개
 
 【작업】
@@ -276,7 +276,7 @@ TC-K0.T7.a  측정이 재현된다 (V15 의존)
 ```
 
 【통과】
-- [ ] G-K0.18 ~ G-K0.23 통과
+- [ ] G-K0.18 ~ G-K0.23 통과 (19·20·22·23 은 통과, 18·21 은 기준 초과로 실패 — V15 결정 대기)
 
 ### ☑ K0.T8 — V18 삭제한 키의 기록이 분석에 남는가
 선행 K0.T4 · 산출 `docs/verify/V18.json`, `packages/omniroute/test/contract/verify/v18.contract.ts` · 되돌리기 커밋 1개
@@ -292,7 +292,7 @@ TC-K0.T8.a  삭제한 키의 비용이 그 키 id 분석에 그대로 잡힌다 
 ```
 
 【통과】
-- [ ] G-K0.24 통과
+- [x] G-K0.24 통과
 
 ### ☑ K0.T9 — V19 `regenerate`의 id·누적 지출·예산
 선행 K0.T4 · 산출 `docs/verify/V19.json`, `packages/omniroute/test/contract/verify/v19.contract.ts` · 되돌리기 커밋 1개
@@ -308,7 +308,7 @@ TC-K0.T9.a  regenerate 뒤 관찰이 V19.json answer 와 같다 (V19 의존)
 ```
 
 【통과】
-- [ ] G-K0.25 통과
+- [x] G-K0.25 통과
 
 ### ☑ K0.T10 — V20 월 예산 시간대·초기화·달 중간 변경
 선행 K0.T4 · 산출 `docs/verify/V20.json`, `packages/omniroute/test/contract/verify/v20.contract.ts` · 되돌리기 커밋 1개
@@ -332,7 +332,7 @@ TC-K0.T10.c  기간 시작 시각이 answer.timezone 기준이다 (V20 의존, �
 ```
 
 【통과】
-- [ ] G-K0.26 통과
+- [x] G-K0.26 통과
 
 ### ☑ K0.T11 — 예산 차단 판정 도우미 (amd64·arm64)
 선행 없음 · 산출 `tests/contract/budget-block.mjs`, `tests/contract/budget-block.test.mjs` · 되돌리기 커밋 1개
@@ -349,9 +349,9 @@ TC-K0.T11.a  두 빌드의 예산 차단은 참, 일반 요청 수 제한은 거
 ```
 
 【통과】
-- [ ] G-K0.27 통과
+- [x] G-K0.27 통과
 
-### ☑ K0.T12 — 계획서 개정 v5.6 (설계 공백 Q1~Q6 과 확인 결과)
+### ◐ K0.T12 — 계획서 개정 v5.6 (설계 공백 Q1~Q6 과 확인 결과)
 선행 K0.T5 ~ K0.T10 · 산출 `docs/design/omniroute-member-layer.md`, 이 문서 · 되돌리기 커밋 1개
 
 설계 공백 (코드를 열어 찾은 것. 계획서가 정하지 않으면 K1~K4 의 TC 단언을 쓸 수 없다)
@@ -377,7 +377,7 @@ TC-K0.T12.a  계획서 개정이 공백 여섯을 모두 닫는다
 ```
 
 【통과】
-- [ ] G-K0.28 · G-K0.29 · G-K0.15 통과
+- [ ] G-K0.28 · G-K0.29 · G-K0.15 통과 (28·29 통과, 15 는 V15 결정 대기)
 
 ### ☑ K0.T13 — 필수 검사·병합 방식 대조
 선행 K0.T2 · 산출 `scripts/check-required-checks.mjs`, `test/check-required-checks.test.mjs`, `test/fixtures/required-checks/**` · 되돌리기 커밋 1개
@@ -401,7 +401,7 @@ TC-K0.T13.c  실제 ruleset 이 맞다
 ```
 
 【통과】
-- [ ] G-K0.30 · G-K0.31 통과
+- [ ] G-K0.30 · G-K0.31 통과 (30 통과, 31 은 ruleset 에 K0 잡 이름이 들어가야 통과)
 
 ### ☑ K0.T14 — 재현 빨강 확인 장치
 선행 K0.T1 · 산출 `scripts/check-red.mjs`, `test/check-red.test.mjs` · 되돌리기 커밋 1개
@@ -423,7 +423,7 @@ TC-K0.T14.c  Red 커밋에서 빨강이면 통과한다
 ```
 
 【통과】
-- [ ] G-K0.34 통과
+- [x] G-K0.34 통과
 
 ### ◐ K0.T15 — K0 CI 잡과 봉인
 선행 K0.T1 ~ K0.T14 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
