@@ -431,3 +431,64 @@ test("TC-S0.T2.n --verify-seals --rerun 은 봉인 커밋의 설치 실패를 �
   assert.match(r.out, new RegExp(`S0: 봉인 커밋 ${head.slice(0, 7)} 설치 실패`));
   assert.doesNotMatch(r.out, /다시 돌린 검사 실패/, "설치가 실패했는데 검사를 돌렸다");
 });
+
+// ---------- 2단계 실행판 K0.T1: test 판정의 expectPassed ----------
+
+/** node:test 파일 하나: names 의 테스트는 통과, skips 의 테스트는 { skip: true } */
+function nodeTestFile(names, skips = []) {
+  const lines = ['import { test } from "node:test";'];
+  for (const n of names) lines.push(`test(${JSON.stringify(n)}, () => {});`);
+  for (const n of skips) lines.push(`test(${JSON.stringify(n)}, { skip: true }, () => {});`);
+  return `${lines.join("\n")}\n`;
+}
+
+const tapCheck = (extra = {}) => ({ id: "t", how: "test", cmd: "node --test --test-reporter=tap t.test.mjs", ...extra });
+
+test("TC-K0.T1.a 통과 수가 expectPassed 와 다르면 실패한다", () => {
+  const dir = repo({ P: { needs: [], checks: [tapCheck({ expectPassed: 2 })] } }, { "t.test.mjs": nodeTestFile(["a"], ["b"]) });
+  const one = gate(dir, "P");
+  assert.notEqual(one.code, 0, `테스트 하나가 skip 이면 실패해야 한다\n${one.out}`);
+  assert.match(one.out, /FAIL\s+t .*통과 1 \/ 기대 2/);
+
+  write(dir, "t.test.mjs", nodeTestFile(["a", "b", "c"]));
+  const three = gate(dir, "P");
+  assert.notEqual(three.code, 0, `통과 수가 기대보다 많아도 실패해야 한다\n${three.out}`);
+  assert.match(three.out, /FAIL\s+t .*통과 3 \/ 기대 2/);
+
+  write(dir, "t.test.mjs", nodeTestFile(["a", "b"]));
+  const two = gate(dir, "P");
+  assert.equal(two.code, 0, two.out);
+  assert.match(two.out, /PASS\s+t .*통과 2 \/ 기대 2/);
+});
+
+test("TC-K0.T1.b 여러 vitest 요약을 합산한다", () => {
+  // pnpm test:contract 는 묶음 둘을, && 로 이은 명령은 vitest 를 두 번 돈다. 요약 줄마다 더한다
+  const cmd = `printf '      Tests  2 passed (2)\\n      Tests  3 passed | 1 skipped (4)\\n'`;
+  const dir = repo({
+    F: { needs: [], checks: [{ id: "v", how: "test", cmd, expectPassed: 5 }] },
+    W: { needs: [], checks: [{ id: "v", how: "test", cmd, expectPassed: 2 }] },
+  });
+  const five = gate(dir, "F");
+  assert.equal(five.code, 0, five.out);
+  assert.match(five.out, /PASS\s+v .*통과 5/);
+  const two = gate(dir, "W");
+  assert.notEqual(two.code, 0, `첫 요약(2)만 읽으면 통과한다\n${two.out}`);
+  assert.match(two.out, /FAIL\s+v .*통과 5 \/ 기대 2/);
+});
+
+test("TC-K0.T1.c strictTests 단계의 expectPassed 없는 test 검사는 실패한다", () => {
+  const dir = repo({ P: { needs: [], strictTests: true, checks: [tapCheck()] } }, { "t.test.mjs": nodeTestFile(["a"]) });
+  const r = gate(dir, "P");
+  assert.notEqual(r.code, 0, r.out);
+  assert.match(r.out, /FAIL\s+t .*expectPassed 없음/);
+  const seal = gate(dir, "P", "--seal");
+  assert.notEqual(seal.code, 0, seal.out);
+  assert.equal(sealExists(dir, "P"), false, "expectPassed 없는 검사로 봉인 파일이 생기면 안 된다");
+});
+
+test("TC-K0.T1.d expectPassed 없는 1단계 검사는 통과 ≥ 1 그대로다", () => {
+  const dir = repo({ P: { needs: [], checks: [tapCheck()] } }, { "t.test.mjs": nodeTestFile(["a", "b", "c"]) });
+  const r = gate(dir, "P");
+  assert.equal(r.code, 0, r.out);
+  assert.match(r.out, /PASS\s+t .*통과 3/);
+});
