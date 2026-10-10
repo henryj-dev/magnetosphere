@@ -26,7 +26,7 @@ describe("TC-K1.T2.c 하트비트 실패면 작업 신호가 끊기고 OmniRoute
     const job = holdLease(renew, 90, async (signal) => {
       seen = signal;
       signal.addEventListener("abort", () => (abortedAt = performance.now()));
-      for (let i = 0; i < 100; i++) await fakeFetch(`http://omniroute.test/api/usage/budget?k=${i}`, { signal });
+      for (let i = 0; i < 100; i++) await fakeFetch(`http://omniroute.test/setBudget/${i}`, { signal });
     }, () => lost);
 
     await expect(job).rejects.toBe(lost);

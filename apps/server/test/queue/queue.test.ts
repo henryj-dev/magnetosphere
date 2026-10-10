@@ -110,7 +110,7 @@ describe("TC-K1.T3.e last_error 에 비밀 값이 없다", () => {
   it("본문에 oma_live_·sk- 를 담은 OmniRouteError → last_error 에 oma_live_·sk- 0건", async () => {
     const id = await enqueue(h, "budget.set", { omnirouteKeyId: "k", monthlyUsd: 1 }, { now: T0 });
     const body = '{"error":{"message":"bad token oma_live_x9Yk2Lq7 for key sk-xAbC123def"}}';
-    const err = new OmniRouteError("POST", "/api/usage/budget", 401, "AUTH_001", body);
+    const err = new OmniRouteError("POST", "/budget", 401, "AUTH_001", body);
     // 대조: 어댑터 오류 메시지에는 비밀 값이 들어 있다
     expect(err.message).toContain("oma_live_");
     await runDue(h, all(async () => Promise.reject(err)), T0);
