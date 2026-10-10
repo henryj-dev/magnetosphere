@@ -283,6 +283,7 @@ export const GATES = {
       { id: "G-K0.7", how: "test", desc: "TC-K0.T1.b 여러 vitest 요약을 합산", cmd: nodeTest("scripts/gate.test.mjs", "TC-K0.T1.b"), expectPassed: 1 },
       { id: "G-K0.8", how: "test", desc: "TC-K0.T1.c strictTests 단계의 expectPassed 없는 test 검사 실패", cmd: nodeTest("scripts/gate.test.mjs", "TC-K0.T1.c"), expectPassed: 1 },
       { id: "G-K0.9", how: "test", desc: "TC-K0.T1.d expectPassed 없는 1단계 검사는 통과 ≥ 1 그대로", cmd: nodeTest("scripts/gate.test.mjs", "TC-K0.T1.d"), expectPassed: 1 },
+      { id: "G-K0.37", how: "test", desc: "TC-K0.T1.e grep 검사의 ^·$ 는 줄 단위", cmd: nodeTest("scripts/gate.test.mjs", "TC-K0.T1.e"), expectPassed: 1 },
       // K0.T2 봉인된 단계만 CI 단계 잡 요구
       { id: "G-K0.10", how: "test", desc: "TC-K0.T2.a·b 봉인된 단계만 단계 잡 요구 (음성 대조 포함)", cmd: "node --test --test-reporter=tap test/check-ci-matrix.test.mjs", expectPassed: 2 },
       // K0.T3 main 에서 앞 실행을 취소하지 않음 (S7 리뷰 L5)
@@ -295,12 +296,13 @@ export const GATES = {
       // K0.T5~T10 확인 항목 (계약 환경 127.0.0.1:20170 에서 관찰 == V<n>.json answer)
       { id: "G-K0.16", how: "test", requires: ["local-services"], desc: "TC-K0.T5.a V12 키 그룹·쿼터 풀 공동 예산", cmd: 'pnpm test:contract -t "TC-K0.T5.a"', expectPassed: 1 },
       { id: "G-K0.17", how: "test", requires: ["local-services"], desc: "TC-K0.T6.a V13 call-logs 키 거르기", cmd: 'pnpm test:contract -t "TC-K0.T6.a"', expectPassed: 1 },
-      { id: "G-K0.18", how: "cmd", requires: ["local-services"], desc: "TC-K0.T7.a V15 분석 API 측정 재현", cmd: "node tests/bench/analytics.mjs --assert" },
+      { id: "G-K0.18", how: "cmd", requires: ["local-services"], desc: "TC-K0.T7.a V15 분석 API 측정 재현 (오늘 창 p95 ≤ 2,000ms·회원 ≤ 1,000ms·대조 ≤ 55,000ms, 계획서 v5.7)", cmd: "node tests/bench/analytics.mjs --assert" },
       { id: "G-K0.19", how: "json", desc: "V15 기록 수 ≥ 300,000", file: "docs/verify/V15.json", path: "answer.dataset.records", op: ">=", value: 300000 },
       { id: "G-K0.20", how: "json", desc: "V15 키 수 ≥ 300", file: "docs/verify/V15.json", path: "answer.dataset.keys", op: ">=", value: 300 },
-      { id: "G-K0.21", how: "json", desc: "V15 전체 키 한 달 분석 p95 ≤ 5,000ms", file: "docs/verify/V15.json", path: "answer.fullMonth.p95Ms", op: "<=", value: 5000 },
+      { id: "G-K0.21", how: "json", desc: "V15 오늘 창 분석 p95 ≤ 2,000ms (계획서 v5.7 5.3)", file: "docs/verify/V15.json", path: "answer.todayWindow.p95Ms", op: "<=", value: 2000 },
       { id: "G-K0.22", how: "json", desc: "V15 회원 하나 분석 p95 ≤ 1,000ms", file: "docs/verify/V15.json", path: "answer.member.p95Ms", op: "<=", value: 1000 },
-      { id: "G-K0.23", how: "json", desc: "V15 측정 횟수 ≥ 10", file: "docs/verify/V15.json", path: "answer.fullMonth.runs", op: ">=", value: 10 },
+      { id: "G-K0.23", how: "json", desc: "V15 측정 횟수 ≥ 10", file: "docs/verify/V15.json", path: "answer.todayWindow.runs", op: ">=", value: 10 },
+      { id: "G-K0.39", how: "json", desc: "V15 하루 한 번 대조(지난 29일) p95 ≤ 55,000ms (1분 작업 임대)", file: "docs/verify/V15.json", path: "answer.reconcile.p95Ms", op: "<=", value: 55000 },
       { id: "G-K0.24", how: "test", requires: ["local-services"], desc: "TC-K0.T8.a V18 삭제한 키 기록이 분석에 남음", cmd: 'pnpm test:contract -t "TC-K0.T8.a"', expectPassed: 1 },
       { id: "G-K0.25", how: "test", requires: ["local-services"], desc: "TC-K0.T9.a V19 regenerate 의 id·누적 지출·예산", cmd: 'pnpm test:contract -t "TC-K0.T9.a"', expectPassed: 1 },
       { id: "G-K0.26", how: "test", requires: ["local-services"], desc: "TC-K0.T10.a·b·c V20 월 예산 시간대·달 중간 변경·경계값", cmd: 'pnpm test:contract -t "TC-K0.T10"', expectPassed: 3 },
@@ -316,6 +318,7 @@ export const GATES = {
       { id: "G-K0.34", how: "test", desc: "TC-K0.T14.a·b·c 재현 빨강 확인기 음성 대조", cmd: "node --test --test-reporter=tap test/check-red.test.mjs", expectPassed: 3 },
       { id: "G-K0.35", how: "cmd", desc: "재현 빨강: TC-K0.T1.a 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K0.6 --since seal:S7" },
       { id: "G-K0.36", how: "cmd", desc: "재현 빨강: TC-K0.T3.a 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K0.11 --since seal:S7" },
+      { id: "G-K0.38", how: "cmd", desc: "재현 빨강: TC-K0.T1.e 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K0.37 --since seal:S7" },
       // 이 단계의 CI 잡과 스크립트 테스트 전부
       { id: "G-K0.32", how: "grep", desc: "TC-K0.T15.a CI 단계 잡 (K0)", pattern: "^\\s+run: node scripts/gate\\.mjs K0\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
       { id: "G-K0.33", how: "cmd", desc: "스크립트 테스트 전부", cmd: 'node --test --test-reporter=tap "scripts/*.test.mjs"' },

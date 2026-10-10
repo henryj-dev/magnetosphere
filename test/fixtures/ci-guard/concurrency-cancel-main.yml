@@ -1,0 +1,18 @@
+# TC-K0.T3.a 음성 대조: main 에서도 앞 실행을 취소하는 concurrency (S7 리뷰 L5)
+# expect: concurrency
+name: ci
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: S2 게이트
+        run: node scripts/gate.mjs S2

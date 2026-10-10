@@ -1,14 +1,20 @@
-// S1 확인 결과 파일(docs/verify/V*.json) 검사. 실행판 0절 「확인 결과 파일」, GATE S1 의 G-S1.14 ~ G-S1.16.
+// 확인 결과 파일(docs/verify/V*.json) 검사. 실행판 0절 「확인 결과 파일」.
+// 1단계 GATE S1 의 G-S1.14 ~ G-S1.16, 2단계 GATE K0 의 G-K0.13 ~ G-K0.15.
 //
-//   node scripts/check-verify.mjs present  [--dir <dir>]   필요한 항목 파일이 모두 있고 모양이 맞다
-//   node scripts/check-verify.mjs unblocked [--dir <dir>]  blocking 이 모두 false
-//   node scripts/check-verify.mjs resolved  [--dir <dir>] [--plan <file>]
+//   node scripts/check-verify.mjs present  [--set <묶음>] [--dir <dir>]   필요한 항목 파일이 모두 있고 모양이 맞다
+//   node scripts/check-verify.mjs unblocked [--set <묶음>] [--dir <dir>]  blocking 이 모두 false
+//   node scripts/check-verify.mjs resolved  [--set <묶음>] [--dir <dir>] [--plan <file>]
 //                                            was_blocking 이 true 인 항목은 resolved_in 이 계획서 현재 버전과 같다
+//
+// --set 은 항목 묶음이다. phase1(기본값, S1 봉인 커밋 재검이 인자 없이 부른다) · phase2(K0).
 
 import fs from "node:fs";
 import path from "node:path";
 
-const ITEMS = ["V10", "V11", "V16", "V17", "V21", "V26", "V27"];
+const SETS = {
+  phase1: ["V10", "V11", "V16", "V17", "V21", "V26", "V27"],
+  phase2: ["V12", "V13", "V15", "V18", "V19", "V20"],
+};
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -16,6 +22,12 @@ function arg(name, fallback) {
 }
 
 const mode = process.argv[2];
+const setName = arg("set", "phase1");
+const ITEMS = SETS[setName];
+if (!ITEMS) {
+  console.error(`알 수 없는 묶음: ${setName} (${Object.keys(SETS).join(" | ")})`);
+  process.exit(2);
+}
 const dir = arg("dir", "docs/verify");
 const plan = arg("plan", "docs/design/omniroute-member-layer.md");
 
@@ -71,7 +83,7 @@ if (mode === "present") {
     }
   }
 } else {
-  console.error("사용법: check-verify.mjs present|unblocked|resolved [--dir <dir>] [--plan <file>]");
+  console.error("사용법: check-verify.mjs present|unblocked|resolved [--set phase1|phase2] [--dir <dir>] [--plan <file>]");
   process.exit(2);
 }
 
@@ -79,4 +91,4 @@ if (problems.length) {
   for (const p of problems) console.error(p);
   process.exit(1);
 }
-console.log(`${mode}: ${ITEMS.length}개 항목 통과`);
+console.log(`${mode} (${setName}): ${ITEMS.length}개 항목 통과`);

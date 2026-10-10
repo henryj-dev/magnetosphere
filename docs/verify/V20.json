@@ -1,0 +1,26 @@
+{
+  "item": "V20",
+  "question": "월 예산의 기준 시간대와 초기화 시점, 달 중간에 예산 값을 바꿀 때 동작, 예산 == 사용액일 때 막히는가",
+  "answer": {
+    "timezone": "UTC",
+    "resetAt": "매달 1일 00:00 UTC (resetTime 기본 \"00:00\", HH:MM 으로 바꿀 수 있음)",
+    "resetTime": "00:00",
+    "raiseUnblocks": true,
+    "lowerBlocks": true,
+    "equalBlocks": false,
+    "zeroIsUnlimited": true,
+    "comparison": "사용액 > 예산일 때만 막는다 (요청 전 검사). 사용액 == 예산이면 요청 하나가 더 통과하고 그 뒤부터 막힌다",
+    "designImpact": "5.3 식으로 남은 한도 0 인 회원의 키 예산 = 그 키 사용액이 되면 요청 하나가 더 통과하고, 사용액 0 인 키는 예산 0(무제한)이 된다. 계획서 v5.6 Q1: 남은 한도 0 이면 키를 disabled_reason limit 으로 끈다"
+  },
+  "evidence": [
+    "소스(chunks/89179.js getBudgetWindow): monthly 는 Date.UTC(y, m, 1, resetTime) 부터 — UTC 고정, TZ 환경 변수와 무관",
+    "소스(chunks/89179.js checkBudget): limit > 0 && spent > limit 이면 차단. limit 0 은 무제한. 지출은 요청마다 domain_cost_history 합 + 기록 대기 버퍼",
+    "계약 환경 실측 (2026-10-10): 0.01 · 요청 3건 → 429 → 1.0 → 다음 요청 200 → 0.01 → 다음 요청 429 BUDGET_EXCEEDED",
+    "실측: 요청 1건(0.00221) 뒤 예산 0.00221 → 다음 요청 200, 그다음 429. (요청 3건 합은 부동소수 0.014633000000000004 라 분석 비용 0.014633 을 걸면 바로 막힌다)",
+    "실측: GET /api/usage/budget periodStartAt 1790812800000 (2026-10-01T00:00Z), nextResetAt 1793491200000 (2026-11-01T00:00Z)",
+    "packages/omniroute/test/contract/verify/v20.contract.ts (TC-K0.T10.a·b·c)"
+  ],
+  "blocking": false,
+  "was_blocking": true,
+  "resolved_in": "v5.7"
+}

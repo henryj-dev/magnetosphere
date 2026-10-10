@@ -1,4 +1,4 @@
-# CI 매트릭스 (실행판 S7.T1). 단계마다 그 단계의 게이트를 서비스를 띄운 잡에서 그대로 돈다 (node scripts/gate.mjs S<n>).
+# CI 매트릭스 (실행판 S7.T1, 2단계 실행판 0절 「CI 단계 잡 규칙」). 단계마다 그 단계의 게이트를 서비스를 띄운 잡에서 그대로 돈다 (node scripts/gate.mjs S<n>).
 # 검사 정의는 gates/gates.config.mjs 하나뿐이라 CI 와 로컬 게이트가 어긋나지 않는다.
 # - 테스트 DB·mailpit·계약 환경 OmniRoute·배포 묶음은 각 검사의 실행기가 docker compose 로 직접 띄운다 (잡에는 docker 만 있으면 된다).
 # - 잡마다 러너가 따로라 포트가 겹치지 않는다. 무거운 묶음(배포·E2E)은 잡을 나눠 동시에 돈다.
@@ -17,7 +17,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # main 에서는 앞 실행을 취소하지 않는다. 봉인 커밋의 단계 게이트 결과가 남아야 한다 (K0.T3, check-ci-matrix [concurrency])
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   FORCE_COLOR: "0"
@@ -186,6 +187,30 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: S7 게이트
         run: node scripts/gate.mjs S7 --explain
+
+  p2-k0:
+    name: 장치·확인 (K0 게이트, OmniRoute 3.8.51)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # 계약 환경 OmniRoute(20170)는 pnpm test:contract 가, 측정용 OmniRoute(20171)는 tests/bench/analytics.mjs 가 띄운다.
+    # G-K0.31 은 gh api 로 main 규칙을 읽는다 (공개 저장소라 읽기 권한 토큰으로 읽힌다. 못 읽으면 검사가 실패한다).
+    # G-K0.35·36 은 Red 커밋을 봉인 S7 뒤 이력에서 찾으므로 이력 전체가 필요하다.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: K0 게이트
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/gate.mjs K0 --explain
+      - name: 분석 API 측정값 (확인 15번, G-K0.18 이 남긴 파일)
+        run: cat "$RUNNER_TEMP/bench-analytics.json"
 
   s1-seal:
     name: 확인 항목 (S1 게이트, 봉인 커밋에서)

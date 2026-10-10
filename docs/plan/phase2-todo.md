@@ -1,6 +1,6 @@
 # Magnetosphere 2단계 "키·한도" — 실행 목록
 
-계획은 [`../design/omniroute-member-layer.md`](../design/omniroute-member-layer.md) (v5.5) 다. 이 문서는 그 9장 2단계의 순서 · 통과 조건 · 잠금만 적는다. 논거는 계획서 절 번호로 가리킨다.
+계획은 [`../design/omniroute-member-layer.md`](../design/omniroute-member-layer.md) (v5.7) 다. 이 문서는 그 9장 2단계의 순서 · 통과 조건 · 잠금만 적는다. 논거는 계획서 절 번호로 가리킨다.
 
 ## 0. 체계
 
@@ -120,10 +120,10 @@ S7 ─▶ K0 ─▶ K1 ─▶ K2 ─▶ K3 ─▶ K4 ─▶ K5 ─▶ K6
 
 # K0 — 장치 확장과 확인 항목 6개 🔓 (S7 필요)
 
-**브랜치** `p2/k0`. 이 문서를 넣은 `p2/plan` 이 K0.T2 를 먼저 했다 (CI 를 초록으로 두려면 필요했다).
+**브랜치** `k0/verify` (실행판을 쓸 때 정한 이름은 `p2/k0`). 이 문서를 넣은 `p2/plan` 이 K0.T2 를 먼저 했다 (CI 를 초록으로 두려면 필요했다).
 **outputs** 장치 스크립트·음성 대조, `docs/verify/V12·13·15·18·19·20.json`, `packages/omniroute/test/contract/verify/**`, `tests/bench/**`, 예산 차단 도우미. 확인 결과가 어떻든 이 경로 밖으로 나가지 않는다.
 
-### ☐ K0.T1 — gate `test` 판정에 `expectPassed`
+### ☑ K0.T1 — gate `test` 판정에 `expectPassed`
 선행 없음 · 산출 `scripts/gate.mjs`, `scripts/gate.test.mjs` · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-K0.T1.a`
 
 【작업】
@@ -144,11 +144,14 @@ TC-K0.T1.c  strictTests 단계의 expectPassed 없는 test 검사는 실패한�
 TC-K0.T1.d  expectPassed 없는 1단계 검사는 통과 ≥ 1 그대로다
   단언:  strictTests 없는 단계, expectPassed 없는 test 검사(통과 3) → PASS
   검출:  판정을 바꾸며 1단계 검사 정의가 모두 실패로 바뀌어 S0~S7 봉인 재검(gate --verify-seals --rerun, gate.yml)이 깨지는 것
+TC-K0.T1.e  grep 검사의 ^·$ 는 줄의 시작·끝이다 (작업 중 추가)
+  단언:  둘째 줄 이후에 "        run: node scripts/gate.mjs K0 --explain" 이 있는 파일, 패턴 ^\s+run: node scripts/gate\.mjs K0\b · K0 --explain$ → 각각 1, PASS
+  검출:  gate grep 이 new RegExp(pattern, "g") 라 ^ 가 파일 시작에만 걸려 G-K0.28·29·32 와 K1~K6 의 "CI 단계 잡" grep 이 늘 0 인 것 (이 브랜치 첫 CI 에서 G-K0.32 가 잡이 있는데도 0 으로 실패)
 ```
 
 【통과】
-- [ ] G-K0.6 ~ G-K0.9 통과
-- [ ] G-K0.35 통과 (Red 커밋에서 TC-K0.T1.a 실패)
+- [x] G-K0.6 ~ G-K0.9 · G-K0.37 통과
+- [x] G-K0.35 통과 (Red 커밋에서 TC-K0.T1.a 실패), G-K0.38 통과 (Red 커밋에서 TC-K0.T1.e 실패)
 
 ### ☑ K0.T2 — CI 는 봉인된 단계만 단계 잡을 요구한다
 선행 없음 · 산출 `scripts/check-ci-matrix.mjs`(`--seal-dir`), `test/check-ci-matrix.test.mjs` · 되돌리기 커밋 1개 (`p2/plan`)
@@ -171,7 +174,7 @@ TC-K0.T2.b  봉인 파일이 생긴 단계의 잡이 없으면 실패한다
 - [x] G-K0.10 통과
 - [x] G-S7.1 통과 (2단계 단계를 넣은 설정으로)
 
-### ☐ K0.T3 — main 에서 앞 CI 실행을 취소하지 않는다 (S7 리뷰 L5)
+### ☑ K0.T3 — main 에서 앞 CI 실행을 취소하지 않는다 (S7 리뷰 L5)
 선행 K0.T2 · 산출 `.github/workflows/ci.yml`, `scripts/check-ci-matrix.mjs`, `test/fixtures/ci-guard/concurrency-cancel-main.yml` · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-K0.T3.a`
 
 【작업】
@@ -189,10 +192,10 @@ TC-K0.T3.b  실제 ci.yml 은 main 에서 취소하지 않는다
 ```
 
 【통과】
-- [ ] G-K0.11 통과
-- [ ] G-K0.36 통과 (Red 커밋에서 G-K0.11 실패)
+- [x] G-K0.11 통과
+- [x] G-K0.36 통과 (Red 커밋에서 G-K0.11 실패)
 
-### ☐ K0.T4 — 확인 결과 검사기에 2단계 항목 묶음
+### ☑ K0.T4 — 확인 결과 검사기에 2단계 항목 묶음
 선행 없음 · 산출 `scripts/check-verify.mjs`, `scripts/check-verify.test.mjs` · 되돌리기 커밋 1개
 
 【작업】
@@ -218,15 +221,16 @@ TC-K0.T4.e  --set 없이 부르면 1단계 일곱 항목을 본다
 ```
 
 【통과】
-- [ ] G-K0.12 통과
-- [ ] `node --test --test-reporter=tap scripts/check-verify.test.mjs` 종료코드 0 (TC-S1.G.a~d 포함, G-K0.33)
+- [x] G-K0.12 통과
+- [x] `node --test --test-reporter=tap scripts/check-verify.test.mjs` 종료코드 0 (TC-S1.G.a~d 포함, G-K0.33)
 
-### ☐ K0.T5 — V12 키 그룹·쿼터 풀 공동 예산
+### ☑ K0.T5 — V12 키 그룹·쿼터 풀 공동 예산
 선행 K0.T4 · 산출 `docs/verify/V12.json`, `packages/omniroute/test/contract/verify/v12.contract.ts` · 되돌리기 커밋 1개
 
 【작업】
 1. OmniRoute 3.8.51 이미지 안의 OpenAPI 와 소스에서 키 묶음(그룹·풀·combo 예산 등) 경로를 찾는다. 있으면 계약 환경에서 키 둘을 한 묶음에 넣고 공동 예산을 걸어 본다. `V12.json`: `answer = { exists: bool, mechanism, api, sharedBlocking: bool|null }`. 커밋.
 2. 결과가 `exists: true` 이고 둘 이상의 키 지출을 합쳐 막으면 `blocking: true`. 계획서 5.3 을 공동 예산 방식으로 개정(K0.T12 의 같은 개정 버전)하고, 이 문서의 K2 작업을 `(폐기)` + 새 번호로 개정한다. K2 `outputs`(`apps/server/src/limits/**` 등 새 경로)는 두 방식 모두를 덮는다. 결과가 `false`면 5.3 그대로 간다. 두 갈래를 미리 적지 않는다.
+   (실제: `exists: true`·`sharedBlocking: true` — 쿼터 풀 일정 예산. 하지만 풀은 제공자 연결 하나에 묶이고 창이 슬라이딩이며 3.8.51 arm64 는 차단을 본문 없는 500 으로 내 회원 한도로 쓸 수 없다. 계획서 v5.6 5.3 은 "분배 유지"로 개정했고 K2 작업은 바꾸지 않았다.)
 
 【테스트】
 ```
@@ -236,10 +240,10 @@ TC-K0.T5.a  V12 관찰이 V12.json answer 와 같다 (V12 의존)
 ```
 
 【통과】
-- [ ] G-K0.16 통과
-- [ ] G-K0.13 · G-K0.14 · G-K0.15 통과 (V12 포함)
+- [x] G-K0.16 통과
+- [x] G-K0.13 · G-K0.14 · G-K0.15 통과 (V12 포함)
 
-### ☐ K0.T6 — V13 call-logs 를 키로 거르는 쿼리
+### ☑ K0.T6 — V13 call-logs 를 키로 거르는 쿼리
 선행 K0.T4 · 산출 `docs/verify/V13.json`, `packages/omniroute/test/contract/verify/v13.contract.ts` · 되돌리기 커밋 1개
 
 【작업】
@@ -253,27 +257,28 @@ TC-K0.T6.a  V13 관찰이 V13.json answer 와 같다 (V13 의존)
 ```
 
 【통과】
-- [ ] G-K0.17 통과
+- [x] G-K0.17 통과
 
-### ☐ K0.T7 — V15 분석 API 성능 (5.3 이 1분마다 부른다)
+### ☑ K0.T7 — V15 분석 API 성능 (5.3 이 1분마다 부른다)
 선행 K0.T4 · 산출 `docs/verify/V15.json`, `tests/bench/analytics.mjs`, `tests/bench/docker-compose.yml` · 되돌리기 커밋 1개
 
 【작업】
 1. 측정용 OmniRoute 를 계약 환경과 따로 띄운다 (`127.0.0.1:20171`, 같은 digest, 데이터 볼륨 없음. 계약 환경의 분석 합계를 오염시키지 않으려고). 키 300개, 완료 기록 300,000건(계획서 "수십만 건, 키 수백 개"의 아래 끝을 고정값으로)을 넣는다. 넣는 방법(요청 / OmniRoute DB 직접 삽입)은 작업에서 정하고 `evidence`에 적되, 넣은 뒤 `analytics` 전체 `totalRequests == 300000`으로 확인한다. 측정 뒤 내린다 (Docker 메모리 4GB).
 2. 두 호출을 각각 10번 잰다: 전체 키 한 달(필터 없음, `byApiKey`로 회원 묶음) · 회원 하나(키 2개, 그중 삭제 1개). `answer = { dataset: { records, keys }, fullMonth: { p95Ms, runs }, member: { p95Ms, runs }, arch, decision }`. `decision`은 분배가 쓸 호출 방식(전체 한 번 / 회원마다)이다. 기준을 넘으면 `blocking: true` 로 두고 계획서 5.3 실행 시점을 개정한다. 커밋.
    기준의 근거: 1분 작업의 임대는 55초(`period − 5_000`)이고 지출 기록이 60초 주기다. 전체 호출 p95 5,000ms 는 주기의 1/12 로, 분배 한 번이 예산 쓰기 300번을 더해도 임대 안에 끝난다.
+   (실제: 필터 없는 전체 한 달 호출은 CI x64 세 번 p95 6,396ms·통과·6,104ms 로 기준 언저리·위였다. 사용자가 선택지 B 를 골랐다 (계획서 v5.7): 1분 분배는 오늘 창만 부르고 지난 날은 `usage_daily`에 저장, 하루 한 번 대조. 측정을 그 호출로 바꿨다 — 300,000건을 최근 30일에 하루 10,000건씩 넣고 오늘 창 p95 ≤ 2,000ms, 회원 하나 ≤ 1,000ms, 대조(지난 29일) ≤ 55,000ms. G-K0.21·23 은 `answer.todayWindow`, G-K0.39 는 `answer.reconcile`을 본다.)
 
 【테스트】
 ```
 TC-K0.T7.a  측정이 재현된다 (V15 의존)
-  단언:  node tests/bench/analytics.mjs --assert → 넣은 기록 300,000·키 300 확인, 전체 p95 ≤ 5,000ms, 회원 p95 ≤ 1,000ms, 10회씩. 종료코드 0
+  단언:  node tests/bench/analytics.mjs --assert → 넣은 기록 300,000(30일)·키 300·오늘 10,000 확인, 오늘 창 p95 ≤ 2,000ms, 회원 p95 ≤ 1,000ms, 대조(지난 29일) p95 ≤ 55,000ms, 10회씩. 종료코드 0 (v5.7, 처음 기준은 전체 한 달 p95 ≤ 5,000ms)
   검출:  분석 API 가 기록 수에 비례해 느려져 1분 분배가 다음 경계까지 안 끝나고, 두 인스턴스가 같은 회원 예산을 엇갈려 쓰는 것
 ```
 
 【통과】
-- [ ] G-K0.18 ~ G-K0.23 통과
+- [x] G-K0.18 ~ G-K0.23 · G-K0.39 통과
 
-### ☐ K0.T8 — V18 삭제한 키의 기록이 분석에 남는가
+### ☑ K0.T8 — V18 삭제한 키의 기록이 분석에 남는가
 선행 K0.T4 · 산출 `docs/verify/V18.json`, `packages/omniroute/test/contract/verify/v18.contract.ts` · 되돌리기 커밋 1개
 
 【작업】
@@ -287,9 +292,9 @@ TC-K0.T8.a  삭제한 키의 비용이 그 키 id 분석에 그대로 잡힌다 
 ```
 
 【통과】
-- [ ] G-K0.24 통과
+- [x] G-K0.24 통과
 
-### ☐ K0.T9 — V19 `regenerate`의 id·누적 지출·예산
+### ☑ K0.T9 — V19 `regenerate`의 id·누적 지출·예산
 선행 K0.T4 · 산출 `docs/verify/V19.json`, `packages/omniroute/test/contract/verify/v19.contract.ts` · 되돌리기 커밋 1개
 
 【작업】
@@ -303,9 +308,9 @@ TC-K0.T9.a  regenerate 뒤 관찰이 V19.json answer 와 같다 (V19 의존)
 ```
 
 【통과】
-- [ ] G-K0.25 통과
+- [x] G-K0.25 통과
 
-### ☐ K0.T10 — V20 월 예산 시간대·초기화·달 중간 변경
+### ☑ K0.T10 — V20 월 예산 시간대·초기화·달 중간 변경
 선행 K0.T4 · 산출 `docs/verify/V20.json`, `packages/omniroute/test/contract/verify/v20.contract.ts` · 되돌리기 커밋 1개
 
 【작업】
@@ -318,7 +323,8 @@ TC-K0.T10.a  달 중간에 예산을 올리고 내리면 다음 요청부터 바
   단언:  월 예산 0.01·요청 3건(0.014633) 뒤 429 → 예산 1.0 → 다음 요청 == answer.raiseUnblocks ? 200 : 429. 다시 0.01 → == answer.lowerBlocks ? 429 : 200
   검출:  분배가 1분마다 예산을 올려도 OmniRoute 가 이번 달 차단을 풀지 않아, 한도를 올려 준 회원이 다음 달까지 막히는 것
 TC-K0.T10.b  예산 == 사용액이면 막히는가 (V20 의존)
-  단언:  요청 3건 뒤 그 키 분석 비용 c 를 예산으로 → 다음 요청이 예산 차단인지 == answer.equalBlocks
+  단언:  요청 1건(0.00221) 뒤 그 키 분석 비용 c 를 예산으로 → 다음 요청이 예산 차단인지 == answer.equalBlocks, 그다음 요청은 차단
+         (처음엔 요청 3건이었다. OmniRoute 는 요청마다 더한 부동소수 합 0.014633000000000004 로 비교해 분석 비용 0.014633 을 걸면 '같음'이 아니라 '넘음'이 된다)
   검출:  남은 한도 0 인 회원의 키 예산을 "그 키 사용액"으로 걸었는데 OmniRoute 가 '>' 로 비교해 계속 통과시키는 것
 TC-K0.T10.c  기간 시작 시각이 answer.timezone 기준이다 (V20 의존, 코드 미확인)
   단언:  OmniRoute 예산 조회 응답(또는 소스에서 찾은 계산 함수를 이미지 안 node 로 부른 값)의 기간 시작 == answer.timezone 의 이번 달 1일 00:00
@@ -326,9 +332,9 @@ TC-K0.T10.c  기간 시작 시각이 answer.timezone 기준이다 (V20 의존, �
 ```
 
 【통과】
-- [ ] G-K0.26 통과
+- [x] G-K0.26 통과
 
-### ☐ K0.T11 — 예산 차단 판정 도우미 (amd64·arm64)
+### ☑ K0.T11 — 예산 차단 판정 도우미 (amd64·arm64)
 선행 없음 · 산출 `tests/contract/budget-block.mjs`, `tests/contract/budget-block.test.mjs` · 되돌리기 커밋 1개
 
 【작업】
@@ -343,9 +349,9 @@ TC-K0.T11.a  두 빌드의 예산 차단은 참, 일반 요청 수 제한은 거
 ```
 
 【통과】
-- [ ] G-K0.27 통과
+- [x] G-K0.27 통과
 
-### ☐ K0.T12 — 계획서 개정 v5.6 (설계 공백 Q1~Q6 과 확인 결과)
+### ☑ K0.T12 — 계획서 개정 v5.6 (설계 공백 Q1~Q6 과 확인 결과)
 선행 K0.T5 ~ K0.T10 · 산출 `docs/design/omniroute-member-layer.md`, 이 문서 · 되돌리기 커밋 1개
 
 설계 공백 (코드를 열어 찾은 것. 계획서가 정하지 않으면 K1~K4 의 TC 단언을 쓸 수 없다)
@@ -362,6 +368,7 @@ TC-K0.T11.a  두 빌드의 예산 차단은 참, 일반 요청 수 제한은 거
 【작업】
 1. V12·V13·V15·V18·V19·V20 결과와 Q1~Q6 의 결정을 계획서에 반영한다. 상태 줄을 `v5.6`으로, 변경 이력 맨 위에 `- v5.6: …` 한 줄(Q1~Q6 을 모두 언급). `was_blocking`인 V 파일은 `resolved_in: "v5.6"`. 이 문서의 영향받는 TC 단언(`(V<n> 의존)`, Q1~Q6 을 쓰는 K1~K4 TC)을 결정에 맞춰 고치고 문서 머리의 계획서 버전을 v5.6 으로 바꾼다. 커밋.
    (Q1~Q6 은 사람이 고른다. 이 문서는 결정의 내용을 정하지 않는다. 고른 결과는 아래 TC 와 K1~K4 TC 단언으로만 기계에 닿는다.)
+   (실제: v5.6 에 Q1~Q6·V12·V13·V18·V19·V20 을, V15 결정(선택지 B)을 v5.7 에 넣었다. `was_blocking` 파일의 `resolved_in`은 현재 버전 v5.7 이다 — G-K0.15 가 현재 버전과 같기를 요구한다.)
 
 【테스트】
 ```
@@ -371,14 +378,15 @@ TC-K0.T12.a  계획서 개정이 공백 여섯을 모두 닫는다
 ```
 
 【통과】
-- [ ] G-K0.28 · G-K0.29 · G-K0.15 통과
+- [x] G-K0.28 · G-K0.29 · G-K0.15 통과
 
-### ☐ K0.T13 — 필수 검사·병합 방식 대조
+### ☑ K0.T13 — 필수 검사·병합 방식 대조
 선행 K0.T2 · 산출 `scripts/check-required-checks.mjs`, `test/check-required-checks.test.mjs`, `test/fixtures/required-checks/**` · 되돌리기 커밋 1개
 
 【작업】
 1. `check-required-checks.mjs --repo <owner/name> [--rules <json 파일>]`: `gh api repos/<repo>/rules/branches/main`의 `required_status_checks` 문맥 ⊇ `.github/workflows/*.yml`의 잡 표시 이름(`name`, 매트릭스 `${{ matrix.combo }}`는 펼침) 이고, `pull_request.allowed_merge_methods == ["merge"]`인지 본다. `--rules`는 음성 대조용 파일 입력. CI 단계 잡에는 `GH_TOKEN: ${{ github.token }}`을 준다. 커밋.
 2. `(사용자/메인 세션)` main ruleset 의 `allowed_merge_methods`를 `merge` 하나로 줄인다 (지금 `merge`·`squash`·`rebase` 셋 다 허용 — 2026-10-10 `gh api` 로 확인). K0 잡 이름을 필수 검사에 넣는다. 이후 단계마다 같은 일을 한다.
+   (실제: `allowed_merge_methods`는 K0 작업 전에 `["merge"]`로 줄었다. K0 잡 이름은 PR 병합 전에 메인 세션이 넣는다.)
 
 【테스트】
 ```
@@ -394,9 +402,9 @@ TC-K0.T13.c  실제 ruleset 이 맞다
 ```
 
 【통과】
-- [ ] G-K0.30 · G-K0.31 통과
+- [x] G-K0.30 · G-K0.31 통과
 
-### ☐ K0.T14 — 재현 빨강 확인 장치
+### ☑ K0.T14 — 재현 빨강 확인 장치
 선행 K0.T1 · 산출 `scripts/check-red.mjs`, `test/check-red.test.mjs` · 되돌리기 커밋 1개
 
 【작업】
@@ -416,9 +424,9 @@ TC-K0.T14.c  Red 커밋에서 빨강이면 통과한다
 ```
 
 【통과】
-- [ ] G-K0.34 통과
+- [x] G-K0.34 통과
 
-### ☐ K0.T15 — K0 CI 잡과 봉인
+### ◐ K0.T15 — K0 CI 잡과 봉인
 선행 K0.T1 ~ K0.T14 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
 
 【작업】
@@ -449,6 +457,7 @@ TC-K0.T15.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-K0.4 | TC-S0.T2.d 검사 종류마다 이빨 | 같은 파일, `TC-S0.T2.d` | 통과 = 13 (하위 테스트 포함) |
 | G-K0.5 | TC-S0.T3 pre-push 훅 거부 | `… --test-name-pattern="TC-S0.T3" scripts/hook.test.mjs` | 통과 = 2 |
 | G-K0.6 ~ 9 | TC-K0.T1.a ~ d | `… --test-name-pattern="TC-K0.T1.<x>" scripts/gate.test.mjs` | 각 통과 = 1 |
+| G-K0.37 | TC-K0.T1.e grep 줄 단위 | `… --test-name-pattern="TC-K0.T1.e" scripts/gate.test.mjs` | 통과 = 1 |
 | G-K0.10 | TC-K0.T2.a·b | `node --test --test-reporter=tap test/check-ci-matrix.test.mjs` | 통과 = 2 |
 | G-K0.11 | TC-K0.T3.a·b | `node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-guard/concurrency-cancel-main.yml --expect 6 --expect-fail` | 종료코드 0 |
 | G-K0.12 | TC-K0.T4.a ~ e | `… --test-name-pattern="TC-K0.T4" scripts/check-verify.test.mjs` | 통과 = 5 |
@@ -460,9 +469,10 @@ TC-K0.T15.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-K0.18 | TC-K0.T7.a V15 측정 재현 | [L] `node tests/bench/analytics.mjs --assert` | 종료코드 0 |
 | G-K0.19 | V15 기록 수 | json `docs/verify/V15.json` `answer.dataset.records` | ≥ 300,000 |
 | G-K0.20 | V15 키 수 | json `answer.dataset.keys` | ≥ 300 |
-| G-K0.21 | V15 전체 키 한 달 분석 | json `answer.fullMonth.p95Ms` | ≤ 5,000 |
+| G-K0.21 | V15 오늘 창 분석 (v5.7) | json `answer.todayWindow.p95Ms` | ≤ 2,000 |
 | G-K0.22 | V15 회원 하나 분석 | json `answer.member.p95Ms` | ≤ 1,000 |
-| G-K0.23 | V15 측정 횟수 | json `answer.fullMonth.runs` | ≥ 10 |
+| G-K0.23 | V15 측정 횟수 | json `answer.todayWindow.runs` | ≥ 10 |
+| G-K0.39 | V15 하루 한 번 대조 (지난 29일) | json `answer.reconcile.p95Ms` | ≤ 55,000 (1분 작업 임대) |
 | G-K0.24 | TC-K0.T8.a V18 | [L] `pnpm test:contract -t "TC-K0.T8.a"` | 통과 = 1 |
 | G-K0.25 | TC-K0.T9.a V19 | [L] `pnpm test:contract -t "TC-K0.T9.a"` | 통과 = 1 |
 | G-K0.26 | TC-K0.T10.a·b·c V20 | [L] `pnpm test:contract -t "TC-K0.T10"` | 통과 = 3 |
@@ -476,6 +486,7 @@ TC-K0.T15.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-K0.34 | TC-K0.T14.a·b·c | `node --test --test-reporter=tap test/check-red.test.mjs` | 통과 = 3 |
 | G-K0.35 | 재현 빨강 TC-K0.T1.a | `node scripts/check-red.mjs --check G-K0.6 --since seal:S7` | 종료코드 0 |
 | G-K0.36 | 재현 빨강 TC-K0.T3.a | `node scripts/check-red.mjs --check G-K0.11 --since seal:S7` | 종료코드 0 |
+| G-K0.38 | 재현 빨강 TC-K0.T1.e | `node scripts/check-red.mjs --check G-K0.37 --since seal:S7` | 종료코드 0 |
 
 `node scripts/gate.mjs K0 --seal`
 
@@ -492,12 +503,12 @@ TC-K0.T15.b  ruleset 필수 검사가 이 잡을 포함한다
 선행 없음 · 산출 `packages/db/src/schema/**`, `packages/db/migrations/{sqlite,mysql,pg}/0001_*` · 되돌리기 커밋 1개
 
 【작업】
-1. 공통 정의 `jobLeases`에 `fence`(정수, NOT NULL, 기본 0)를 더하고 세 벌 생성·마이그레이션을 만든다. V19 결과로 계획서가 `api_keys` 칼럼을 바꿨으면 같은 커밋에 넣는다. 커밋.
+1. 공통 정의 `jobLeases`에 `fence`(정수, NOT NULL, 기본 0)를 더하고 세 벌 생성·마이그레이션을 만든다. 같은 커밋에 계획서 v5.6 의 스키마 변경을 넣는다: `omniroute_jobs.failed_at`(시각, NULL 허용, Q3), `api_keys.disabled_reason` 설명에 `limit`(Q1, 칼럼 길이 16 그대로). V19 결과로 `api_keys` 칼럼 변경은 없다 (재발급이 새 키 발급 + 옛 키 삭제라 매핑을 바꾸지 않는다). 커밋.
 
 【테스트】
 ```
-TC-K1.T1.a  다섯 DB 빈 상태 → 최신 마이그레이션에 fence 칼럼이 있다
-  단언:  test:migrate --db sqlite,mysql,mariadb,pg,d1 → job_leases.fence 정수 NOT NULL 기본 0, 기존 행이 있는 DB 에 0001 적용 뒤 fence = 0
+TC-K1.T1.a  다섯 DB 빈 상태 → 최신 마이그레이션에 fence·failed_at 칼럼이 있다
+  단언:  test:migrate --db sqlite,mysql,mariadb,pg,d1 → job_leases.fence 정수 NOT NULL 기본 0, omniroute_jobs.failed_at 시각 NULL 허용, 기존 행이 있는 DB 에 0001 적용 뒤 fence = 0·failed_at NULL
   검출:  한 DB 의 마이그레이션만 빠져 그 DB 에서 acquireLease 가 "no such column fence" 로 주기 작업 전체가 멈추는 것
 TC-K1.T1.b  마이그레이션과 생성 스키마가 같다
   단언:  pnpm -C packages/db gen && git diff --exit-code packages/db/src/schema/ → 0, pnpm -C packages/db check:drift → 0
@@ -538,16 +549,16 @@ TC-K1.T2.d  fence 는 같은 이름에서 엄격히 증가한다
 선행 K1.T2 · 산출 `apps/server/src/queue/**`, `apps/server/test/queue/**` · 되돌리기 커밋 1개
 
 【작업】
-1. `enqueue(action, payload)` · `runDue(now)`(done_at NULL 이고 next_run_at ≤ now, 펜싱 아래 한 건씩 차지) · 핸들러 표(`key.apply_state`, `key.delete`, `budget.set`, `key.rollback`). 실패하면 `attempts + 1`, 다음 간격 `[10_000, 30_000, 120_000, 600_000]`ms. 4번째 재시도 뒤 동작과 실행기 주기는 계획서 v5.6 의 Q2·Q3 결정대로. `last_error`에는 OmniRoute 오류 코드·상태만 남기고 원문 키·토큰은 지운다. 커밋.
+1. `enqueue(action, payload, { runAt? })` · `runDue(now)`(done_at·failed_at NULL 이고 next_run_at ≤ now, 펜싱 아래 한 건씩 차지) · 핸들러 표(`key.apply_state`, `key.delete`, `budget.set`, `key.rollback`). 실패하면 `attempts + 1`, 다음 간격 `[60_000, 120_000, 600_000, 1_800_000]`ms (계획서 v5.6 Q2: 1분·2분·10분·30분, 실행기 최소 주기 1분). 4번째 재시도도 실패하면 `failed_at = now`, 대상 키 `sync_state = failed`, `audit_log` action `alert.job_failed` 1행 (Q3·Q6). `isLongFailed(job, now)` = failed_at 이 30분보다 오래됨 (Q3, 화면은 7단계). `key.delete` 는 `runAt` 으로 끈 시각 + 2분 뒤에 잡는다 (v5.6 5.2, V18). `last_error`에는 OmniRoute 오류 코드·상태만 남기고 원문 키·토큰은 지운다. 커밋.
 
 【테스트】
 ```
-TC-K1.T3.a  재시도 간격은 10초·30초·2분·10분이다
-  단언:  늘 실패하는 핸들러, 가짜 시계 → 실패 시각 대비 next_run_at 차이 == 10000, 30000, 120000, 600000 ms (그 뒤는 Q3 결정)
-  검출:  간격 표 순서·단위를 틀려(초를 ms 로) 10ms 마다 OmniRoute 를 두드리거나 첫 재시도가 10분 뒤로 밀리는 것
+TC-K1.T3.a  재시도 간격은 1분·2분·10분·30분이다 (Q2 의존)
+  단언:  늘 실패하는 핸들러, 가짜 시계 → 실패 시각 대비 next_run_at 차이 == 60000, 120000, 600000, 1800000 ms, 4번째 재시도 실패 뒤 next_run_at 변화 없음·failed_at 설정
+  검출:  간격 표 순서·단위를 틀려(초를 ms 로) 60ms 마다 OmniRoute 를 두드리거나 첫 재시도가 30분 뒤로 밀리는 것
 TC-K1.T3.b  재시도를 다 써도 실패하면 대상 키가 failed 로 드러난다 (Q3 의존)
-  단언:  4번째 재시도 실패 → 대상 api_keys.sync_state "failed", audit_log 에 action "alert.job_failed" 1행 (Q6 결정 형식)
-  검출:  실패 작업이 조용히 10분 간격으로 영원히 남아 정지가 반영 안 된 회원 키가 계속 켜져 있는데 아무도 모르는 것
+  단언:  4번째 재시도 실패 → 작업 failed_at 설정·runDue 대상에서 빠짐, 대상 api_keys.sync_state "failed", audit_log 에 action "alert.job_failed" 1행(target 작업 id), isLongFailed 는 failed_at + 30분 − 1ms 에 false · + 30분 + 1ms 에 true
+  검출:  실패 작업이 조용히 30분 간격으로 영원히 남아 정지가 반영 안 된 회원 키가 계속 켜져 있는데 아무도 모르는 것
 TC-K1.T3.c  두 실행기가 동시에 돌아도 작업마다 핸들러는 한 번이다
   단언:  작업 20개, 실행기 둘 동시 runDue → 작업마다 핸들러 호출 정확히 1 (sqlite·mysql·mariadb·pg)
   검출:  두 인스턴스가 같은 key.rollback 을 동시에 돌려 DELETE 를 두 번 보내고, 두 번째 404 를 실패로 세어 재시도가 쌓이는 것
@@ -566,12 +577,12 @@ TC-K1.T3.e  last_error 에 비밀 값이 없다
 선행 K1.T3 · 산출 `apps/server/src/jobs.ts`, `apps/server/wrangler.toml`, `packages/runtime/src/types.ts` · 되돌리기 커밋 1개
 
 【작업】
-1. `JOBS`에 `omniroute_jobs` 실행기(Q2 결정의 주기)를 등록한다. 분배(`budget_rebalance`, `* * * * *`)는 K2.T3, 정합성 점검(`reconcile`, `*/5 * * * *`)은 K3.T3 이 본문과 함께 등록한다 — 본문 없는 작업을 main 에 등록하지 않는다. `wrangler.toml [triggers] crons`를 `JOBS` cron 집합과 같게 두고, 이 같음을 TC-K1.T4.b 가 뒤 단계에서도 계속 본다. 커밋.
+1. `JOBS`에 `omniroute_jobs` 실행기(1분, `* * * * *`, 계획서 v5.6 Q2)를 등록한다. 분배(`budget_rebalance`, `* * * * *`)는 K2.T6, 정합성 점검(`reconcile`, `*/5 * * * *`)은 K3.T3 이 본문과 함께 등록한다 — 본문 없는 작업을 main 에 등록하지 않는다. `wrangler.toml [triggers] crons`를 `JOBS` cron 집합과 같게 두고, 이 같음을 TC-K1.T4.b 가 뒤 단계에서도 계속 본다. 커밋.
 
 【테스트】
 ```
-TC-K1.T4.a  작업 큐 실행기가 Q2 결정 주기로 등록된다 (Q2 의존)
-  단언:  JOBS 에 name "omniroute_jobs" 하나, 주기 == Q2 결정 (Node 는 그 주기 타이머, Workers 는 "* * * * *")
+TC-K1.T4.a  작업 큐 실행기가 1분 주기로 등록된다 (Q2 의존)
+  단언:  JOBS 에 name "omniroute_jobs" 하나, cron "* * * * *" (Node 는 1분 경계 타이머, Workers 는 "* * * * *" Cron)
   검출:  실행기를 등록하지 않아 반영 실패 작업이 큐에 쌓이기만 하고 재시도가 한 번도 돌지 않는 것
 TC-K1.T4.b  wrangler crons 집합이 JOBS cron 집합과 같다
   단언:  wrangler.toml 의 triggers.crons 집합 == JOBS cron 집합
@@ -618,7 +629,7 @@ TC-K1.T5.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-K1.4 | TC-K1.T2.b 펜싱 쓰기 | [L] 같은 실행기, `TC-K1.T2.b` | 통과 = 4 |
 | G-K1.5 | TC-K1.T2.c 신호 끊김 | `pnpm -C packages/runtime test -t "TC-K1.T2.c"` | 통과 = 1 |
 | G-K1.6 | TC-K1.T2.d fence 증가 | [L] `… test:db -t "TC-K1.T2.d" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
-| G-K1.7 | TC-K1.T3.a 재시도 간격 | `pnpm -C apps/server test -t "TC-K1.T3.a"` | 통과 = 1, 간격 10,000·30,000·120,000·600,000ms |
+| G-K1.7 | TC-K1.T3.a 재시도 간격 | `pnpm -C apps/server test -t "TC-K1.T3.a"` | 통과 = 1, 간격 60,000·120,000·600,000·1,800,000ms |
 | G-K1.8 | TC-K1.T3.b 재시도 소진 | `pnpm -C apps/server test -t "TC-K1.T3.b"` | 통과 = 1 |
 | G-K1.9 | TC-K1.T3.c 동시 실행기 | [L] `pnpm -C apps/server test:db -t "TC-K1.T3.c" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
 | G-K1.10 | TC-K1.T3.d 완료 기록 | `pnpm -C apps/server test -t "TC-K1.T3.d"` | 통과 = 1 |
@@ -628,7 +639,7 @@ TC-K1.T5.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-K1.14 | TC-K1.T4.c Workers 분기 | [L] `pnpm -C apps/server test:workers -t "TC-K1.T4.c"` | 통과 = 1 |
 | G-K1.15 | TC-K1.T4.d Node 경계마다 하나 | [L] `pnpm -C apps/server test:db -t "TC-K1.T4.d" --db mysql,pg` | 통과 = 2 |
 | G-K1.16 | 큐 실행기 등록 | grep `name: "omniroute_jobs"` in `apps/server/src/jobs.ts` | == 1 |
-| G-K1.17 | 재시도 간격 상수 | grep `\[10_000, 30_000, 120_000, 600_000\]` in `apps/server/src/queue` | == 1 |
+| G-K1.17 | 재시도 간격 상수 | grep `\[60_000, 120_000, 600_000, 1_800_000\]` in `apps/server/src/queue` | == 1 |
 | G-K1.18 | 재현 빨강 TC-K1.T2.a | `node scripts/check-red.mjs --check G-K1.3 --since seal:K0` | 종료코드 0 |
 | G-K1.19 | 타입 검사 | `pnpm -r typecheck` | 종료코드 0 |
 | G-K1.20 | TC-K1.T5.a CI 단계 잡 | grep `^\s+run: node scripts/gate\.mjs K1\b` in ci.yml | == 1 |
@@ -643,27 +654,27 @@ TC-K1.T5.b  ruleset 필수 검사가 이 잡을 포함한다
 # K2 — 회원 단위 한도 분배 🔒 (K1 필요)
 
 **브랜치** `p2/k2`.
-**outputs** `apps/server/src/limits/**`, `apps/server/test/limits/**`, `apps/server/test/contract/limits/**` (새 경로만). 어댑터(`packages/omniroute/src`)를 고쳐야 하면 고치되 `outputs`에는 넣지 않는다 (0절). V12 결과로 공동 예산 방식이 되어도 이 경로와 어댑터 안에서 끝난다.
+**outputs** `apps/server/src/limits/**`, `apps/server/test/limits/**`, `apps/server/test/contract/limits/**` (새 경로만). 어댑터(`packages/omniroute/src`)를 고쳐야 하면 고치되 `outputs`에는 넣지 않는다 (0절). V12 결과는 "분배 유지"다 (계획서 v5.6 5.3). V15 결정(v5.7)으로 이 단계가 새 테이블 `usage_daily`를 만든다: 스키마(`packages/db/src/schema/**`, 기존 파일)와 마이그레이션 `packages/db/migrations/*/0002_*`(새 경로)는 이 단계 `outputs` 글롭 밖이다. 잠긴 단계라 `outputs`를 넓힐 수 없으므로 `--assert-order`는 이 경로를 지키지 않고, 순서는 K1 봉인(R1)이 지킨다.
 
 ### ☐ K2.T1 — 남은 한도 계산 (순수 함수)
 선행 없음 · 산출 `apps/server/src/limits/compute.ts`, `apps/server/test/limits/**` · 되돌리기 커밋 1개
 
 【작업】
-1. `computeBudgets({ limitUsd, keys: [{ id, state, spentUsd }] })` → `{ memberSpent, remaining, budgets: Map<id, number> }`. 계획서 5.3 식: 회원 사용액 = 모든 키(삭제 포함) 사용액 합, 남은 한도 = max(한도 − 사용액, 0), 키 예산 = 그 키 사용액 + 남은 한도 (삭제 키는 예산 대상 아님). 한도 NULL 이면 예산 없음. 남은 한도 0 · 사용액 0 키는 v5.6 Q1 결정대로. 금액은 소수 6자리(`DECIMAL(12,6)`)로 반올림. 커밋.
+1. `computeBudgets({ limitUsd, keys: [{ id, state, spentUsd }] })` → `{ memberSpent, remaining, exhausted, budgets: Map<id, number> }`. 계획서 5.3 식: 회원 사용액 = 모든 키(삭제 포함) 사용액 합, 남은 한도 = max(한도 − 사용액, 0), 남은 한도 > 0 이면 키 예산 = 그 키 사용액 + 남은 한도 (삭제 키는 예산 대상 아님). 남은 한도 = 0 이면 `exhausted: true`, `budgets` 빈 Map — 키는 예산이 아니라 끄기로 막는다 (v5.6 Q1, `disabled_reason limit`). 한도 NULL 이면 예산 없음·`exhausted: false`. 금액은 소수 6자리(`DECIMAL(12,6)`)로 반올림. 커밋.
 
 【테스트】
 ```
 TC-K2.T1.a  계산식이 계획서 5.3 과 같다
   단언:  한도 5, 키 A(active) 3, 키 B(deleted) 1.5, 키 C(active) 0 → 사용액 4.5, 남은 0.5, A 3.5, C 0.5, B 예산 없음
   검출:  삭제 키를 사용액 합에서 빼 키를 지우면 한도가 늘어나는 것 (7장 회귀 시나리오 "키 삭제 후 재발급으로 한도 초기화")
-TC-K2.T1.b  한도를 넘긴 회원의 남은 한도는 0 이고 예산은 음수가 아니다
-  단언:  한도 5, 사용액 6(A 4, B 2) → 남은 0, A 예산 4, B 예산 2
-  검출:  max(…, 0) 을 빠뜨려 예산이 사용액보다 작아지고 setBudget 이 음수·0 으로 TypeError 를 던져 분배 전체가 멈추는 것
+TC-K2.T1.b  한도를 넘긴 회원의 남은 한도는 0 이고 예산 대신 끄기다 (Q1 의존)
+  단언:  한도 5, 사용액 6(A 4, B 2) → 남은 0, exhausted true, budgets 빈 Map
+  검출:  max(…, 0) 을 빠뜨려 예산이 사용액보다 작아지고 setBudget 이 음수·0 으로 TypeError 를 던져 분배 전체가 멈추거나, 사용액 그대로 예산을 걸어 OmniRoute 가 '>' 비교로 요청 하나를 더 통과시키는 것 (V20 equalBlocks false)
 TC-K2.T1.c  한도 NULL(무제한)이면 예산을 걸지 않는다
   단언:  limitUsd null → budgets 빈 Map
   검출:  NULL 을 0 으로 읽어 무제한 회원의 모든 키를 막는 것 (5.9 "NULL이면 무제한")
-TC-K2.T1.d  남은 한도 0 · 사용액 0 키는 Q1 결정대로 막힌다 (Q1 의존)
-  단언:  한도 1, A 사용액 1, C 사용액 0 → C 에 대한 결정 결과 (예산 0 이하 값을 setBudget 에 넘기는 경우 0건)
+TC-K2.T1.d  남은 한도 0 · 사용액 0 키는 예산이 아니라 끄기 대상이다 (Q1 의존)
+  단언:  한도 1, A 사용액 1, C 사용액 0 → remaining 0, exhausted true, budgets 에 C 없음 (0 이하 예산 0건)
   검출:  C 예산이 0 으로 계산돼 OmniRoute 에서 무제한이 되거나(어댑터를 우회한 경우), 어댑터 TypeError 로 분배가 멈추는 것
 TC-K2.T1.e  부동소수 오차로 남은 한도가 생기지 않는다
   단언:  한도 0.3, 키 사용액 0.1·0.2 → 남은 0 (6자리 반올림 뒤), 예산은 소수 6자리 이하
@@ -677,7 +688,7 @@ TC-K2.T1.e  부동소수 오차로 남은 한도가 생기지 않는다
 선행 K2.T1 · 산출 `apps/server/src/limits/month.ts` · 되돌리기 커밋 1개
 
 【작업】
-1. `monthWindow(now)` → `[이번 달 1일 00:00, now]`, 시간대는 V20 `answer.timezone`(계획서 v5.6). 1분 분배가 매번 이 창으로 분석을 부르므로 달이 바뀐 첫 실행이 새 달 기준 재계산이다 (Q5). 커밋.
+1. `monthWindow(now)` → `[이번 달 1일 00:00 UTC, now]` (V20 `answer.timezone` "UTC", 계획서 v5.6 5.3). `monthChanged(lastMonth, now)`: `app_settings.budget_rebalance_month`("YYYY-MM", UTC)와 지금 달이 다르면 참 (Q5). 1분 분배가 매번 이 창으로 분석을 부르고, 달이 바뀐 첫 실행이 새 달 기준 재계산(`limit` 으로 꺼진 키 다시 켜기 포함)을 한 뒤 `budget_rebalance_month`를 지금 달로 쓴다. 커밋.
 
 【테스트】
 ```
@@ -687,62 +698,103 @@ TC-K2.T2.a  달 경계 직전·직후의 창이 다르다 (V20 의존)
 TC-K2.T2.b  새 달 첫 실행은 지난달 사용액을 넣지 않는다
   단언:  가짜 분석(지난달 4.9, 이번 달 0), 한도 5, 새 달 00:00:30 실행 → 남은 5
   검출:  창 시작을 "지난 실행 시각"으로 잡는 식의 구현에서 달이 바뀌어도 한도가 풀리지 않는 것
+TC-K2.T2.c  달 바뀜은 저장한 마지막 실행 달로 판단한다 (Q5 의존)
+  단언:  budget_rebalance_month "2026-03", now 2026-04-01T00:00:30Z → monthChanged true, 실행 뒤 "2026-04" 저장. 같은 달 두 번째 실행 → false. 값 없음(첫 실행) → true
+  검출:  월간 cron 을 따로 두려다(cronIntervalMinutes("0 0 1 * *") 는 예외) 등록이 빠져 limit 으로 꺼진 키가 새 달에도 안 켜지는 것
 ```
 
 【통과】
-- [ ] G-K2.6 · G-K2.7 통과
+- [ ] G-K2.6 · G-K2.7 · G-K2.24 통과
 
-### ☐ K2.T3 — 1분 분배 작업
-선행 K2.T2 · 산출 `apps/server/src/limits/rebalance.ts`, `packages/omniroute/src/**`(V15 결정에 필요한 호출), `apps/server/test/contract/limits/**` · 되돌리기 커밋 1개
+### ☐ K2.T3 — 1분 분배 작업 (폐기)
+v5.7 에서 폐기 (V15). 매분 이번 달 전체를 분석으로 부르는 방식은 기록 300,000건에서 CI x64 p95 5.6~6.4초라 느리다. 오늘 창 + 지난 날 저장(K2.T7)으로 바꾼 K2.T6 이 대신한다. TC-K2.T3.a~j 는 TC-K2.T6.a~j 로 옮겼다 (GATE 행 번호는 그대로).
+
+### ☐ K2.T7 — 지난 날 저장 `usage_daily`·날 확정·하루 대조 (v5.7)
+선행 K2.T2 · 산출 `packages/db/src/schema/**`, `packages/db/migrations/{sqlite,mysql,pg}/0002_*`, `apps/server/src/limits/daily.ts`, `apps/server/test/limits/**`, `apps/server/test/contract/limits/**` · 되돌리기 커밋 1개
 
 【작업】
-1. `budget_rebalance` 본문: 활성 키가 있는 회원만, V15 `decision`대로 분석 호출(전체 한 번이면 `byApiKey`를 `api_keys` 매핑으로 회원별로 묶는다 — 삭제 키 포함). 회원마다 `computeBudgets` → 목표가 켜짐인 키 중 `budget_usd`와 다른 것만 `setBudget` → 펜싱 아래 `budget_usd` 기록. 분석이 `OmniRouteFormatError`·`OmniRouteError`면 이번 실행은 예산을 하나도 바꾸지 않는다. 어댑터 변경이 필요하면(예: 필터 없는 분석) `packages/omniroute`에 두고 `G-S5.9`(어댑터 밖 관리 호출 0)를 지킨다. `JOBS`에 `{ name: "budget_rebalance", cron: "* * * * *" }`를 등록하고 `wrangler.toml` crons 에 `"* * * * *"`를 더한다 (TC-K1.T4.b 가 같음을 본다). 커밋.
+1. 공통 정의에 `usage_daily(key_id, day, cost_usd DECIMAL(12,6), updated_at, PK(key_id, day))`를 더하고 세 벌 생성·마이그레이션 `0002_*`를 만든다 (계획서 v5.7 5.9). `0002_*`는 K2 `outputs`(잠긴 단계라 못 고침) 밖이라 `--assert-order`가 지키지 않는다. 순서는 K1 봉인(R1)이 지킨다.
+2. `apps/server/src/limits/daily.ts`: `storedSpent(keyIds, month)` = 이번 달 1일~어제 합. `confirmDays(now)`: `app_settings.usage_daily_confirmed`가 어제보다 이르면 (1) 어제 창(어제 00:00 ~ 오늘 00:00 UTC)을 한 번 불러 매핑된 키의 어제 값을 저장하고 (2) 이번 달 1일 ~ 오늘 00:00 을 다시 불러 저장값을 덮는다(대조). 키·날마다 |새 값 − 저장값| > 0.000001 이 하나라도 있으면 `audit_log` `alert.usage_drift`(차이 난 키·날 수, 합계 차이) 1행. 대조 호출이 어댑터 제한 시간에 걸리면 대조를 멈추고 다음 실행부터 날 단위로 나눠 하루씩 부른다 (진행한 날을 `app_settings`에 남김). 펜싱 아래에서 쓴다. 커밋.
 
 【테스트】
 ```
-TC-K2.T3.a  활성 키가 없는 회원은 OmniRoute 호출이 없다
-  단언:  회원 둘(활성 키 있음 1, 꺼진 키만 1), 가짜 OmniRoute → setBudget 대상은 첫 회원 키뿐
-  검출:  모든 회원을 매분 돌아 회원 수에 비례해 분배 시간이 늘고 임대(55초)를 넘기는 것
-TC-K2.T3.b  예산이 바뀐 키만 setBudget 을 부른다
-  단언:  같은 상태로 두 번 실행 → 두 번째 실행 setBudget 0건
-  검출:  매분 키마다 POST /api/usage/budget 를 보내 키 300개면 분당 300건이 OmniRoute 에 쌓이는 것
-TC-K2.T3.c  분석 형식 오류면 예산을 하나도 바꾸지 않는다
-  단언:  분석 응답에 음수 cost(analyticsSchema money 위반) → OmniRouteFormatError, setBudget 0건, budget_usd 변화 0
-  검출:  형식이 바뀐 분석을 0 으로 읽어 모든 회원 남은 한도를 한도 전액으로 되돌리는 것
-TC-K2.T3.d  두 키로 나눠 써 회원 한도에 닿으면 분배 뒤 두 키 모두 예산 차단이다 (계약)
-  단언:  한도 0.02, 키 A·B 각 요청 3건(0.014633씩) → 분배 1회 → A·B 다음 요청 isBudgetBlocked 둘 다 true
-  검출:  키별 예산을 키 사용액 기준으로만 걸어 회원 합계가 한도를 넘어도 각 키가 자기 몫 안이라 통과하는 것
-TC-K2.T3.e  삭제한 키의 사용액이 새 키의 남은 몫을 줄인다 (계약, V18 의존)
-  단언:  한도 0.02, 키 A 요청 3건(0.014633) → A 삭제 → 키 B 발급·분배 → B 예산 == 0.02 − 0.014633 (오차 1e-6)
-  검출:  분석 apiKeyIds 에 삭제 키를 빼 B 가 한도 전액을 새로 받는 것
-TC-K2.T3.f  사용액 0 키도 회원 한도 도달 뒤 요청이 2xx 가 아니다 (계약, Q1 의존)
-  단언:  한도 0.01, 키 A 요청 3건 → 키 C(사용액 0) 분배 1회 → C 다음 요청 상태 ≠ 2xx
-  검출:  Q1 공백 그대로 예산 0(무제한)이 걸리거나 예산을 아예 안 걸어 C 로 한도 밖 사용이 계속되는 것
-TC-K2.T3.g  초과 폭은 한도 × 동시에 쓰는 키 수 안이다 (계약)
-  단언:  한도 0.02, 키 2개를 동시에 예산 차단까지 쓰기 → 회원 총 사용액 ≤ 0.02 × 2 + 요청 1건 비용(0.004878)
-  검출:  예산이 "남은 한도"가 아니라 "한도"로 걸려 초과 폭이 키 수와 무관하게 커지는 것 (5.3 한계의 상한이 깨짐)
-TC-K2.T3.i  분배는 1분마다 등록된다
-  단언:  JOBS 의 budget_rebalance cron == "* * * * *", wrangler crons 에 "* * * * *" 포함 (TC-K1.T4.b 재실행)
-  검출:  분배를 5분 정합성 cron 에 같이 걸어 한도 반영이 최대 5분 늦는 것, Workers crons 에서 빠져 Workers 조합에서 분배가 안 도는 것
-TC-K2.T3.h  분배 한 번이 측정 환경에서 임대 안에 끝난다 (V15 의존)
-  단언:  tests/bench 의 키 300·기록 300,000 환경, 회원 150·각 키 2 매핑 → 분배 1회 소요 ≤ 30,000ms
-  검출:  회원마다 분석을 부르는 방식이 V15 결정과 달라져 300 회 호출로 55초 임대를 넘기는 것
+TC-K2.T7.a  날이 바뀐 첫 분배가 어제를 확정 저장한다 (V15 의존)
+  단언:  가짜 어댑터·시계, usage_daily_confirmed "2026-04-09", now 2026-04-10T00:01Z → 어제 창 호출 1건(startDate 04-09T00:00Z, endDate 04-10T00:00Z), usage_daily 에 매핑 키의 04-09 행, usage_daily_confirmed "2026-04-09"→"2026-04-10" 기준으로 갱신. 같은 날 두 번째 실행 → 어제 창·대조 호출 0건
+  검출:  날 확정을 매분 다시 해 1분 분배가 하루 창 두 개를 부르거나, 확정을 빠뜨려 어제 몫이 회원 사용액에서 통째로 빠지는 것
+TC-K2.T7.b  하루 한 번 대조가 저장값을 덮고 차이를 알린다 (V15 의존)
+  단언:  저장값 04-03 키 A 0.010000, 가짜 대조 응답 0.012000 (가격표 변경) → 대조 호출 1건(startDate 04-01T00:00Z, endDate 04-10T00:00Z), 저장값 0.012000, audit_log "alert.usage_drift" 1행(키·날 1, 합계 0.002). 차이 없으면 alert 0행
+  검출:  가격표가 바뀌어도 지난 날 저장값이 그 달 끝까지 옛 값으로 남거나, 차이를 조용히 덮어 운영자가 한도 계산이 바뀐 것을 모르는 것
+TC-K2.T7.c  대조가 제한 시간에 걸리면 날 단위로 나눈다
+  단언:  대조 첫 호출이 AbortSignal 시간 초과 → 그 실행 저장값 변화 0, 다음 실행부터 하루 창 호출로 나눠 진행, 9일 치를 다 맞추면 한 번 호출로 돌아감
+  검출:  한 달 창 대조가 임대(55초)를 넘겨 두 인스턴스가 같은 날을 번갈아 쓰거나, 실패한 대조를 매분 다시 불러 OmniRoute 를 두드리는 것
+TC-K2.T7.d  지난 날 합 + 오늘 == 분석 API 한 달 값이다 (계약, V15 의존)
+  단언:  계약 환경, 키 A·B 요청 몇 건 → 가짜 시계로 '오늘'을 내일로 두고 confirmDays → 실제 오늘이 '어제'로 저장 → storedSpent([A,B]) + 그 가짜 오늘 창 값 == getAnalytics(apiKeyIds [A,B], 이번 달 1일 ~ 지금).totalCost (오차 1e-9). 실제 시계로도 storedSpent + 오늘 창 == 한 달 값 (오차 1e-9)
+  검출:  창 경계를 [시작, 끝] 둘 다 포함으로 잡아 자정 정각 기록을 두 번 세거나, byApiKey 비용과 summary 비용 계산이 달라 저장 합이 분석 API 한 달 값과 어긋나는 것
+TC-K2.T7.e  다섯 DB 에 usage_daily 가 있다
+  단언:  test:migrate --db sqlite,mysql,mariadb,pg,d1 → usage_daily (key_id, day) 기본 키, cost_usd DECIMAL(12,6)·SQLite REAL, 같은 (key_id, day) 두 번 저장은 갱신 1행
+  검출:  한 DB 의 0002 마이그레이션이 빠져 그 조합에서 1분 분배가 "no such table usage_daily" 로 멈추는 것
 ```
 
 【통과】
-- [ ] G-K2.8 ~ G-K2.15 · G-K2.22 · G-K2.23 통과
+- [ ] G-K2.27 ~ G-K2.31 통과
+
+### ☐ K2.T6 — 1분 분배 작업 (v5.7: 오늘 창 + 지난 날 저장)
+선행 K2.T2 · K2.T7 · 산출 `apps/server/src/limits/rebalance.ts`, `packages/omniroute/src/**`(필터 없는 분석 호출), `apps/server/test/contract/limits/**` · 되돌리기 커밋 1개
+
+【작업】
+1. `budget_rebalance` 본문: 활성 키가 있는 회원과 `limit` 으로 꺼진 키가 있는 회원만, 계획서 v5.7 5.3 대로 분석은 오늘 창 하나만 부른다 (`startDate` 오늘 00:00 UTC, `endDate` 지금, `apiKeyIds` 없음, V15 decision). `byApiKey`를 `api_keys` 매핑으로 회원별로 묶고(삭제 키 포함), 회원 사용액 = K2.T7 `storedSpent`(이번 달 1일~어제 `usage_daily` 합) + 오늘 창 값. 날이 바뀐 첫 실행은 분석 전에 K2.T7 `confirmDays`를 부른다. 회원마다 `computeBudgets` → `exhausted`면 켜진 키를 `setKeyActive(false)`, `state disabled`·`disabled_reason limit` (Q1). 아니면 목표가 켜짐인 키 중 `budget_usd`와 다른 것만 `setBudget` → 펜싱 아래 `budget_usd` 기록, `limit` 으로 꺼진 키는 예산을 먼저 건 뒤 `setKeyActive(true)`, `state active`·`disabled_reason` NULL (회원·관리자·회원 상태로 꺼진 키는 건드리지 않는다). 이 끄기·켜기는 K3.T2 `applyKey`가 생기면 그것으로 바꾼다. 분석이 `OmniRouteFormatError`·`OmniRouteError`면 이번 실행은 예산을 하나도 바꾸지 않는다. 어댑터 변경이 필요하면(예: 필터 없는 분석) `packages/omniroute`에 두고 `G-S5.9`(어댑터 밖 관리 호출 0)를 지킨다. `JOBS`에 `{ name: "budget_rebalance", cron: "* * * * *" }`를 등록하고 `wrangler.toml` crons 에 `"* * * * *"`를 더한다 (TC-K1.T4.b 가 같음을 본다). 커밋.
+
+【테스트】
+```
+TC-K2.T6.a  활성 키가 없는 회원은 OmniRoute 호출이 없다
+  단언:  회원 둘(활성 키 있음 1, 꺼진 키만 1), 가짜 OmniRoute → setBudget 대상은 첫 회원 키뿐
+  검출:  모든 회원을 매분 돌아 회원 수에 비례해 분배 시간이 늘고 임대(55초)를 넘기는 것
+TC-K2.T6.b  예산이 바뀐 키만 setBudget 을 부른다
+  단언:  같은 상태로 두 번 실행 → 두 번째 실행 setBudget 0건
+  검출:  매분 키마다 POST /api/usage/budget 를 보내 키 300개면 분당 300건이 OmniRoute 에 쌓이는 것
+TC-K2.T6.c  분석 형식 오류면 예산을 하나도 바꾸지 않는다
+  단언:  분석 응답에 음수 cost(analyticsSchema money 위반) → OmniRouteFormatError, setBudget 0건, budget_usd 변화 0
+  검출:  형식이 바뀐 분석을 0 으로 읽어 모든 회원 남은 한도를 한도 전액으로 되돌리는 것
+TC-K2.T6.d  두 키로 나눠 써 회원 한도에 닿으면 분배 뒤 두 키 모두 막힌다 (계약)
+  단언:  한도 0.02, 키 A·B 각 요청 3건(0.014633씩, 합 0.029266 > 0.02) → 분배 1회 → A·B 다음 요청 둘 다 거부 (남은 한도 0 이라 v5.6 Q1 끄기: 403). 대조: 한도 0.03 이면 분배 뒤 A·B 예산 == 각 사용액 + 0.000734, 다음 요청 200
+  검출:  키별 예산을 키 사용액 기준으로만 걸어 회원 합계가 한도를 넘어도 각 키가 자기 몫 안이라 통과하는 것
+TC-K2.T6.e  삭제한 키의 사용액이 새 키의 남은 몫을 줄인다 (계약, V18 의존)
+  단언:  한도 0.02, 키 A 요청 3건(0.014633) → A 삭제 → 키 B 발급·분배 → B 예산 == 0.02 − 0.014633 (오차 1e-6)
+  검출:  분석 apiKeyIds 에 삭제 키를 빼 B 가 한도 전액을 새로 받는 것
+TC-K2.T6.f  사용액 0 키도 회원 한도 도달 뒤 꺼진다 (계약, Q1 의존)
+  단언:  한도 0.01, 키 A 요청 3건 → 키 C(사용액 0) 분배 1회 → A·C 다음 요청 403 permission_denied, api_keys 두 행 disabled_reason "limit"
+  검출:  Q1 공백 그대로 예산 0(무제한)이 걸리거나 예산을 아예 안 걸어 C 로 한도 밖 사용이 계속되는 것
+TC-K2.T6.j  남은 한도가 다시 생기면 limit 으로 꺼진 키만 켠다 (계약, Q1 의존)
+  단언:  f 뒤 회원이 직접 끈 키 D(disabled_reason member) 추가 → 한도 0.05 로 올림 → 분배 1회 → A·C 다음 요청 200, D 403. 어댑터 호출 순서는 키마다 [setBudget, setKeyActive(true)]
+  검출:  새 달·한도 상향 뒤에도 limit 키가 꺼진 채 남거나, 회원이 끈 키까지 켜거나, 예산 없이 먼저 켜 1분 동안 한도 밖 사용이 열리는 것
+TC-K2.T6.g  초과 폭은 한도 × 동시에 쓰는 키 수 안이다 (계약)
+  단언:  한도 0.02, 키 2개를 동시에 막힐 때까지(isBudgetBlocked 또는 403) 쓰기 → 회원 총 사용액 ≤ 0.02 × 2 + 요청 1건 비용(0.004878)
+  검출:  예산이 "남은 한도"가 아니라 "한도"로 걸려 초과 폭이 키 수와 무관하게 커지는 것 (5.3 한계의 상한이 깨짐)
+TC-K2.T6.i  분배는 1분마다 등록된다
+  단언:  JOBS 의 budget_rebalance cron == "* * * * *", wrangler crons 에 "* * * * *" 포함 (TC-K1.T4.b 재실행)
+  검출:  분배를 5분 정합성 cron 에 같이 걸어 한도 반영이 최대 5분 늦는 것, Workers crons 에서 빠져 Workers 조합에서 분배가 안 도는 것
+TC-K2.T6.h  분배 한 번이 측정 환경에서 임대 안에 끝난다 (V15 의존)
+  단언:  tests/bench 의 키 300·기록 300,000(30일) 환경, 회원 150·각 키 2 매핑 → 날 확정·대조가 없는 분배 1회 ≤ 30,000ms, 날이 바뀐 첫 분배(확정·대조 포함) ≤ 55,000ms
+  검출:  회원마다 분석을 부르거나 매분 한 달 창을 불러(V15 fullMonth p95 6초) 55초 임대를 넘기는 것
+TC-K2.T6.k  1분 분배는 오늘 창 하나만 부른다 (V15 의존)
+  단언:  가짜 어댑터, 같은 날 두 번째 실행 → getAnalytics 1건, startDate == 오늘 00:00:00.000Z, endDate == now, apiKeyIds 없음. 회원 사용액 == usage_daily 이번 달 합 + 오늘 창 byApiKey 합
+  검출:  매분 이번 달 1일부터 불러 기록이 쌓일수록 분배가 느려지거나, 저장값을 빼고 오늘 값만으로 남은 한도를 계산해 한도가 매일 새로 생기는 것
+```
+
+【통과】
+- [ ] G-K2.8 ~ G-K2.15 · G-K2.22 · G-K2.23 · G-K2.25 · G-K2.26 통과
 - [ ] G-K2.18 통과 (어댑터 밖 OmniRoute 관리 호출 0)
 
 ### ☐ K2.T4 — 즉시 분배 진입점
-선행 K2.T3 · 산출 `apps/server/src/limits/member.ts` · 되돌리기 커밋 1개
+선행 K2.T6 · 산출 `apps/server/src/limits/member.ts` · 되돌리기 커밋 1개
 
 【작업】
-1. `rebalanceMember(userId)`: 그 회원 키 전부(삭제 포함) id 로 분석 한 번 → 계산 → 예산. 발급·재발급 직후와 관리자 한도 변경 직후(K4)가 부른다. 1분 작업과 같은 임대를 잡지 않고 회원 단위 펜싱(`budget_usd` 갱신 조건)으로 겹침을 막는다. 커밋.
+1. `rebalanceMember(userId)`: 그 회원 키 전부(삭제 포함)의 `storedSpent` + 그 키 id 로 오늘 창 분석 한 번(v5.7 5.3) → 계산 → 예산. 발급·재발급 직후와 관리자 한도 변경 직후(K4)가 부른다. 1분 작업과 같은 임대를 잡지 않고 회원 단위 펜싱(`budget_usd` 갱신 조건)으로 겹침을 막는다. 커밋.
 
 【테스트】
 ```
 TC-K2.T4.a  즉시 분배는 그 회원 키 전부(삭제 포함)로 분석한다
-  단언:  회원 키 3(그중 삭제 1) → getAnalytics apiKeyIds 집합 == 세 id, 다른 회원 키 0
+  단언:  회원 키 3(그중 삭제 1) → getAnalytics apiKeyIds 집합 == 세 id, 다른 회원 키 0, startDate == 오늘 00:00 UTC, 사용액 == storedSpent(세 id) + 오늘 값
   검출:  삭제 키를 빼고 불러 재발급 직후 예산이 한도 전액으로 걸리는 것 (1분 분배가 고칠 때까지 최대 1분 열림)
 TC-K2.T4.b  즉시 분배와 1분 분배가 겹쳐도 옛 계산이 새 계산을 덮지 않는다
   단언:  즉시 분배(분석 시각 t2) 기록 뒤 늦게 끝난 1분 분배(분석 시각 t1 < t2)의 budget_usd 갱신 → 0행
@@ -753,7 +805,7 @@ TC-K2.T4.b  즉시 분배와 1분 분배가 겹쳐도 옛 계산이 새 계산�
 - [ ] G-K2.16 · G-K2.17 통과
 
 ### ☐ K2.T5 — K2 CI 잡과 봉인
-선행 K2.T1 ~ K2.T4 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
+선행 K2.T1 · K2.T2 · K2.T4 · K2.T6 · K2.T7 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
 
 【작업】
 1. 잡 `p2-k2`(이름 `한도 분배 (K2 게이트, OmniRoute 3.8.51)`) 스텝 `run: node scripts/gate.mjs K2 --explain`. K2 `checks` 채움. 커밋.
@@ -778,18 +830,24 @@ TC-K2.T5.b  ruleset 필수 검사가 이 잡을 포함한다
 | id | 검사 | 명령 | 통과 기준 |
 |---|---|---|---|
 | G-K2.1 ~ 5 | TC-K2.T1.a ~ e | `pnpm -C apps/server test -t "TC-K2.T1.<x>"` | 각 통과 = 1 |
-| G-K2.6 · 7 | TC-K2.T2.a · b | `pnpm -C apps/server test -t "TC-K2.T2.<x>"` | 각 통과 = 1, 창 시작 = V20 시간대 매달 1일 00:00 |
-| G-K2.8 ~ 10 | TC-K2.T3.a ~ c | `pnpm -C apps/server test -t "TC-K2.T3.<x>"` | 각 통과 = 1 |
-| G-K2.11 | TC-K2.T3.d 두 키 회원 한도 | [L] `pnpm test:contract -t "TC-K2.T3.d"` | 통과 = 1 |
-| G-K2.12 | TC-K2.T3.e 삭제 키 사용액 | [L] `pnpm test:contract -t "TC-K2.T3.e"` | 통과 = 1 |
-| G-K2.13 | TC-K2.T3.f 사용액 0 키 | [L] `pnpm test:contract -t "TC-K2.T3.f"` | 통과 = 1 |
-| G-K2.14 | TC-K2.T3.g 초과 폭 | [L] `pnpm test:contract -t "TC-K2.T3.g"` | 통과 = 1, 회원 총 사용액 ≤ 한도 × 2 + 0.004878 |
-| G-K2.15 | TC-K2.T3.h 분배 소요 | [L] `node tests/bench/analytics.mjs --rebalance --assert` | 종료코드 0, ≤ 30,000ms |
+| G-K2.6 · 7 | TC-K2.T2.a · b | `pnpm -C apps/server test -t "TC-K2.T2.<x>"` | 각 통과 = 1, 창 시작 = 매달 1일 00:00 UTC (V20) |
+| G-K2.24 | TC-K2.T2.c 달 바뀜 판단 | `pnpm -C apps/server test -t "TC-K2.T2.c"` | 통과 = 1 |
+| G-K2.8 ~ 10 | TC-K2.T6.a ~ c | `pnpm -C apps/server test -t "TC-K2.T6.<x>"` | 각 통과 = 1 |
+| G-K2.11 | TC-K2.T6.d 두 키 회원 한도 | [L] `pnpm test:contract -t "TC-K2.T6.d"` | 통과 = 1 |
+| G-K2.12 | TC-K2.T6.e 삭제 키 사용액 | [L] `pnpm test:contract -t "TC-K2.T6.e"` | 통과 = 1 |
+| G-K2.13 | TC-K2.T6.f 사용액 0 키 | [L] `pnpm test:contract -t "TC-K2.T6.f"` | 통과 = 1 |
+| G-K2.25 | TC-K2.T6.j limit 키 다시 켜기 | [L] `pnpm test:contract -t "TC-K2.T6.j"` | 통과 = 1 |
+| G-K2.14 | TC-K2.T6.g 초과 폭 | [L] `pnpm test:contract -t "TC-K2.T6.g"` | 통과 = 1, 회원 총 사용액 ≤ 한도 × 2 + 0.004878 |
+| G-K2.15 | TC-K2.T6.h 분배 소요 | [L] `node tests/bench/analytics.mjs --rebalance --assert` | 종료코드 0, 보통 ≤ 30,000ms · 날이 바뀐 첫 분배 ≤ 55,000ms |
+| G-K2.26 | TC-K2.T6.k 오늘 창만 | `pnpm -C apps/server test -t "TC-K2.T6.k"` | 통과 = 1 |
+| G-K2.27 ~ 29 | TC-K2.T7.a ~ c | `pnpm -C apps/server test -t "TC-K2.T7.<x>"` | 각 통과 = 1 |
+| G-K2.30 | TC-K2.T7.d 저장 합 + 오늘 == 한 달 | [L] `pnpm test:contract -t "TC-K2.T7.d"` | 통과 = 1, 오차 1e-9 |
+| G-K2.31 | TC-K2.T7.e usage_daily 다섯 DB | [L] `pnpm -C packages/db test:migrate -t "TC-K2.T7.e" --db sqlite,mysql,mariadb,pg,d1` | 통과 = 5 |
 | G-K2.16 · 17 | TC-K2.T4.a · b | `pnpm -C apps/server test -t "TC-K2.T4.<x>"` | 각 통과 = 1 |
 | G-K2.18 | 어댑터 밖 관리 호출 0 | grep `/api/(keys\|usage)` in `apps packages`, `packages/omniroute/**` 제외 | == 0 |
 | G-K2.19 | 타입 검사 | `pnpm -r typecheck` | 종료코드 0 |
 | G-K2.20 | TC-K2.T5.a CI 단계 잡 | grep `^\s+run: node scripts/gate\.mjs K2\b` in ci.yml | == 1 |
-| G-K2.22 | TC-K2.T3.i 분배 1분 등록 | `pnpm -C apps/server test -t "TC-K2.T3.i" && pnpm -C apps/server test -t "TC-K1.T4.b"` | 통과 = 2 |
+| G-K2.22 | TC-K2.T6.i 분배 1분 등록 | `pnpm -C apps/server test -t "TC-K2.T6.i" && pnpm -C apps/server test -t "TC-K1.T4.b"` | 통과 = 2 |
 | G-K2.23 | 1분 주기 상수 | grep `name: "budget_rebalance", cron: "\* \* \* \* \*"` in `apps/server/src/jobs.ts` | == 1 |
 | G-K2.21 | ruleset · TC-K2.T5.b | `node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere` | 종료코드 0 |
 
@@ -808,16 +866,16 @@ TC-K2.T5.b  ruleset 필수 검사가 이 잡을 포함한다
 선행 없음 · 산출 `apps/server/src/keys/target.ts` · 되돌리기 커밋 1개
 
 【작업】
-1. `targetState(keyState, userStatus)` → `deleted | off | on` (계획서 5.7 식). `disabled_reason` 셋(`member`·`admin`·`user_status`)과 정지 해제 규칙. 커밋.
+1. `targetState({ keyState, disabledReason, userStatus, remaining })` → `deleted | off | on` (계획서 v5.6 5.7 식: 꺼짐 = 회원 status ≠ active 또는 disabled_reason ∈ {member, admin} 또는 남은 한도 0, `remaining` null 은 무제한). `disabled_reason` 넷(`member`·`admin`·`user_status`·`limit`)과 정지 해제·한도 회복 규칙. 커밋.
 
 【테스트】
 ```
-TC-K3.T1.a  12 조합 표가 계획서 5.7 과 같다
-  단언:  keyState {active, disabled, deleted} × userStatus {pending, active, suspended, deleted} 12 칸 == 기대 표 (deleted 4·… 정확히)
-  검출:  pending 회원 키를 켜짐으로 계산해 승인 전 회원이 키를 쓰는 것
-TC-K3.T1.b  정지를 풀면 user_status 때문에 꺼진 키만 켠다
-  단언:  키 셋(disabled_reason member · admin · user_status), 회원 suspended → active → user_status 키만 목표 on, 나머지 off 유지
-  검출:  정지 해제가 회원 스스로 끈 키·관리자가 끈 키까지 켜는 것
+TC-K3.T1.a  조합 표가 계획서 v5.6 5.7 과 같다 (Q1 의존)
+  단언:  keyState {active, disabled, deleted} × userStatus {pending, active, suspended, deleted} × remaining {null, 0, 0.5} 36 칸 == 기대 표 (deleted 는 keyState deleted 또는 userStatus deleted, on 은 userStatus active · keyState ≠ deleted · disabled_reason ∉ {member, admin} · remaining ≠ 0 뿐)
+  검출:  pending 회원 키를 켜짐으로 계산해 승인 전 회원이 키를 쓰는 것, 남은 한도 0 을 무시해 limit 으로 끈 키를 반영·점검이 다시 켜는 것
+TC-K3.T1.b  정지를 풀면 user_status 때문에, 한도가 생기면 limit 때문에 꺼진 키만 켠다 (Q1 의존)
+  단언:  키 넷(disabled_reason member · admin · user_status · limit), 회원 suspended → active (remaining 0.5) → user_status·limit 키만 목표 on, member·admin off 유지. remaining 0 이면 넷 모두 off
+  검출:  정지 해제·한도 상향이 회원 스스로 끈 키·관리자가 끈 키까지 켜는 것
 ```
 
 【통과】
@@ -827,15 +885,15 @@ TC-K3.T1.b  정지를 풀면 user_status 때문에 꺼진 키만 켠다
 선행 K3.T1 · 산출 `apps/server/src/keys/apply.ts` · 되돌리기 커밋 1개
 
 【작업】
-1. `applyKey(keyId)`: 목표 계산 → OmniRoute 상태가 다르면 즉시 `setKeyActive`/`deleteKey`. 켜기 직전 `rebalanceMember`(K2.T4)로 예산을 먼저 건다. 2xx 면 `sync_state = synced`, 실패하면 `pending` + `key.apply_state` 작업(첫 재시도 10초). 끄기·정지는 반영이 끝나야 "완료" — API 응답은 `sync_state`를 그대로 준다 (화면 "반영 중" 표시는 4단계·7단계). 커밋.
+1. `applyKey(keyId)`: 목표 계산 → OmniRoute 상태가 다르면 즉시 `setKeyActive`. 목표가 삭제됨이면 즉시 `setKeyActive(false)` 하고 `key.delete` 작업을 끈 시각 + 2분 뒤로 잡는다 (계획서 v5.6 5.2, V18: 끈 뒤 60초가 지나야 DELETE 해도 옛 원문 키가 다시 열리지 않는다). 켜기 직전 `rebalanceMember`(K2.T4)로 예산을 먼저 건다. 2xx 면 `sync_state = synced`, 실패하면 `pending` + `key.apply_state` 작업(첫 재시도 1분, Q2). K2.T6 분배의 limit 끄기·켜기를 이 함수로 바꾼다. 끄기·정지는 반영이 끝나야 "완료" — API 응답은 `sync_state`를 그대로 준다 (화면 "반영 중" 표시는 4단계·7단계). 커밋.
 
 【테스트】
 ```
 TC-K3.T2.a  끄기는 응답 전에 OmniRoute 에 반영된다
   단언:  applyKey(목표 off) → 응답 전 setKeyActive(false) 1건, sync_state synced
   검출:  끄기를 큐에만 넣어 최대 1분 동안 끈 키가 동작하는 것 (V11: OmniRoute 는 PATCH 직후부터 403)
-TC-K3.T2.b  OmniRoute 실패면 반영 중으로 남고 10초 뒤 재시도가 잡힌다
-  단언:  setKeyActive → OmniRouteError 503 → sync_state pending, key.apply_state 작업 1개, next_run_at − now == 10,000ms
+TC-K3.T2.b  OmniRoute 실패면 반영 중으로 남고 1분 뒤 재시도가 잡힌다 (Q2 의존)
+  단언:  setKeyActive → OmniRouteError 503 → sync_state pending, key.apply_state 작업 1개, next_run_at − now == 60,000ms
   검출:  실패를 삼켜 synced 로 기록해 정합성 점검(5분) 전까지 꺼야 할 키가 켜져 있는 것
 TC-K3.T2.c  목표가 켜짐이 아니면 켜지 않는다
   단언:  회원 suspended, 키 disabled_reason member → 회원이 켜기 요청 → 409, setKeyActive 0건
@@ -843,27 +901,30 @@ TC-K3.T2.c  목표가 켜짐이 아니면 켜지 않는다
 TC-K3.T2.d  켜기 전에 예산을 건다
   단언:  켜기 반영의 어댑터 호출 순서 == [getAnalytics, setBudget, setKeyActive(true)]
   검출:  한도를 다 쓴 회원의 꺼진 키를 켤 때 옛 예산(더 큰 값)으로 먼저 켜져 1분 분배 전까지 한도 밖 사용이 열리는 것
+TC-K3.T2.e  삭제는 끄기 먼저, DELETE 는 끈 뒤 2분이 지나서다 (V18 의존)
+  단언:  목표 삭제됨 → 응답 전 setKeyActive(false) 1건·deleteKey 0건, key.delete 작업 next_run_at − 끈 시각 == 120,000ms, 그 작업 실행 → deleteKey 1건
+  검출:  바로 DELETE 해 OmniRoute 키 검증 캐시(60초) 동안 옛 원문 키가 예산·기록 없이 통과하는 것 (V18 rawKeyAfterDelete 200)
 ```
 
 【통과】
-- [ ] G-K3.3 ~ G-K3.6 통과
+- [ ] G-K3.3 ~ G-K3.6 · G-K3.18 통과
 
 ### ☐ K3.T3 — 정합성 점검 (5분)
 선행 K3.T2 · 산출 `apps/server/src/keys/reconcile.ts`, `apps/server/test/contract/keys/**` · 되돌리기 커밋 1개
 
 【작업】
-1. `reconcile` 본문: `listKeys()` → 매핑된 키마다 실제 `isActive`를 목표와 비교해 `applyKey`. 매핑 없는 `m_` 키 → 알림(Q6 형식), 삭제·변경 없음. `m_` 키 중 `scopes`에 `manage`·`admin`이 있으면 끄고 알림(5.8). 재시도를 다 쓴 작업(Q3)을 알림으로. 회원 상태 변화(DB 에서 바뀐 정지·탈퇴)도 이 점검이 반영한다. 임대·펜싱 아래서 돈다. `JOBS`에 `{ name: "reconcile", cron: "*/5 * * * *" }`를 등록한다 (1단계 `JOB_CRON`과 wrangler crons 의 `"*/5 * * * *"`가 이미 있다). 커밋.
+1. `reconcile` 본문: `listKeys()` → 매핑된 키마다 실제 `isActive`를 목표와 비교해 `applyKey` (`sync_state failed` 키 포함, Q3). 매핑 없는 `m_` 키 → `audit_log` `alert.unknown_m_key` (Q6), 삭제·변경 없음. `m_` 키 중 `scopes`에 `manage`·`admin`이 있으면 끄고 `alert.manage_scope_key` (5.8). 회원 상태 변화(DB 에서 바뀐 정지·탈퇴)도 이 점검이 반영한다. 임대·펜싱 아래서 돈다. `JOBS`에 `{ name: "reconcile", cron: "*/5 * * * *" }`를 등록한다 (1단계 `JOB_CRON`과 wrangler crons 의 `"*/5 * * * *"`가 이미 있다). 커밋.
 
 【테스트】
 ```
 TC-K3.T3.a  OmniRoute 에서 켜진 키의 목표가 꺼짐이면 점검이 끈다 (계약)
   단언:  매핑 키를 어댑터(대시보드 쿠키 자격)로 setKeyActive(true) → 회원 status suspended(DB) → reconcile 1회 → listKeys 의 그 키 isActive false, 요청 403
   검출:  반영 실패·수동 조작으로 어긋난 상태가 영원히 남는 것 (정지한 회원이 계속 쓰는 것)
-TC-K3.T3.b  매핑 없는 m_ 키는 알리기만 한다
-  단언:  OmniRoute 에 m_deadbeef_cafebabe 키(매핑 없음)와 다른 이름 키 하나 → 알림 1건(m_ 키만), deleteKey·setKeyActive 0건
+TC-K3.T3.b  매핑 없는 m_ 키는 알리기만 한다 (Q6 의존)
+  단언:  OmniRoute 에 m_deadbeef_cafebabe 키(매핑 없음)와 다른 이름 키 하나 → audit_log action "alert.unknown_m_key" 1행(target 그 키 id), deleteKey·setKeyActive 0건
   검출:  자동 삭제로 운영자가 OmniRoute 에서 직접 만든 키나 복구 중인 매핑을 지우는 것
 TC-K3.T3.c  scopes 에 manage 가 붙은 m_ 키는 끄고 알린다 (계약, V10)
-  단언:  매핑 키에 scopes ["manage"]를 붙인다(시험 도구 tests/contract 의 대시보드 쿠키 호출, 어댑터는 scopes 를 못 보낸다) → reconcile 1회 → 그 키 isActive false, 알림 1건, 회원 앱이 보낸 요청 본문에 scopes 0건
+  단언:  매핑 키에 scopes ["manage"]를 붙인다(시험 도구 tests/contract 의 대시보드 쿠키 호출, 어댑터는 scopes 를 못 보낸다) → reconcile 1회 → 그 키 isActive false, audit_log "alert.manage_scope_key" 1행, 회원 앱이 보낸 요청 본문에 scopes 0건
   검출:  write 토큰으로 회원 키에 manage 를 붙여 admin 토큰을 만드는 권한 상승(V10 privilegeEscalation)을 점검이 놓치는 것
 TC-K3.T3.d  점검은 임대를 잃으면 멈춘다
   단언:  reconcile 중 renewLease false → 그 뒤 setKeyActive·deleteKey 0건
@@ -871,13 +932,16 @@ TC-K3.T3.d  점검은 임대를 잃으면 멈춘다
 TC-K3.T3.f  정합성 점검은 5분마다 등록된다
   단언:  JOBS 의 reconcile cron == "*/5 * * * *", TC-K1.T4.b 재실행 통과
   검출:  점검을 1분 cron 에 걸어 OmniRoute 키 목록 전체를 매분 읽거나, 등록을 빠뜨려 어긋난 상태가 영영 안 맞춰지는 것
-TC-K3.T3.e  탈퇴 회원 키는 점검이 삭제한다
-  단언:  회원 status deleted(DB) → reconcile 1회 → deleteKey 1건, api_keys.state deleted, deleted_at 설정, 행은 남음
+TC-K3.T3.e  탈퇴 회원 키는 점검이 삭제한다 (V18 의존)
+  단언:  회원 status deleted(DB) → reconcile 1회 → setKeyActive(false) 1건·key.delete 작업(끈 뒤 2분) 1개 → 그 작업 실행 → deleteKey 1건, api_keys.state deleted, deleted_at 설정, 행은 남음
   검출:  탈퇴 회원 키가 OmniRoute 에 켜진 채 남거나, 매핑 행을 지워 그 키 사용액이 분석 합계에서 빠지는 것
+TC-K3.T3.g  재시도를 다 쓴 키도 점검이 다시 맞춘다 (Q3 의존)
+  단언:  sync_state failed 인 키(목표 off, OmniRoute isActive true) → reconcile 1회 → setKeyActive(false) 1건, sync_state synced
+  검출:  failed 를 "포기"로 읽어 정지한 회원의 키가 다음 점검에서도 켜진 채 남는 것
 ```
 
 【통과】
-- [ ] G-K3.7 ~ G-K3.11 · G-K3.16 · G-K3.17 통과
+- [ ] G-K3.7 ~ G-K3.11 · G-K3.16 · G-K3.17 · G-K3.19 통과
 
 ### ☐ K3.T4 — K3 CI 잡과 봉인
 선행 K3.T1 ~ K3.T3 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
@@ -905,12 +969,14 @@ TC-K3.T4.b  ruleset 필수 검사가 이 잡을 포함한다
 | id | 검사 | 명령 | 통과 기준 |
 |---|---|---|---|
 | G-K3.1 · 2 | TC-K3.T1.a · b | `pnpm -C apps/server test -t "TC-K3.T1.<x>"` | 각 통과 = 1 (a 는 12 칸 표 한 테스트) |
-| G-K3.3 ~ 6 | TC-K3.T2.a ~ d | `pnpm -C apps/server test -t "TC-K3.T2.<x>"` | 각 통과 = 1, b 는 next_run_at − now == 10,000ms |
+| G-K3.3 ~ 6 | TC-K3.T2.a ~ d | `pnpm -C apps/server test -t "TC-K3.T2.<x>"` | 각 통과 = 1, b 는 next_run_at − now == 60,000ms |
+| G-K3.18 | TC-K3.T2.e 삭제 순서 | `pnpm -C apps/server test -t "TC-K3.T2.e"` | 통과 = 1, 끄기 뒤 120,000ms |
 | G-K3.7 | TC-K3.T3.a 어긋난 상태 맞춤 | [L] `pnpm test:contract -t "TC-K3.T3.a"` | 통과 = 1 |
 | G-K3.8 | TC-K3.T3.b 매핑 없는 m_ 키 | `pnpm -C apps/server test -t "TC-K3.T3.b"` | 통과 = 1 |
 | G-K3.9 | TC-K3.T3.c scopes manage 감지 | [L] `pnpm test:contract -t "TC-K3.T3.c"` | 통과 = 1 |
 | G-K3.10 | TC-K3.T3.d 임대 잃으면 멈춤 | `pnpm -C apps/server test -t "TC-K3.T3.d"` | 통과 = 1 |
 | G-K3.11 | TC-K3.T3.e 탈퇴 회원 키 | [L] `pnpm -C apps/server test:db -t "TC-K3.T3.e" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
+| G-K3.19 | TC-K3.T3.g failed 키 다시 맞춤 | `pnpm -C apps/server test -t "TC-K3.T3.g"` | 통과 = 1 |
 | G-K3.12 | 어댑터 키 수정 본문에 scopes 없음 (1단계 회귀) | [L] `pnpm test:contract -t "TC-S5.T2.i"` | 통과 = 1 |
 | G-K3.13 | 타입 검사 | `pnpm -r typecheck` | 종료코드 0 |
 | G-K3.14 | TC-K3.T4.a CI 단계 잡 | grep `^\s+run: node scripts/gate\.mjs K3\b` in ci.yml | == 1 |
@@ -969,33 +1035,39 @@ TC-K4.T1.i  목록은 남은 발급 가능 개수를 준다
 【통과】
 - [ ] G-K4.1 ~ G-K4.9 통과
 
-### ☐ K4.T2 — 이름 변경·끄기·켜기·재발급·삭제
+### ☐ K4.T2 — 이름 변경·끄기·켜기·재발급·삭제 (폐기)
+v5.6 에서 폐기 (V18·V19). `regenerate`와 바로 `DELETE`는 옛 원문 키를 최대 60초 동안 예산·기록 없이 통과시킨다. 재발급·삭제 방식을 바꾼 K4.T7 이 대신한다. TC-K4.T2.a~e 는 쓰지 않는다.
+
+### ☐ K4.T7 — 이름 변경·끄기·켜기·재발급·삭제 (v5.6)
 선행 K4.T1 · 산출 `apps/server/src/routes/keys.ts` · 되돌리기 커밋 1개
 
 【작업】
-1. `PATCH /api/me/keys/:id {label}`(DB 만), `POST /api/me/keys/:id/disable`·`enable`(K3 `applyKey`, `disabled_reason member`), `POST /api/me/keys/:id/regenerate`(V19 결과대로 매핑 유지 또는 갱신, 새 원문 1회, `rebalanceMember`), `DELETE /api/me/keys/:id`(`deleteKey`, `state deleted`, `deleted_at`, 행 유지). 남의 키는 모두 404. 어댑터에 `regenerateKey`가 없으므로 `packages/omniroute/src`에 더한다 (`G-S5.9`: OmniRoute 경로 문자열은 어댑터에만). 커밋.
+1. `PATCH /api/me/keys/:id {label}`(DB 만), `POST /api/me/keys/:id/disable`·`enable`(K3 `applyKey`, `disabled_reason member`), `POST /api/me/keys/:id/regenerate`(계획서 v5.6 5.2: 새 키를 K4.T1 발급 순서로 만들고 옛 키를 아래 삭제 순서로 지운다. 발급 조건은 발급과 같고 최대 개수는 옛 키를 빼고 센다. 새 원문 1회, `rebalanceMember`. OmniRoute `regenerate`는 부르지 않는다), `DELETE /api/me/keys/:id`(`state deleted`, `deleted_at`, 행 유지 → K3 `applyKey`가 즉시 끄고 `key.delete`를 끈 뒤 2분으로 잡는다). 남의 키는 모두 404. 커밋.
 
 【테스트】
 ```
-TC-K4.T2.a  이름 변경은 OmniRoute 를 부르지 않는다
+TC-K4.T7.a  이름 변경은 OmniRoute 를 부르지 않는다
   단언:  PATCH label → 200, OmniRoute 호출 0
   검출:  label 을 OmniRoute 키 이름에 써 개인정보 규칙(m_ 이름)을 깨는 것
-TC-K4.T2.b  삭제는 행을 남긴다
-  단언:  DELETE → deleteKey 1건, state deleted, deleted_at 설정, 다음 분배의 분석 apiKeyIds 에 그 id 포함
-  검출:  행을 지워 그 키의 이번 달 사용액이 회원 합계에서 빠지는 것
-TC-K4.T2.c  재발급은 한도를 초기화하지 않는다 (V19 의존)
-  단언:  재발급 → regenerateKey 1건, 응답 새 원문, 매핑(V19 결과대로)으로 다음 분배가 옛 사용액을 포함
-  검출:  regenerate 가 새 id 를 주는데 매핑을 안 바꿔(또는 옛 id 를 버려) 사용액이 0 에서 시작하는 것
-TC-K4.T2.d  남의 키는 404 이고 OmniRoute 를 부르지 않는다
+TC-K4.T7.b  삭제는 바로 끄고, 행을 남기고, DELETE 는 2분 뒤다 (V18 의존)
+  단언:  DELETE → 응답 전 setKeyActive(false) 1건·deleteKey 0건, state deleted, deleted_at 설정, key.delete 작업 next_run_at == 끈 시각 + 120,000ms, 다음 분배의 분석 apiKeyIds 에 그 id 포함
+  검출:  행을 지워 그 키의 이번 달 사용액이 회원 합계에서 빠지는 것, 바로 DELETE 해 옛 원문 키가 60초 동안 예산·기록 없이 통과하는 것
+TC-K4.T7.c  재발급은 새 키 + 옛 키 삭제이고 한도를 초기화하지 않는다 (V19 의존)
+  단언:  재발급 → 어댑터 호출 == [createKey, setKeyActive(false), setBudget, setKeyActive(true), setKeyActive(false) (옛 키)], regenerate 경로 호출 0, 응답 새 원문, 옛 행 state deleted, 다음 분배 분석 apiKeyIds 에 옛 id·새 id 둘 다
+  검출:  OmniRoute regenerate 를 써 옛 원문 키가 60초 동안 통과하거나(V19 oldKeyStatus 200), 옛 id 를 버려 사용액이 0 에서 시작하는 것
+TC-K4.T7.d  남의 키는 404 이고 OmniRoute 를 부르지 않는다
   단언:  회원 B 세션으로 A 키에 disable·enable·regenerate·DELETE·PATCH → 모두 404, OmniRoute 0
   검출:  키 id 만으로 조회해 다른 회원 키를 끄거나 재발급해 원문을 가져가는 것
-TC-K4.T2.e  회원이 끈 키는 회원이 켤 수 있다
-  단언:  disable(member) → enable → 200, setKeyActive(true) 1건. admin 이 끈 키 → enable 403
-  검출:  관리자가 끈 키를 회원이 다시 켜는 것
+TC-K4.T7.e  회원이 끈 키는 회원이 켤 수 있다
+  단언:  disable(member) → enable → 200, setKeyActive(true) 1건. admin 이 끈 키 → enable 403, limit 으로 꺼진 키 → enable 409 limit_exhausted
+  검출:  관리자가 끈 키나 한도 때문에 꺼진 키를 회원이 다시 켜는 것
+TC-K4.T7.f  재발급도 발급 조건을 본다
+  단언:  최대 2·키 2개에서 재발급 → 201 (옛 키를 빼고 셈), 남은 한도 0 → 409 limit_exhausted·OmniRoute 0
+  검출:  재발급을 발급 조건 없이 열어 한도를 다 쓴 회원이 새 키를 받거나, 최대 개수에 막혀 키를 교체하지 못하는 것
 ```
 
 【통과】
-- [ ] G-K4.10 ~ G-K4.14 통과
+- [ ] G-K4.10 ~ G-K4.14 · G-K4.28 통과
 
 ### ☐ K4.T3 — 관리자 한도·최대 개수 API
 선행 K4.T1 · 산출 `apps/server/src/routes/admin-limits.ts` · 되돌리기 커밋 1개
@@ -1020,7 +1092,7 @@ TC-K4.T3.b  잘못된 값은 400 이다
 선행 K4.T1 · 산출 `apps/server/src/routes/guard.ts` · 되돌리기 커밋 1개
 
 【작업】
-1. `/api/me/keys*`·`/api/admin/*`의 GET 아닌 요청은 `Origin`이 `BETTER_AUTH_URL` 출처와 같아야 한다 (7장 "회원 앱 변경 API는 CSRF 보호"). 키 발급·재발급 요청 수 제한은 v5.6 Q4 숫자로, `rate_limit` 테이블(여러 인스턴스 공유)을 쓴다. 커밋.
+1. `/api/me/keys*`·`/api/admin/*`의 GET 아닌 요청은 `Origin`이 `BETTER_AUTH_URL` 출처와 같아야 한다 (7장 "회원 앱 변경 API는 CSRF 보호"). 키 발급·재발급 요청 수 제한은 계획서 v5.6 Q4: 회원당 1시간 10회, 클라이언트 IP 당 1시간 30회, 넘으면 429. `rate_limit` 테이블(여러 인스턴스 공유)을 쓴다. 커밋.
 
 【테스트】
 ```
@@ -1028,7 +1100,7 @@ TC-K4.T4.a  다른 출처의 변경 요청은 403 이다
   단언:  Origin https://evil.example 로 POST /api/me/keys · DELETE /api/me/keys/:id → 403, OmniRoute 0. Origin 없음 → 403. 같은 출처 → 정상
   검출:  SameSite=Lax 쿠키만 믿어, 같은 사이트의 다른 하위 도메인 페이지가 회원 키를 발급·삭제하는 것
 TC-K4.T4.b  발급 요청 수 제한을 넘으면 429 다 (Q4 의존)
-  단언:  같은 회원이 Q4 숫자 + 1 번 발급 시도(최대 개수 넉넉히) → 마지막 429, 다른 인스턴스(같은 DB)에서도 같은 계산 (sqlite·mysql·pg)
+  단언:  같은 회원이 1시간 안에 발급·재발급 11번(최대 개수 넉넉히) → 11번째 429·OmniRoute 호출 없음, 다른 인스턴스(같은 DB)에서도 같은 계산. 같은 IP 의 회원 넷이 합쳐 31번 → 31번째 429 (sqlite·mysql·pg)
   검출:  인스턴스 메모리로 세어 인스턴스 수만큼 한도가 늘거나, 발급·삭제 반복으로 OmniRoute 에 키 생성 요청을 퍼붓는 것
 ```
 
@@ -1036,15 +1108,15 @@ TC-K4.T4.b  발급 요청 수 제한을 넘으면 429 다 (Q4 의존)
 - [ ] G-K4.17 · G-K4.18 통과
 
 ### ☐ K4.T5 — 실제 OmniRoute 로 수명주기 (계약)
-선행 K4.T1 ~ K4.T4 · 산출 `apps/server/test/contract/routes/**` · 되돌리기 커밋 1개
+선행 K4.T1 · K4.T3 · K4.T4 · K4.T7 · 산출 `apps/server/test/contract/routes/**` · 되돌리기 커밋 1개
 
 【작업】
-1. 회원 앱(계약 환경 OmniRoute 에 연결)으로 발급 → 그 원문으로 `/v1/messages`(모델 `mka/claude-mock`) → 끄기 → 삭제. 커밋.
+1. 회원 앱(계약 환경 OmniRoute 에 연결)으로 발급 → 그 원문으로 `/v1/messages`(모델 `mka/claude-mock`) → 끄기 → 켜기 → 삭제 → `key.delete` 작업 실행(가짜 시계 + 2분, 실제 대기 65초 — OmniRoute 키 검증 캐시 60초). 커밋.
 
 【테스트】
 ```
-TC-K4.T5.a  발급한 키로 Anthropic 형식 요청이 되고, 끄면 403, 지우면 401 이다
-  단언:  POST /api/me/keys → 원문 → /v1/messages 200 → disable → 다음 요청 403 permission_denied(지연 0ms, V11) → DELETE → 401
+TC-K4.T5.a  발급한 키로 Anthropic 형식 요청이 되고, 끄면 403, 지우면 바로 거부되고 DELETE 뒤 401 이다 (V18 의존)
+  단언:  POST /api/me/keys → 원문 → /v1/messages 200 → disable → 다음 요청 403 permission_denied(지연 0ms, V11) → enable → 200 → DELETE /api/me/keys/:id → 다음 요청 403 (끈 상태) → 65초 뒤 key.delete 실행 → listKeys 에 그 키 없음, 다음 요청 401
   검출:  발급 순서의 마지막 켜기가 빠지거나 끄기가 큐로만 가서 "끈 키 거부"(완료 기준)가 지연되는 것
 TC-K4.T5.b  남은 한도 0 인 회원은 발급이 막히고 OmniRoute 에 키가 늘지 않는다
   단언:  한도 0.01, 키 하나로 요청 3건 → 분배 → 키 삭제 → 새 발급 409 limit_exhausted, listKeys 의 그 회원 m_ 키 수 변화 0
@@ -1055,7 +1127,7 @@ TC-K4.T5.b  남은 한도 0 인 회원은 발급이 막히고 OmniRoute 에 키�
 - [ ] G-K4.19 · G-K4.20 통과
 
 ### ☐ K4.T6 — K4 CI 잡과 봉인
-선행 K4.T1 ~ K4.T5 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
+선행 K4.T1 · K4.T3 ~ K4.T5 · K4.T7 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
 
 【작업】
 1. 잡 `p2-k4`(이름 `키 API (K4 게이트, 다섯 DB·OmniRoute 3.8.51)`) 스텝 `run: node scripts/gate.mjs K4 --explain`. K4 `checks` 채움. 커밋.
@@ -1084,11 +1156,12 @@ TC-K4.T6.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-K4.7 | TC-K4.T1.f 동시 발급 (D1) | [L] `pnpm -C apps/server test:workers -t "TC-K4.T1.f"` | 통과 = 1, 201 == 2 |
 | G-K4.8 | TC-K4.T1.g · h 원문 미저장·이름 규칙 | `pnpm -C apps/server test -t "TC-K4.T1.[gh]"` | 통과 = 2, preview 4자리, 이름 `m_` + 8 + `_` + 8 |
 | G-K4.9 | TC-K4.T1.i 남은 발급 가능 개수 | `pnpm -C apps/server test -t "TC-K4.T1.i"` | 통과 = 1 |
-| G-K4.10 ~ 14 | TC-K4.T2.a ~ e | `pnpm -C apps/server test -t "TC-K4.T2.<x>"` | 각 통과 = 1 |
+| G-K4.10 ~ 14 | TC-K4.T7.a ~ e | `pnpm -C apps/server test -t "TC-K4.T7.<x>"` | 각 통과 = 1. b 는 끄기 뒤 120,000ms |
+| G-K4.28 | TC-K4.T7.f 재발급 조건 | `pnpm -C apps/server test -t "TC-K4.T7.f"` | 통과 = 1 |
 | G-K4.15 · 16 | TC-K4.T3.a · b | `pnpm -C apps/server test -t "TC-K4.T3.<x>"` | 각 통과 = 1 |
 | G-K4.17 | TC-K4.T4.a CSRF | `pnpm -C apps/server test -t "TC-K4.T4.a"` | 통과 = 1 |
 | G-K4.18 | TC-K4.T4.b 발급 요청 수 제한 | [L] `pnpm -C apps/server test:db -t "TC-K4.T4.b" --db sqlite,mysql,pg` | 통과 = 3 |
-| G-K4.19 | TC-K4.T5.a 발급·끄기·삭제 | [L] `pnpm test:contract -t "TC-K4.T5.a"` | 통과 = 1, 끈 뒤 첫 요청 403 |
+| G-K4.19 | TC-K4.T5.a 발급·끄기·삭제 | [L] `pnpm test:contract -t "TC-K4.T5.a"` | 통과 = 1, 끈 뒤 첫 요청 403, 삭제 뒤 첫 요청 403 |
 | G-K4.20 | TC-K4.T5.b 한도 0 발급 거부 | [L] `pnpm test:contract -t "TC-K4.T5.b"` | 통과 = 1 |
 | G-K4.21 | 발급 순서 (5.2 의 2~5번) 기대값 | grep `"createKey", "setKeyActive\(false\)", "setBudget", "setKeyActive\(true\)"` in `apps/server/test/routes` | == 1 |
 | G-K4.22 | 원문 키 저장 칼럼 없음 | grep `\b(key_raw\|raw_key\|secret_key)\b` in `packages/db/src/schema` | == 0 |
@@ -1137,15 +1210,15 @@ TC-K5.T2.a  끈 키는 거부된다 (여섯 조합)
   단언:  발급 → 요청 200 → POST /api/me/keys/:id/disable → 다음 요청 403 permission_denied
   검출:  조합마다 다른 DB 경로에서 disabled_reason 저장이 실패해 끄기 API 가 500 이거나 반영이 큐로만 가는 것
 TC-K5.T2.b  여러 키로 나눠 써도 회원 한도에서 막힌다 (여섯 조합)
-  단언:  키 둘로 번갈아 요청 → 회원 총 사용액이 한도($0.02)에 닿은 시각부터 125,000ms 안에 두 키 모두 isBudgetBlocked,
+  단언:  키 둘로 번갈아 요청 → 회원 총 사용액이 한도($0.02)에 닿은 시각부터 125,000ms 안에 두 키 모두 거부 (isBudgetBlocked 또는 limit 끄기의 403, v5.6 Q1),
          그때 총 사용액 ≤ 0.02 × 2 + 0.004878
   검출:  한 조합의 분배 작업이 돌지 않는 것 (Workers crons 에 "* * * * *" 누락, MySQL 임대 판정 오류 등) — 그 조합에서만 한도가 안 걸린다
 TC-K5.T2.c  삭제·재발급으로 한도가 초기화되지 않는다 (여섯 조합)
   단언:  b 뒤 두 키 삭제 → 새 발급 409 limit_exhausted. 한도 $0.04 로 올린 뒤 발급 → 그 키 예산 == 0.04 − 총 사용액 (오차 1e-6)
   검출:  삭제 키 사용액이 회원 합계에서 빠지는 조합(매핑 행 삭제, 분석 apiKeyIds 누락)
 TC-K5.T2.d  재발급으로 한도가 초기화되지 않는다 (여섯 조합, V19 의존)
-  단언:  한도 도달 뒤 남은 키 재발급 → 새 원문의 다음 요청 isBudgetBlocked
-  검출:  재발급이 누적 지출 0 인 새 키를 만들어 한도를 다 쓴 회원이 다시 쓰는 것
+  단언:  한도 도달 뒤 남은 키 재발급 → 409 limit_exhausted, 옛 원문의 다음 요청 403. 한도를 올린 뒤 재발급 → 새 원문 200·옛 원문 바로 403·그 키 예산 == 한도 − 총 사용액 (옛 id 사용액 포함, 오차 1e-6)
+  검출:  재발급이 누적 지출 0 인 새 키를 만들어 한도를 다 쓴 회원이 다시 쓰거나, OmniRoute regenerate 로 옛 원문이 60초 동안 기록 없이 통과하는 것
 ```
 
 【통과】
@@ -1310,14 +1383,16 @@ TC-K6.T3.c  1·2단계 봉인이 모두 유효하고 처음 커밋부터 순서 
 | **여러 키로 나눠 써도 회원 한도에서 차단되는 조합 수** | **6 / 6** | G-K5.3 ~ G-K5.8 (TC-K5.T2.b), 계약 G-K2.11 |
 | Claude Code 가 발급 키로 동작 | 종료코드 0, "hello from mock" | G-K5.1 |
 | 끈 키 거부 | 끈 직후 첫 요청 403 (6 / 6 조합) | G-K4.19, G-K5.3 ~ 8 (TC-K5.T2.a) |
+| 삭제·재발급 뒤 옛 원문 키 | 첫 요청부터 거부 (403) | G-K4.19, G-K4.10 ~ 14, TC-K5.T2.d |
 | 삭제·재발급으로 한도 초기화 | 0 / 6 조합 | G-K5.3 ~ 8 (TC-K5.T2.c·d), G-K4.20 |
 | 한도 반영 시간 | ≤ 125,000ms (지출 기록 60초 + 분배 1분 + 5초) | TC-K5.T2.b |
 | 초과 폭 | ≤ 한도 × 최대 키 2 + 요청 1건 | G-K2.14, TC-K5.T2.b |
 | 최대 키 기본값 | 2 (활성 + 비활성, 삭제 제외) | G-K4.5, G-K4.24 |
 | 동시 발급 최대 개수 초과 | 0 (다섯 DB) | G-K4.6, G-K4.7 |
 | 분배 주기 · 정합성 점검 주기 | 1분 · 5분 | G-K2.22, G-K2.23, G-K3.16, G-K3.17, G-K1.13 |
-| 재시도 간격 | 10초 · 30초 · 2분 · 10분 (첫 반영 실패 뒤 10초) | G-K1.7, G-K1.17, G-K3.4 |
-| 분석 API (기록 300,000 · 키 300) | 전체 p95 ≤ 5,000ms · 회원 p95 ≤ 1,000ms | G-K0.19 ~ G-K0.23 |
+| 재시도 간격 | 1분 · 2분 · 10분 · 30분 (첫 반영 실패 뒤 1분, v5.6 Q2) | G-K1.7, G-K1.17, G-K3.4 |
+| 삭제 뒤 DELETE | 끈 시각 + 2분 (OmniRoute 키 검증 캐시 60초, V18) | G-K3.18, G-K4.10 ~ 14 |
+| 분석 API (기록 300,000 · 키 300) | 오늘 창 p95 ≤ 2,000ms · 회원 p95 ≤ 1,000ms · 대조 ≤ 55,000ms (v5.7) | G-K0.19 ~ G-K0.23, G-K0.39 |
 | 확인 항목 | 6 / 6, 설계 막음 0 | G-K0.13, G-K0.14 |
 | 설계 공백 | 0 / 6 남음 | G-K0.28 |
 
@@ -1342,13 +1417,17 @@ TC-K6.T3.c  1·2단계 봉인이 모두 유효하고 처음 커밋부터 순서 
 |---|---|---|
 | TC-K0.T5.a | V12 공동 예산 유무 | 계획서 5.3 개정, K2 작업 교체 |
 | TC-K0.T6.a | V13 거르기 파라미터 | 4단계 "최근 요청"이 어댑터에서 거름 (2단계 영향 없음) |
-| TC-K0.T7.a, TC-K2.T3.h | V15 측정·호출 방식 | 계획서 5.3 실행 시점 개정 |
-| TC-K0.T8.a, TC-K2.T3.e | V18 삭제 키 기록 유지 | 계획서가 대안(삭제 전 사용액 보존) 결정, K1 스키마 |
-| TC-K0.T9.a, TC-K4.T2.c, TC-K5.T2.d | V19 regenerate id·지출 유지 | 계획서 5.2·5.9 개정, K1 스키마·K4 재발급 |
+| TC-K0.T7.a, TC-K2.T6.h, TC-K2.T6.k, TC-K2.T7.a ~ d | V15 측정·호출 방식 (v5.7: 오늘 창 + usage_daily) | 계획서 5.3 실행 시점 개정 |
+| TC-K2.T6.e | V18 삭제 키 기록 유지 | 계획서가 대안(삭제 전 사용액 보존) 결정, K1 스키마 |
+| TC-K0.T9.a, TC-K4.T7.c, TC-K5.T2.d | V19 regenerate id·지출 유지·옛 원문 키 | 계획서 5.2 개정 (v5.6: 재발급 = 새 키 + 옛 키 삭제), K4 재발급 |
+| TC-K0.T8.a, TC-K3.T2.e, TC-K3.T3.e, TC-K4.T7.b, TC-K4.T5.a | V18 삭제 뒤 옛 원문 키·키 검증 캐시 60초 | 계획서 5.2 개정 (v5.6: 끄고 60초 뒤 DELETE), K3 반영·K4 삭제 |
 | TC-K0.T10.a·b·c, TC-K2.T2.a | V20 시간대·경계값 | 계획서 5.3 개정 (Q1 과 함께) |
-| TC-K1.T3.b | Q3 재시도 소진 동작 | K0.T12 개정 내용 |
-| TC-K2.T1.d, TC-K2.T3.f | Q1 사용액 0 키 처리 | K0.T12 개정 내용 |
-| TC-K4.T4.b | Q4 발급 요청 수 숫자 | K0.T12 개정 내용 |
+| TC-K1.T3.a, TC-K1.T4.a, TC-K3.T2.b | Q2 재시도 간격 1분·2분·10분·30분, 실행기 1분 | 계획서 v5.6 5.7 |
+| TC-K1.T3.b, TC-K3.T3.g | Q3 재시도 소진 → failed, 점검이 다시 맞춤, 30분 오래 실패 | 계획서 v5.6 5.7 |
+| TC-K2.T1.b, TC-K2.T1.d, TC-K2.T6.f, TC-K2.T6.j, TC-K3.T1.a, TC-K3.T1.b | Q1 남은 한도 0 이면 키 끄기(limit), 회복하면 켜기 | 계획서 v5.6 5.3·5.7 |
+| TC-K2.T2.c | Q5 1분 분배가 달 바뀜 판단 | 계획서 v5.6 5.3 |
+| TC-K1.T3.b, TC-K3.T3.b, TC-K3.T3.c | Q6 알림 = audit_log alert.<종류> | 계획서 v5.6 5.7 |
+| TC-K4.T4.b | Q4 발급 요청 수 회원 10회·IP 30회 / 1시간 | 계획서 v5.6 5.2·7장 |
 
 ## 코드 미확인 TC 목록
 
@@ -1361,4 +1440,3 @@ TC-K6.T3.c  1·2단계 봉인이 모두 유효하고 처음 커밋부터 순서 
 | TC-K1.T4.c | `wrangler dev --test-scheduled`의 `/__scheduled` 경로가 이 저장소 wrangler 버전에서 cron 별로 동작하는지 | K1.T4 |
 | TC-K5.T1.a | 고정할 `@anthropic-ai/claude-code` 버전의 인자(`--setting-sources`, `--max-turns`)가 V16 때와 같은지 | K5.T1 |
 | TC-K5.T2.a ~ d | `tests/e2e/run.mjs`에 `--scenario` 인자를 더할 자리 (지금은 조합 하나의 고정 흐름) | K5.T2 |
-| TC-K4.T2.c | OmniRoute `POST /api/keys/{id}/regenerate` 응답 형식 (어댑터에 아직 없음) | K0.T9 (V19), K4.T2 |

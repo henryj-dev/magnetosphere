@@ -1,0 +1,31 @@
+# check-required-checks 음성 대조용 워크플로 (K0.T13). 실행되지 않는다 (.github/workflows 밖).
+# 잡 표시 이름: name 이 있는 잡, name 없는 잡(id), matrix 로 펼치는 잡
+name: ci
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  unit:
+    name: 단위 (S0 게이트·패키지 테스트·타입)
+    runs-on: ubuntu-latest
+    steps:
+      - run: node scripts/gate.mjs S0
+  guard:
+    name: 재발 방지 (S7 게이트)
+    runs-on: ubuntu-latest
+    steps:
+      - run: node scripts/gate.mjs S7
+  e2e:
+    name: E2E ${{ matrix.combo }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        combo: [docker-sqlite, workers-d1]
+    steps:
+      - run: pnpm e2e --combo ${{ matrix.combo }}
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - run: node scripts/gate.mjs --status
