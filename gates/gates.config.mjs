@@ -331,7 +331,7 @@ export const GATES = {
     outputs: ["packages/db/migrations/*/0001_*", "packages/runtime/test/lease-fence/**", "apps/server/src/queue/**", "apps/server/test/queue/**"],
     checks: [
       // K1.T1 job_leases.fence·omniroute_jobs.failed_at
-      { id: "G-K1.1", how: "test", requires: ["local-services"], desc: "TC-K1.T1.a 다섯 DB fence·failed_at 칼럼 (0000 → 기존 행 → 0001)", cmd: 'pnpm -C packages/db test:migrate -t "TC-K1.T1.a" --db sqlite,mysql,mariadb,pg,d1', expectPassed: 5 },
+      { id: "G-K1.1", how: "test", requires: ["local-services"], desc: "TC-K1.T1.a 다섯 DB fence·last_slot·failed_at·key_id 칼럼 (0000 → 기존 행 → 0001)", cmd: 'pnpm -C packages/db test:migrate -t "TC-K1.T1.a" --db sqlite,mysql,mariadb,pg,d1', expectPassed: 5 },
       { id: "G-K1.2", how: "cmd", desc: "TC-K1.T1.b 생성물·드리프트", cmd: "pnpm -C packages/db gen && git diff --exit-code packages/db/src/schema/ && pnpm -C packages/db check:drift" },
       // K1.T2 임대 하트비트·펜싱 (S4 보안 리뷰 L4)
       { id: "G-K1.3", how: "test", requires: ["local-services"], desc: "TC-K1.T2.a 하트비트가 있는 동안 다른 인스턴스는 임대를 못 잡는다", cmd: 'pnpm -C packages/runtime test:db -t "TC-K1.T2.a" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
@@ -339,7 +339,7 @@ export const GATES = {
       { id: "G-K1.5", how: "test", desc: "TC-K1.T2.c 하트비트 실패면 작업 신호가 끊기고 호출이 멈춘다", cmd: 'pnpm -C packages/runtime test -t "TC-K1.T2.c"', expectPassed: 1 },
       { id: "G-K1.6", how: "test", requires: ["local-services"], desc: "TC-K1.T2.d fence 는 같은 이름에서 엄격히 증가", cmd: 'pnpm -C packages/runtime test:db -t "TC-K1.T2.d" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
       // K1.T3 작업 큐와 재시도 (계획서 v5.6 Q2·Q3·Q6)
-      { id: "G-K1.7", how: "test", desc: "TC-K1.T3.a 재시도 간격 60,000·120,000·600,000·1,800,000ms", cmd: 'pnpm -C apps/server test -t "TC-K1.T3.a"', expectPassed: 1 },
+      { id: "G-K1.7", how: "test", desc: "TC-K1.T3.a 재시도 간격 60,000·120,000·600,000·1,800,000ms, tick 지연 0~20초에도 0·1·3·13·43분 경계", cmd: 'pnpm -C apps/server test -t "TC-K1.T3.a"', expectPassed: 1 },
       { id: "G-K1.8", how: "test", desc: "TC-K1.T3.b 재시도 소진 → failed_at·sync_state failed·alert.job_failed", cmd: 'pnpm -C apps/server test -t "TC-K1.T3.b"', expectPassed: 1 },
       { id: "G-K1.9", how: "test", requires: ["local-services"], desc: "TC-K1.T3.c 동시 실행기 둘, 작업마다 핸들러 한 번", cmd: 'pnpm -C apps/server test:db -t "TC-K1.T3.c" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
       { id: "G-K1.10", how: "test", desc: "TC-K1.T3.d 완료 기록", cmd: 'pnpm -C apps/server test -t "TC-K1.T3.d"', expectPassed: 1 },
@@ -356,6 +356,22 @@ export const GATES = {
       // K1.T5 CI 단계 잡과 ruleset 필수 검사
       { id: "G-K1.20", how: "grep", desc: "TC-K1.T5.a CI 단계 잡 (K1)", pattern: "^\\s+run: node scripts/gate\\.mjs K1\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
       { id: "G-K1.21", how: "cmd", desc: "TC-K1.T5.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
+      // K1 리뷰 고침 (#1~#8, #10)
+      { id: "G-K1.22", how: "test", desc: "TC-K1.T1.c 구조 비교 정규화는 문자열 리터럴 밖에서만", cmd: 'pnpm -C packages/db test -t "TC-K1.T1.c"', expectPassed: 1 },
+      { id: "G-K1.23", how: "test", desc: "TC-K1.T2.e DB 응답이 멈춰도 ttl 안에 작업 신호가 끊긴다", cmd: 'pnpm -C packages/runtime test -t "TC-K1.T2.e"', expectPassed: 1 },
+      { id: "G-K1.24", how: "test", requires: ["local-services"], desc: "TC-K1.T2.f 주기 경계 하나는 한 번만 돈다", cmd: 'pnpm -C packages/runtime test:db -t "TC-K1.T2.f" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-K1.25", how: "test", requires: ["local-services"], desc: "TC-K1.T3.f 오래된 켜기 재시도가 새 끄기를 덮지 않는다", cmd: 'pnpm -C apps/server test:db -t "TC-K1.T3.f" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-K1.26", how: "test", requires: ["local-services"], desc: "TC-K1.T3.g 실패 표시·키 sync_state·알림은 함께 남거나 함께 되돌려진다", cmd: 'pnpm -C apps/server test:db -t "TC-K1.T3.g" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-K1.27", how: "test", desc: "TC-K1.T3.h 망가진 payload 는 곧바로 failed, 큐는 계속", cmd: 'pnpm -C apps/server test -t "TC-K1.T3.h"', expectPassed: 1 },
+      { id: "G-K1.28", how: "test", desc: "TC-K1.T3.i 임대를 잃어 끊긴 시도는 재시도 횟수를 쓰지 않는다", cmd: 'pnpm -C apps/server test -t "TC-K1.T3.i"', expectPassed: 1 },
+      { id: "G-K1.29", how: "cmd", desc: "재현 빨강: TC-K1.T3.a(개정) 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K1.7 --since seal:K0" },
+      { id: "G-K1.30", how: "cmd", desc: "재현 빨강: TC-K1.T2.e 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K1.23 --since seal:K0" },
+      { id: "G-K1.31", how: "cmd", desc: "재현 빨강: TC-K1.T2.f 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K1.24 --since seal:K0" },
+      { id: "G-K1.32", how: "cmd", desc: "재현 빨강: TC-K1.T3.f 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K1.25 --since seal:K0" },
+      { id: "G-K1.33", how: "cmd", desc: "재현 빨강: TC-K1.T3.g 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K1.26 --since seal:K0" },
+      { id: "G-K1.34", how: "cmd", desc: "재현 빨강: TC-K1.T3.h 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K1.27 --since seal:K0" },
+      { id: "G-K1.35", how: "cmd", desc: "재현 빨강: TC-K1.T3.i 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K1.28 --since seal:K0" },
+      { id: "G-K1.36", how: "cmd", desc: "재현 빨강: TC-K1.T1.c 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K1.22 --since seal:K0" },
     ],
   },
   K2: {

@@ -504,19 +504,25 @@ TC-K0.T15.b  ruleset 필수 검사가 이 잡을 포함한다
 
 【작업】
 1. 공통 정의 `jobLeases`에 `fence`(정수, NOT NULL, 기본 0)를 더하고 세 벌 생성·마이그레이션을 만든다. 같은 커밋에 계획서 v5.6 의 스키마 변경을 넣는다: `omniroute_jobs.failed_at`(시각, NULL 허용, Q3), `api_keys.disabled_reason` 설명에 `limit`(Q1, 칼럼 길이 16 그대로). V19 결과로 `api_keys` 칼럼 변경은 없다 (재발급이 새 키 발급 + 옛 키 삭제라 매핑을 바꾸지 않는다). 커밋.
+2. (K1 리뷰 #1·#6) 같은 0001 에 `omniroute_jobs.key_id`(대상 `api_keys.id`, NULL 허용, 색인 `(key_id, done_at)`)와 `job_leases.last_slot`(마지막으로 돈 경계 번호, bigint, NULL 허용)을 더한다. 병합 전이라 0001 을 다시 만든다. 커밋.
+3. (K1 리뷰 #10) 구조 비교(TC-S2.T3.d)의 SQL 정규화는 따옴표 밖에서만 공백을 맞춘다. 재현 커밋 `Red: TC-K1.T1.c` → 고침.
 
 【테스트】
 ```
 TC-K1.T1.a  다섯 DB 빈 상태 → 최신 마이그레이션에 fence·failed_at 칼럼이 있다
-  단언:  test:migrate --db sqlite,mysql,mariadb,pg,d1 → job_leases.fence 정수 NOT NULL 기본 0, omniroute_jobs.failed_at 시각 NULL 허용, 기존 행이 있는 DB 에 0001 적용 뒤 fence = 0·failed_at NULL
+  단언:  test:migrate --db sqlite,mysql,mariadb,pg,d1 → job_leases.fence 정수 NOT NULL 기본 0·last_slot NULL 허용, omniroute_jobs.failed_at 시각·key_id NULL 허용, 기존 행이 있는 DB 에 0001 적용 뒤 fence = 0·나머지 NULL
   검출:  한 DB 의 마이그레이션만 빠져 그 DB 에서 acquireLease 가 "no such column fence" 로 주기 작업 전체가 멈추는 것
+TC-K1.T1.c  구조 비교 정규화는 문자열 리터럴 안의 공백을 바꾸지 않는다 (K1 리뷰 #10)
+  단언:  norm("… DEFAULT 'a, b' …") ≠ norm("… DEFAULT 'a,b' …"), 따옴표 밖의 괄호·쉼표 둘레 공백은 같게 본다
+  검출:  norm 이 리터럴 안의 ", ( )" 둘레 공백까지 지워, 기본값 'a, b' 가 마이그레이션에서 'a,b' 로 바뀌어도 TC-S2.T3.d 가 초록인 것
 TC-K1.T1.b  마이그레이션과 생성 스키마가 같다
   단언:  pnpm -C packages/db gen && git diff --exit-code packages/db/src/schema/ → 0, pnpm -C packages/db check:drift → 0
   검출:  공통 정의만 고치고 생성물·마이그레이션을 안 만들어 Drizzle 이 없는 칼럼에 쓰는 것
 ```
 
 【통과】
-- [x] G-K1.1 · G-K1.2 통과
+- [x] G-K1.1 · G-K1.2 · G-K1.22 통과
+- [x] G-K1.36 통과 (Red 커밋에서 TC-K1.T1.c 실패)
 
 ### ☑ K1.T2 — 임대 하트비트·펜싱 (S4 보안 리뷰 L4)
 선행 K1.T1 · 산출 `packages/runtime/src/lease.ts`, `packages/runtime/src/node.ts`, `packages/runtime/src/workers.ts`, `packages/runtime/test/lease-fence/**` · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-K1.T2.a`
@@ -524,6 +530,9 @@ TC-K1.T1.b  마이그레이션과 생성 스키마가 같다
 【작업】
 1. TC-K1.T2.a 를 넣는다 (지금 `acquireLease`는 한 번 잡고 늘리지 않으므로 빨강). 꼬리줄 `Red: TC-K1.T2.a`. 커밋.
 2. `acquireLease`는 잡으면 `{ fence }`(잡을 때마다 `fence + 1`)를 돌려준다. `renewLease(name, holder, fence, ttl)`은 같은 holder·fence 일 때만 늘린다. Node `schedule()`은 작업 중 `ttl / 3`마다 늘리고, 늘리기에 실패하면 작업에 넘긴 `AbortSignal`을 끊는다. `fenced(h, name, fence)` 조건을 DB 쓰기(`api_keys.budget_usd`·`sync_state`, `omniroute_jobs`)에 붙인다. Workers 는 Cron 호출이 겹칠 수 있으므로(1분 작업이 1분을 넘기면) 같은 임대를 쓴다. 커밋.
+3. (K1 리뷰 #3) `renew` 하나에 ttl/3 시간 제한, 마지막 갱신 성공 + ttl − ttl/6 을 로컬 마감으로 두고 지나면 신호를 끊는다. `Red: TC-K1.T2.e` → 고침.
+4. (K1 리뷰 #6) 주기 작업은 경계 번호(경계 시각 / 주기, 반올림)를 넘기고 `acquireLease`는 `last_slot < slot`일 때만 잡아 `last_slot = slot`으로 둔다. 같은 경계는 같은 holder 라도 다시 돌지 않는다 (K2 분배가 이것에 기댄다). `Red: TC-K1.T2.f` → 고침.
+5. (K1 리뷰 #7) `fenced()` 서브쿼리를 공유 잠금으로 읽는다: Postgres `FOR SHARE`, MySQL·MariaDB `LOCK IN SHARE MODE`(MariaDB 10.11 은 `FOR SHARE` 문법 오류), SQLite·D1 은 쓰기가 직렬화되어 그대로. 커밋.
 
 【테스트】
 ```
@@ -536,26 +545,37 @@ TC-K1.T2.b  임대를 잃은 쪽의 펜싱 쓰기는 0행이다
 TC-K1.T2.c  하트비트 실패면 작업 신호가 끊기고 OmniRoute 호출이 멈춘다
   단언:  renewLease 가 false 를 돌려주는 가짜 DB + 가짜 fetch → signal.aborted true, 끊긴 뒤 fetch 호출 0건
   검출:  임대를 잃고도 분배 루프가 끝까지 돌아 setBudget 을 두 인스턴스가 번갈아 부르는 것
+TC-K1.T2.e  DB 응답이 멈춰도 ttl 안에 작업 신호가 끊긴다 (K1 리뷰 #3)
+  단언:  renew 가 영원히 기다리는 가짜 연결, ttl 300ms → 시작부터 300ms 안에 signal.aborted, 이유 LeaseLostError
+  검출:  holdLease 의 renew 에 시간 제한이 없고 기다리는 동안 beating 이 true 라, DB 가 멈추면 임대가 만료된 뒤에도 작업이 계속 돌아 새 임대자와 함께 쓰는 것
+TC-K1.T2.f  주기 경계 하나는 한 번만 돈다 (K1 리뷰 #6)
+  단언:  runLeased(A, 경계 n) 두 번 → 한 번만 실행, 만료 뒤 B 가 경계 n → 실행 안 함, 경계 n+1·n+2 → 실행 (네 DB)
+  검출:  takeable 이 "만료됐거나 내 임대"라 같은 holder 의 타이머가 같은 경계에서 다시 울리면 분배가 두 번 도는 것
 TC-K1.T2.d  fence 는 같은 이름에서 엄격히 증가한다
   단언:  같은 이름을 holder 바꿔 10번 잡음 → fence 10개가 엄격 증가 (네 DB)
   검출:  MySQL INSERT IGNORE 경로(RETURNING 없음)에서 fence 를 다시 읽지 않아 두 임대자가 같은 fence 를 받는 것
 ```
 
 【통과】
-- [x] G-K1.3 ~ G-K1.6 통과
-- [x] G-K1.18 통과 (Red 커밋에서 TC-K1.T2.a 실패)
+- [x] G-K1.3 ~ G-K1.6 · G-K1.23 · G-K1.24 통과
+- [x] G-K1.18 · G-K1.30 · G-K1.31 통과 (Red 커밋에서 TC-K1.T2.a·e·f 실패)
 
 ### ☑ K1.T3 — 작업 큐 `omniroute_jobs` 와 재시도
 선행 K1.T2 · 산출 `apps/server/src/queue/**`, `apps/server/test/queue/**` · 되돌리기 커밋 1개
 
 【작업】
 1. `enqueue(action, payload, { runAt? })` · `runDue(now)`(done_at·failed_at NULL 이고 next_run_at ≤ now, 펜싱 아래 한 건씩 차지) · 핸들러 표(`key.apply_state`, `key.delete`, `budget.set`, `key.rollback`). 실패하면 `attempts + 1`, 다음 간격 `[60_000, 120_000, 600_000, 1_800_000]`ms (계획서 v5.6 Q2: 1분·2분·10분·30분, 실행기 최소 주기 1분). 4번째 재시도도 실패하면 `failed_at = now`, 대상 키 `sync_state = failed`, `audit_log` action `alert.job_failed` 1행 (Q3·Q6). `isLongFailed(job, now)` = failed_at 이 30분보다 오래됨 (Q3, 화면은 7단계). `key.delete` 는 `runAt` 으로 끈 시각 + 2분 뒤에 잡는다 (v5.6 5.2, V18). `last_error`에는 OmniRoute 오류 코드·상태만 남기고 원문 키·토큰은 지운다. 커밋.
+2. (K1 리뷰 #1) `key.apply_state`는 값을 싣지 않는다 (payload `{ keyId }`). 핸들러가 실행할 때 `api_keys`·회원 상태로 목표를 다시 계산해 걸고(`queue/target.ts`, 5.7 목표 상태 함수의 **최소 형태**: `api_keys.state`·`user.status` 만. 남은 한도·`disabled_reason` 규칙은 K3.T1 이 넓힌다), 건 뒤 다시 읽어 바뀌었으면 한 번 더 건다. 같은 키의 미완료 `key.apply_state`가 있으면 새로 넣지 않는다(합치기). 같은 키에 미완료 `key.delete`가 있으면 켜지 않는다(delete 가 이긴다). `Red: TC-K1.T3.f` → 고침.
+3. (K1 리뷰 #2) 다음 시도는 **실패 시각** + 간격, 차례 비교는 `next_run_at ≤ now + 30초`(실행기 주기의 절반). `Red: TC-K1.T3.a`(개정) → 고침.
+4. (K1 리뷰 #4) `failed_at`·키 `sync_state`·`alert.job_failed`를 한 트랜잭션(D1 은 batch)으로, 펜싱 조건과 함께 쓴다. 알림을 못 쓰면 셋 다 되돌리고 차지 시각 뒤 다시 실패 처리한다 (알림 없는 failed 를 남기지 않는다). 작업 하나의 결과 쓰기 예외는 그 작업에서 잡아 `errors`로 센다. `Red: TC-K1.T3.g` → 고침.
+5. (K1 리뷰 #5) payload 가 JSON 객체가 아니거나 모르는 작업이면 재시도 없이 곧바로 failed. `Red: TC-K1.T3.h` → 고침.
+6. (K1 리뷰 #8) 임대를 잃어 신호가 끊긴 시도는 세지 않는다: 차지를 풀어 `attempts`·`next_run_at`을 되돌린다. `Red: TC-K1.T3.i` → 고침.
 
 【테스트】
 ```
-TC-K1.T3.a  재시도 간격은 1분·2분·10분·30분이다 (Q2 의존)
-  단언:  늘 실패하는 핸들러, 가짜 시계 → 실패 시각 대비 next_run_at 차이 == 60000, 120000, 600000, 1800000 ms, 4번째 재시도 실패 뒤 next_run_at 변화 없음·failed_at 설정
-  검출:  간격 표 순서·단위를 틀려(초를 ms 로) 60ms 마다 OmniRoute 를 두드리거나 첫 재시도가 30분 뒤로 밀리는 것
+TC-K1.T3.a  재시도 간격은 1분·2분·10분·30분이다 (Q2 의존, K1 리뷰 #2 개정)
+  단언:  늘 실패하는 핸들러, 1분 경계 tick 에 0~20초 지연(고정 씨앗 20개) → 시도는 0·1·3·13·43분 경계, 실패 시각 대비 next_run_at 차이 == 60000, 120000, 600000, 1800000 ms, 4번째 재시도 실패 뒤 failed_at 설정
+  검출:  간격 표 순서·단위를 틀리는 것, 그리고 next_run_at 을 실행 시작 + 간격으로 잡고 유예 없이 비교해 다음 tick 지연이 더 작으면 한 주기를 건너뛰는 것 (1분이 2분이 된다)
 TC-K1.T3.b  재시도를 다 써도 실패하면 대상 키가 failed 로 드러난다 (Q3 의존)
   단언:  4번째 재시도 실패 → 작업 failed_at 설정·runDue 대상에서 빠짐, 대상 api_keys.sync_state "failed", audit_log 에 action "alert.job_failed" 1행(target 작업 id), isLongFailed 는 failed_at + 30분 − 1ms 에 false · + 30분 + 1ms 에 true
   검출:  실패 작업이 조용히 30분 간격으로 영원히 남아 정지가 반영 안 된 회원 키가 계속 켜져 있는데 아무도 모르는 것
@@ -565,13 +585,26 @@ TC-K1.T3.c  두 실행기가 동시에 돌아도 작업마다 핸들러는 한 �
 TC-K1.T3.d  성공한 작업은 done_at 이 찍히고 다시 돌지 않는다
   단언:  성공 → done_at 설정, attempts 1, 다음 runDue 에서 호출 0
   검출:  done_at 을 안 찍어 매 실행마다 같은 PATCH 를 다시 보내는 것
+TC-K1.T3.f  오래된 켜기 재시도가 새 끄기를 덮지 않는다 (K1 리뷰 #1)
+  단언:  T0 켜기 작업 503 → T0+30초 회원이 끄고 즉시 끄기 성공(같은 키 작업은 합쳐져 1개) → T0+1분 재시도 → OmniRoute 키 꺼짐. 차지한 실행기가 멈춘 채 CLAIM_MS 뒤 다시 집혀도 꺼짐, 깨어난 옛 실행기의 완료 쓰기 0행 (네 DB)
+  검출:  key.apply_state 가 넣을 때의 payload.active 를 걸어, 실행기가 next_run_at 순서로만 집는 사이 회원이 끈 키가 옛 재시도로 다시 켜지는 것
+TC-K1.T3.g  실패 표시와 알림은 함께 남거나 함께 되돌려진다 (K1 리뷰 #4)
+  단언:  마지막 시도만 남은 작업 + 다음 작업, audit_log 삽입 실패 → failed_at NULL·sync_state 그대로·다음 작업은 돎·runDue 예외 없음, 알림이 돌아온 뒤 CLAIM_MS 지나 → failed_at·sync_state failed·alert 1행 (네 DB)
+  검출:  failed_at UPDATE 뒤 알림 삽입이 따로 실패해 알림 없는 failed 가 남고, 예외가 runDue 밖으로 나가 그 tick 의 남은 작업이 멈추는 것
+TC-K1.T3.h  망가진 payload 는 곧바로 failed 로 두고 큐를 끊지 않는다 (K1 리뷰 #5)
+  단언:  payload "{broken" 작업 → 핸들러 호출 0·attempts 1·failed_at·last_error "payload JSON 아님"·sync_state failed·alert 1행, 같은 tick 의 다음 작업 실행
+  검출:  JSON.parse 가 try 밖이라 SyntaxError 가 tick 마다 큐 전체를 끊는 것
+TC-K1.T3.i  임대를 잃어 끊긴 실행은 재시도 횟수를 쓰지 않는다 (K1 리뷰 #8)
+  단언:  핸들러 도중 다른 실행기가 임대를 가져가 신호가 끊김 → 그 작업 attempts 0·next_run_at 원래 값·last_error NULL, 다음 작업은 집지 않음
+  검출:  차지할 때 늘린 attempts 가 펜싱에 막혀 그대로 남아, 임대 다툼이 잦으면 OmniRoute 는 멀쩡한데 작업이 failed 로 가는 것
 TC-K1.T3.e  last_error 에 비밀 값이 없다
   단언:  오류 본문에 "oma_live_x…"·"sk-x…" 를 담은 OmniRouteError → last_error 에 "oma_live_"·"sk-" 0건
   검출:  OmniRouteError.message 가 응답 본문 300자를 담아(어댑터 call()) 관리 토큰이 DB 에 평문으로 남는 것
 ```
 
 【통과】
-- [x] G-K1.7 ~ G-K1.11 · G-K1.17 통과
+- [x] G-K1.7 ~ G-K1.11 · G-K1.17 · G-K1.25 ~ G-K1.28 통과
+- [x] G-K1.29 · G-K1.32 ~ G-K1.35 통과 (Red 커밋에서 TC-K1.T3.a·f·g·h·i 실패)
 
 ### ☑ K1.T4 — 주기 작업 등록 (1분 분배·5분 정합성·큐 실행기)
 선행 K1.T3 · 산출 `apps/server/src/jobs.ts`, `apps/server/wrangler.toml`, `packages/runtime/src/types.ts` · 되돌리기 커밋 1개
@@ -623,13 +656,13 @@ TC-K1.T5.b  ruleset 필수 검사가 이 잡을 포함한다
 
 | id | 검사 | 명령 | 통과 기준 |
 |---|---|---|---|
-| G-K1.1 | TC-K1.T1.a 다섯 DB fence 칼럼 | [L] `pnpm -C packages/db test:migrate -t "TC-K1.T1.a" --db sqlite,mysql,mariadb,pg,d1` | 통과 = 5 (TC 1 × DB 5) |
+| G-K1.1 | TC-K1.T1.a 다섯 DB fence·last_slot·failed_at·key_id 칼럼 | [L] `pnpm -C packages/db test:migrate -t "TC-K1.T1.a" --db sqlite,mysql,mariadb,pg,d1` | 통과 = 5 (TC 1 × DB 5) |
 | G-K1.2 | TC-K1.T1.b 생성물·드리프트 | `pnpm -C packages/db gen && git diff --exit-code packages/db/src/schema/ && pnpm -C packages/db check:drift` | 종료코드 0 |
 | G-K1.3 | TC-K1.T2.a 하트비트 | [L] `pnpm -C packages/runtime test:db -t "TC-K1.T2.a" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
 | G-K1.4 | TC-K1.T2.b 펜싱 쓰기 | [L] 같은 실행기, `TC-K1.T2.b` | 통과 = 4 |
 | G-K1.5 | TC-K1.T2.c 신호 끊김 | `pnpm -C packages/runtime test -t "TC-K1.T2.c"` | 통과 = 1 |
 | G-K1.6 | TC-K1.T2.d fence 증가 | [L] `… test:db -t "TC-K1.T2.d" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
-| G-K1.7 | TC-K1.T3.a 재시도 간격 | `pnpm -C apps/server test -t "TC-K1.T3.a"` | 통과 = 1, 간격 60,000·120,000·600,000·1,800,000ms |
+| G-K1.7 | TC-K1.T3.a 재시도 간격 (tick 지연 포함) | `pnpm -C apps/server test -t "TC-K1.T3.a"` | 통과 = 1, 간격 60,000·120,000·600,000·1,800,000ms, 시도 0·1·3·13·43분 경계 |
 | G-K1.8 | TC-K1.T3.b 재시도 소진 | `pnpm -C apps/server test -t "TC-K1.T3.b"` | 통과 = 1 |
 | G-K1.9 | TC-K1.T3.c 동시 실행기 | [L] `pnpm -C apps/server test:db -t "TC-K1.T3.c" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
 | G-K1.10 | TC-K1.T3.d 완료 기록 | `pnpm -C apps/server test -t "TC-K1.T3.d"` | 통과 = 1 |
@@ -644,6 +677,21 @@ TC-K1.T5.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-K1.19 | 타입 검사 | `pnpm -r typecheck` | 종료코드 0 |
 | G-K1.20 | TC-K1.T5.a CI 단계 잡 | grep `^\s+run: node scripts/gate\.mjs K1\b` in ci.yml | == 1 |
 | G-K1.21 | ruleset · TC-K1.T5.b | `node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere` | 종료코드 0 |
+| G-K1.22 | TC-K1.T1.c 정규화는 리터럴 밖에서만 | `pnpm -C packages/db test -t "TC-K1.T1.c"` | 통과 = 1 |
+| G-K1.23 | TC-K1.T2.e 멈춘 DB 에도 신호 끊김 | `pnpm -C packages/runtime test -t "TC-K1.T2.e"` | 통과 = 1 |
+| G-K1.24 | TC-K1.T2.f 경계 하나는 한 번 | [L] `pnpm -C packages/runtime test:db -t "TC-K1.T2.f" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
+| G-K1.25 | TC-K1.T3.f 키별 순서 | [L] `pnpm -C apps/server test:db -t "TC-K1.T3.f" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
+| G-K1.26 | TC-K1.T3.g 실패 표시·알림 원자성 | [L] `pnpm -C apps/server test:db -t "TC-K1.T3.g" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
+| G-K1.27 | TC-K1.T3.h 망가진 payload | `pnpm -C apps/server test -t "TC-K1.T3.h"` | 통과 = 1 |
+| G-K1.28 | TC-K1.T3.i 임대 잃은 시도 | `pnpm -C apps/server test -t "TC-K1.T3.i"` | 통과 = 1 |
+| G-K1.29 | 재현 빨강 TC-K1.T3.a | `node scripts/check-red.mjs --check G-K1.7 --since seal:K0` | 종료코드 0 |
+| G-K1.30 | 재현 빨강 TC-K1.T2.e | `… --check G-K1.23 --since seal:K0` | 종료코드 0 |
+| G-K1.31 | 재현 빨강 TC-K1.T2.f | `… --check G-K1.24 --since seal:K0` | 종료코드 0 |
+| G-K1.32 | 재현 빨강 TC-K1.T3.f | `… --check G-K1.25 --since seal:K0` | 종료코드 0 |
+| G-K1.33 | 재현 빨강 TC-K1.T3.g | `… --check G-K1.26 --since seal:K0` | 종료코드 0 |
+| G-K1.34 | 재현 빨강 TC-K1.T3.h | `… --check G-K1.27 --since seal:K0` | 종료코드 0 |
+| G-K1.35 | 재현 빨강 TC-K1.T3.i | `… --check G-K1.28 --since seal:K0` | 종료코드 0 |
+| G-K1.36 | 재현 빨강 TC-K1.T1.c | `… --check G-K1.22 --since seal:K0` | 종료코드 0 |
 
 `node scripts/gate.mjs K1 --seal`
 
@@ -866,7 +914,7 @@ TC-K2.T5.b  ruleset 필수 검사가 이 잡을 포함한다
 선행 없음 · 산출 `apps/server/src/keys/target.ts` · 되돌리기 커밋 1개
 
 【작업】
-1. `targetState({ keyState, disabledReason, userStatus, remaining })` → `deleted | off | on` (계획서 v5.6 5.7 식: 꺼짐 = 회원 status ≠ active 또는 disabled_reason ∈ {member, admin} 또는 남은 한도 0, `remaining` null 은 무제한). `disabled_reason` 넷(`member`·`admin`·`user_status`·`limit`)과 정지 해제·한도 회복 규칙. 커밋.
+1. `targetState({ keyState, disabledReason, userStatus, remaining })` → `deleted | off | on` (계획서 v5.6 5.7 식: 꺼짐 = 회원 status ≠ active 또는 disabled_reason ∈ {member, admin} 또는 남은 한도 0, `remaining` null 은 무제한). `disabled_reason` 넷(`member`·`admin`·`user_status`·`limit`)과 정지 해제·한도 회복 규칙. K1 의 최소 형태 `apps/server/src/queue/target.ts`(`keyTarget(api_keys.state, user.status)`, 작업 큐 `key.apply_state`가 실행할 때 부른다)를 이 함수로 바꾼다 — queue/target.ts 는 이 함수를 부르는 얇은 층이 된다. 커밋.
 
 【테스트】
 ```
@@ -1294,6 +1342,8 @@ E2E 시나리오의 숫자: 한도 반영 ≤ 125,000ms = 지출 기록 60초 + 
 
 **브랜치** `p2/k6`.
 **outputs** 없음 (검사와 문서만).
+
+**백로그 (K1 리뷰 #9)** 끝난 작업(`omniroute_jobs.done_at`) 정리: 기본 30일이 지난 완료 작업을 지우는 주기 정리를 둘지, 감사 로그(`audit_log`)로 대신할 수 있는지(완료 작업에 남는 정보가 감사 로그에 이미 있는가) 검토하고 정한다. 실패 작업(`failed_at`)은 정리하지 않는다 (오래 실패 화면, 7단계).
 
 ### ☐ K6.T1 — 임시 코드 회수
 선행 없음 · 산출 없음 (검사만) · 되돌리기 해당 없음
