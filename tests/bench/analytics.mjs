@@ -6,13 +6,18 @@
 // 1. 측정용 OmniRoute(tests/bench/docker-compose.yml, 127.0.0.1:20171)를 빈 상태로 다시 띄운다 (down → up)
 // 2. 계약 환경과 같은 준비(tests/contract/setup.mjs: 제공자 노드 둘·연결·가격)를 한다
 // 3. 키 300개를 관리 API 로 만든다. 첫 키로 진짜 요청 2건(OpenAI·Anthropic)을 보내 기록 모양을 얻는다
-// 4. 그 두 줄을 본떠 usage_history 에 직접 넣는다. 합계가 정확히 300,000건, 키 300개에 고르게, 이번 달(UTC) 1일 0시부터
-//    지금까지 시각을 고르게. 분석 API 는 usage_history 만 읽고 비용을 조회 시점에 토큰 × 가격표로 계산한다 (확인 15번 evidence).
-//    넣은 뒤 분석 전체 totalRequests == 300,000, byApiKey 키 수 ≥ 300 으로 확인한다
+// 4. 그 두 줄을 본떠 usage_history 에 직접 넣는다. 합계 정확히 300,000건(한 달 분량), 키 300개에 고르게,
+//    오늘(UTC)을 포함한 최근 30일에 하루 10,000건씩. 오늘 몫은 오늘 00:00 UTC 부터 지금까지에 고르게 둔다.
+//    분석 API 는 usage_history 만 읽고 비용을 조회 시점에 토큰 × 가격표로 계산한다 (확인 15번 evidence).
+//    넣은 뒤 30일 창 totalRequests == 300,000·byApiKey ≥ 300, 오늘 창 == 10,000 으로 확인한다
 // 5. 회원 하나 = 키 둘(첫 키 + 둘째 키), 둘째 키는 관리 API 로 지운다 (삭제한 키 포함 조회, 계획서 5.3)
-// 6. 두 호출을 데우기 1번 뒤 10번씩 잰다: 전체 키 한 달(필터 없음, byApiKey 로 회원 묶음) · 회원 하나(apiKeyIds 2개)
+// 6. 세 호출을 데우기 1번 뒤 10번씩 잰다 (계획서 v5.7 5.3)
+//    - 오늘 창: 1분 분배가 매번 부르는 것. startDate 오늘 00:00 UTC, 필터 없음
+//    - 회원 하나: 30일 창, apiKeyIds 2개 (즉시 분배·사용량 화면)
+//    - 대조: 하루 한 번 지난 날 저장값을 다시 맞추는 것. 가장 나쁜 경우(지난 29일)로 잰다
 //    endDate 를 매번 지금으로 줘 응답 캐시를 타지 않는다
-// 7. 결과 JSON 을 출력한다. --assert 면 기준(전체 p95 ≤ 5,000ms, 회원 p95 ≤ 1,000ms, 10회씩)을 넘으면 종료코드 1
+// 7. 결과 JSON 을 출력한다. --assert 면 기준(오늘 창 p95 ≤ 2,000ms, 회원 p95 ≤ 1,000ms,
+//    대조 p95 ≤ 55,000ms(1분 작업 임대), 10회씩)을 넘으면 종료코드 1
 // 8. 측정용 OmniRoute 를 내린다 (--keep 이면 남긴다). Docker 메모리 4GB 에서 계약 환경과 함께 오래 두지 않는다
 //
 // 사람이 쓰는 OmniRoute(localhost:20128)는 쓰지 않는다.
@@ -29,7 +34,10 @@ const PASSWORD = "contract-initial-password-5c1e9a";
 const RECORDS = 300_000;
 const KEYS = 300;
 const RUNS = 10;
-const LIMIT = { fullMonthP95Ms: 5_000, memberP95Ms: 1_000 };
+const DAYS = 30;
+const PER_DAY = RECORDS / DAYS;
+const DAY_MS = 86_400_000;
+const LIMIT = { todayP95Ms: 2_000, memberP95Ms: 1_000, reconcileP95Ms: 55_000 };
 
 const args = new Set(process.argv.slice(2));
 
@@ -63,7 +71,7 @@ async function infer(key, kind) {
   if (res.status !== 200) throw new Error(`${p} → ${res.status}`);
 }
 
-const monthStart = (now) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+const dayStart = (now) => Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
 
 /** usage_history 에 본보기 줄을 본떠 n 건 넣는다 (컨테이너 안 better-sqlite3, OmniRoute 와 같은 파일·WAL) */
 const INSERT = `
@@ -72,7 +80,8 @@ const db = new Database("/app/data/storage.sqlite");
 db.pragma("busy_timeout = 10000");
 const keys = JSON.parse(process.env.BENCH_KEYS);
 const n = Number(process.env.BENCH_N);
-const from = Number(process.env.BENCH_FROM), to = Number(process.env.BENCH_TO);
+const today = Number(process.env.BENCH_TODAY), now = Number(process.env.BENCH_NOW);
+const perDay = Number(process.env.BENCH_PER_DAY), dayMs = 86400000;
 const templates = db.prepare("SELECT * FROM usage_history ORDER BY id").all();
 if (templates.length !== 2) throw new Error("본보기 줄이 2개가 아니다: " + templates.length);
 const cols = Object.keys(templates[0]).filter((c) => c !== "id");
@@ -81,8 +90,11 @@ db.transaction(() => {
   for (let i = 0; i < n; i++) {
     const t = templates[i % 2];
     const k = keys[i % keys.length];
+    // 진짜 요청 2건이 오늘 몫에 이미 있으므로 i + 2 로 날을 나눈다: 날마다 정확히 perDay 건
+    const d = Math.floor((i + 2) / perDay), j = (i + 2) % perDay;
+    const from = today - d * dayMs, span = d === 0 ? Math.max(now - today, 1) : dayMs;
     ins.run({ ...Object.fromEntries(cols.map((c) => [c, t[c]])), api_key_id: k.id, api_key_name: k.name,
-      timestamp: new Date(from + Math.floor(((to - from) * i) / n)).toISOString() });
+      timestamp: new Date(from + Math.floor((span * j) / perDay)).toISOString() });
   }
 })();
 console.log(db.prepare("SELECT COUNT(*) AS n FROM usage_history").get().n);
@@ -128,28 +140,36 @@ async function main() {
   }
 
   const now = new Date();
-  const from = monthStart(now).getTime();
+  const today = dayStart(now);
+  const from = today - (DAYS - 1) * DAY_MS;
   const total = Number(dockerExec(INSERT, {
     BENCH_KEYS: JSON.stringify(keys.map((k) => ({ id: k.id, name: k.name }))),
     BENCH_N: String(RECORDS - 2),
-    BENCH_FROM: String(from),
-    BENCH_TO: String(now.getTime() - 60_000),
+    BENCH_TODAY: String(today),
+    BENCH_NOW: String(now.getTime() - 60_000),
+    BENCH_PER_DAY: String(PER_DAY),
   }));
 
   const [member1, member2] = keys;
   await http("DELETE", `/api/keys/${member2.id}`, { token: tok.token });
 
-  const window = () => `startDate=${new Date(from).toISOString()}&endDate=${new Date().toISOString()}`;
-  const fullMonth = await measure("full", () => `/api/usage/analytics?${window()}`);
-  const full = globalThis.last_full;
-  const member = await measure("member", () => `/api/usage/analytics?apiKeyIds=${member1.id},${member2.id}&${window()}`);
+  const iso = (t) => new Date(t).toISOString();
+  const all = await http("GET", `/api/usage/analytics?startDate=${iso(from)}&endDate=${iso(Date.now())}`, { token: tok.token });
+  const todayWindow = await measure("today", () => `/api/usage/analytics?startDate=${iso(today)}&endDate=${iso(Date.now())}`);
+  const member = await measure("member", () => `/api/usage/analytics?apiKeyIds=${member1.id},${member2.id}&startDate=${iso(from)}&endDate=${iso(Date.now())}`);
+  const reconcile = await measure("reconcile", () => `/api/usage/analytics?startDate=${iso(from)}&endDate=${iso(today - 1)}`);
   const mem = globalThis.last_member;
 
   const arch = spawnSync("docker", ["compose", "-f", COMPOSE, "exec", "-T", "omniroute", "uname", "-m"], { encoding: "utf8" }).stdout.trim();
   const result = {
-    dataset: { records: full.summary.totalRequests, keys: full.byApiKey.length, inserted: total, memberRequests: mem.summary.totalRequests },
-    fullMonth,
+    dataset: {
+      records: all.summary.totalRequests, keys: all.byApiKey.length, inserted: total, days: DAYS,
+      todayRecords: globalThis.last_today.summary.totalRequests, reconcileRecords: globalThis.last_reconcile.summary.totalRequests,
+      memberRequests: mem.summary.totalRequests,
+    },
+    todayWindow,
     member,
+    reconcile,
     arch,
     host: `${os.platform()} ${os.arch()}`,
   };
@@ -160,18 +180,22 @@ async function main() {
   }
 
   // 한 줄 요약. 게이트는 실패한 검사 출력의 끝 30줄만 보여 주므로 결과 JSON 이 잘려도 이 줄은 남는다
-  console.error(`bench: 결과 ${JSON.stringify({ arch, records: result.dataset.records, keys: result.dataset.keys, fullMonth: fullMonth.ms, member: member.ms })}`);
+  console.error(`bench: 결과 ${JSON.stringify({ arch, ...result.dataset, today: todayWindow.ms, member: member.ms, reconcile: reconcile.ms })}`);
   if (args.has("--assert")) {
     const problems = [];
-    if (result.dataset.records !== RECORDS) problems.push(`분석 전체 totalRequests ${result.dataset.records} (기대 ${RECORDS})`);
-    if (result.dataset.keys < KEYS) problems.push(`byApiKey 키 ${result.dataset.keys}개 (기대 ≥ ${KEYS})`);
+    const d = result.dataset;
+    if (d.records !== RECORDS) problems.push(`30일 창 totalRequests ${d.records} (기대 ${RECORDS})`);
+    if (d.keys < KEYS) problems.push(`byApiKey 키 ${d.keys}개 (기대 ≥ ${KEYS})`);
+    if (d.todayRecords !== PER_DAY) problems.push(`오늘 창 totalRequests ${d.todayRecords} (기대 ${PER_DAY})`);
+    if (d.reconcileRecords !== RECORDS - PER_DAY) problems.push(`대조 창 totalRequests ${d.reconcileRecords} (기대 ${RECORDS - PER_DAY})`);
     // 넣은 줄 i 는 키 i % KEYS 의 것이고, 첫 키에는 진짜 요청 2건이 더 있다
     const rowsOf = (k) => Math.floor((RECORDS - 2 - 1 - k) / KEYS) + 1;
     const memberWant = rowsOf(0) + rowsOf(1) + 2;
-    if (result.dataset.memberRequests !== memberWant) problems.push(`회원 하나(키 둘, 하나 삭제) totalRequests ${result.dataset.memberRequests} (기대 ${memberWant})`);
-    if (fullMonth.runs < RUNS || member.runs < RUNS) problems.push(`측정 횟수 ${fullMonth.runs}·${member.runs} (기대 ${RUNS})`);
-    if (fullMonth.p95Ms > LIMIT.fullMonthP95Ms) problems.push(`전체 키 한 달 p95 ${fullMonth.p95Ms}ms (기준 ≤ ${LIMIT.fullMonthP95Ms})`);
+    if (d.memberRequests !== memberWant) problems.push(`회원 하나(키 둘, 하나 삭제) totalRequests ${d.memberRequests} (기대 ${memberWant})`);
+    for (const [name, m] of [["오늘 창", todayWindow], ["회원 하나", member], ["대조", reconcile]]) if (m.runs < RUNS) problems.push(`${name} 측정 횟수 ${m.runs} (기대 ${RUNS})`);
+    if (todayWindow.p95Ms > LIMIT.todayP95Ms) problems.push(`오늘 창 p95 ${todayWindow.p95Ms}ms (기준 ≤ ${LIMIT.todayP95Ms})`);
     if (member.p95Ms > LIMIT.memberP95Ms) problems.push(`회원 하나 p95 ${member.p95Ms}ms (기준 ≤ ${LIMIT.memberP95Ms})`);
+    if (reconcile.p95Ms > LIMIT.reconcileP95Ms) problems.push(`대조 p95 ${reconcile.p95Ms}ms (기준 ≤ ${LIMIT.reconcileP95Ms}, 임대)`);
     if (problems.length) {
       for (const p of problems) console.error(`bench: ${p}`);
       process.exitCode = 1;
