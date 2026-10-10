@@ -208,8 +208,17 @@ export function createClient(o: ConnectOptions & { credential: Credential }) {
     /** 이 자격 증명의 범위. 접근 토큰이면 어떤 범위든 200 이다 (V10 tokenScopeVisibility) */
     whoami: () => req({ method: "GET", path: "/api/cli/whoami" }, whoamiSchema),
 
+    /**
+     * 모든 키. 3.8.51 은 limit 을 주지 않으면 페이지를 나누지 않고 전부 준다 (V28: SELECT * FROM api_keys ORDER BY created_at).
+     * 받은 키가 total 보다 적으면 목록이 잘린 것으로 보고 OmniRouteFormatError 다 — 정합성 점검이 일부 키만 보고 지나가지 않게 (fail-closed).
+     * 목록과 total 은 OmniRoute 가 따로 읽어 그 사이 키가 생기면 keys 가 더 많을 수 있다. 그것은 받는다
+     */
     async listKeys(): Promise<KeyInfo[]> {
-      return (await req({ method: "GET", path: "/api/keys" }, keyListSchema)).keys;
+      const r = await req({ method: "GET", path: "/api/keys" }, keyListSchema);
+      if (r.keys.length < r.total) {
+        throw new OmniRouteFormatError("GET", "/api/keys", [{ code: "custom", path: ["keys"], message: `키 ${r.keys.length}개, total ${r.total} (목록이 잘렸다)`, input: r.total }]);
+      }
+      return r.keys;
     },
 
     /** 원문 키는 이 응답에 한 번만 온다. 저장하지 않고 회원에게 한 번 보여 준다 (계획서 5.2) */

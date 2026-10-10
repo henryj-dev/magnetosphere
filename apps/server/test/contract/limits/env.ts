@@ -15,7 +15,7 @@ import { writeSetting } from "../../../src/limits/store.ts";
 import { makeTestEnv, type TestEnv } from "../../helpers.ts";
 
 export const OMNI_URL = process.env.OMNI_URL ?? "http://127.0.0.1:20170";
-const OMNI_PASSWORD = process.env.OMNI_PASSWORD ?? "contract-initial-password-5c1e9a";
+export const OMNI_PASSWORD = process.env.OMNI_PASSWORD ?? "contract-initial-password-5c1e9a";
 /** tests/contract/setup.mjs 가 등록한 가짜 모델의 요청 1건 비용 (0단계 회원 B, TC-S5.T2.e) */
 export const OPENAI_COST = 0.00221;
 export const THREE_COST = 0.00221 + 0.0062115 * 2;
@@ -23,6 +23,8 @@ export const THREE_COST = 0.00221 + 0.0062115 * 2;
 export interface Ctx {
   env: TestEnv;
   h: DbHandle;
+  /** 이 시험의 접근 토큰 (write). 끝나면 회수한다 */
+  token: string;
   client: OmniRouteClient;
   /** 어댑터 호출 기록 (함수 이름과 키 id) */
   calls: { fn: string; id: string; value?: unknown }[];
@@ -59,6 +61,7 @@ export async function open(name: string): Promise<Ctx> {
   const ctx: Ctx = {
     env,
     h,
+    token: t.token,
     client,
     calls,
     limits,

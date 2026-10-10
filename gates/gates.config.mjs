@@ -290,7 +290,7 @@ export const GATES = {
       { id: "G-K0.11", how: "cmd", desc: "TC-K0.T3.a·b concurrency 규칙 (음성 대조 포함)", cmd: "node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-guard/concurrency-cancel-main.yml --expect 6 --expect-fail" },
       // K0.T4 확인 결과 검사기 항목 묶음
       { id: "G-K0.12", how: "test", desc: "TC-K0.T4.a~e check-verify --set 음성 대조", cmd: nodeTest("scripts/check-verify.test.mjs", "TC-K0.T4"), expectPassed: 5 },
-      { id: "G-K0.13", how: "cmd", desc: "확인 파일 6개 존재·모양", cmd: "node scripts/check-verify.mjs present --set phase2" },
+      { id: "G-K0.13", how: "cmd", desc: "확인 파일 7개 존재·모양 (V28 은 K3 리뷰)", cmd: "node scripts/check-verify.mjs present --set phase2" },
       { id: "G-K0.14", how: "cmd", desc: "설계를 막는 결과 없음", cmd: "node scripts/check-verify.mjs unblocked --set phase2" },
       { id: "G-K0.15", how: "cmd", desc: "막았던 결과는 현재 계획서 버전을 가리킴", cmd: "node scripts/check-verify.mjs resolved --set phase2" },
       // K0.T5~T10 확인 항목 (계약 환경 127.0.0.1:20170 에서 관찰 == V<n>.json answer)
@@ -475,7 +475,53 @@ export const GATES = {
     waivable: false,
     strictTests: true,
     outputs: ["apps/server/src/keys/**", "apps/server/test/keys/**", "apps/server/test/contract/keys/**"],
-    checks: [],
+    checks: [
+      // K3.T1 목표 상태 함수 (순수 함수)
+      { id: "G-K3.1", how: "test", desc: "TC-K3.T1.a 조합 표가 계획서 5.7 과 같다 (Q1)", cmd: 'pnpm -C apps/server test -t "TC-K3.T1.a"', expectPassed: 1 },
+      { id: "G-K3.2", how: "test", desc: "TC-K3.T1.b 정지 해제·한도 회복은 user_status·limit 키만 켠다 (Q1)", cmd: 'pnpm -C apps/server test -t "TC-K3.T1.b"', expectPassed: 1 },
+      // K3.T2 반영: 즉시 실행, 실패하면 큐
+      { id: "G-K3.3", how: "test", desc: "TC-K3.T2.a 끄기는 응답 전에 OmniRoute 에 반영", cmd: 'pnpm -C apps/server test -t "TC-K3.T2.a"', expectPassed: 1 },
+      { id: "G-K3.4", how: "test", desc: "TC-K3.T2.b OmniRoute 실패면 pending·1분 뒤 재시도 (Q2)", cmd: 'pnpm -C apps/server test -t "TC-K3.T2.b"', expectPassed: 1 },
+      { id: "G-K3.5", how: "test", desc: "TC-K3.T2.c 목표가 켜짐이 아니면 켜지 않는다 (409)", cmd: 'pnpm -C apps/server test -t "TC-K3.T2.c"', expectPassed: 1 },
+      { id: "G-K3.6", how: "test", desc: "TC-K3.T2.d 켜기 전에 예산을 건다", cmd: 'pnpm -C apps/server test -t "TC-K3.T2.d"', expectPassed: 1 },
+      { id: "G-K3.18", how: "test", desc: "TC-K3.T2.e 삭제는 끄기 먼저, DELETE 는 끈 뒤 120,000ms (V18)", cmd: 'pnpm -C apps/server test -t "TC-K3.T2.e"', expectPassed: 1 },
+      { id: "G-K3.20", how: "test", desc: "TC-K3.T2.f 작업 큐가 삭제 목표 키를 끄면 key.delete 를 끈 뒤 2분으로 (V18)", cmd: 'pnpm -C apps/server test -t "TC-K3.T2.f"', expectPassed: 1 },
+      // K3.T3 정합성 점검 (5분)
+      { id: "G-K3.7", how: "test", requires: ["local-services"], desc: "TC-K3.T3.a OmniRoute 에서 켜진 키의 목표가 꺼짐이면 점검이 끈다 (계약)", cmd: 'pnpm test:contract -t "TC-K3.T3.a"', expectPassed: 1 },
+      { id: "G-K3.8", how: "test", desc: "TC-K3.T3.b 매핑 없는 m_ 키는 알리기만 (Q6)", cmd: 'pnpm -C apps/server test -t "TC-K3.T3.b"', expectPassed: 1 },
+      { id: "G-K3.9", how: "test", requires: ["local-services"], desc: "TC-K3.T3.c scopes manage 가 붙은 키는 끄고 알린다 (계약, V10)", cmd: 'pnpm test:contract -t "TC-K3.T3.c"', expectPassed: 1 },
+      { id: "G-K3.10", how: "test", desc: "TC-K3.T3.d 점검은 임대를 잃으면 멈춘다", cmd: 'pnpm -C apps/server test -t "TC-K3.T3.d"', expectPassed: 1 },
+      { id: "G-K3.11", how: "test", requires: ["local-services"], desc: "TC-K3.T3.e 탈퇴 회원 키는 점검이 삭제한다 (V18, 네 DB)", cmd: 'pnpm -C apps/server test:db -t "TC-K3.T3.e" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-K3.19", how: "test", desc: "TC-K3.T3.g 재시도를 다 쓴 키도 점검이 다시 맞춘다 (Q3)", cmd: 'pnpm -C apps/server test -t "TC-K3.T3.g"', expectPassed: 1 },
+      { id: "G-K3.21", how: "test", desc: "TC-K3.T3.h 작업 큐가 남긴 어긋남을 점검이 맞춘다 (K1 메모)", cmd: 'pnpm -C apps/server test -t "TC-K3.T3.h"', expectPassed: 1 },
+      { id: "G-K3.16", how: "test", desc: "TC-K3.T3.f 점검 5분 등록·TC-K1.T4.b wrangler crons == JOBS crons", cmd: 'pnpm -C apps/server test -t "TC-K3.T3.f" && pnpm -C apps/server test -t "TC-K1.T4.b"', expectPassed: 2 },
+      { id: "G-K3.17", how: "grep", desc: "5분 주기 상수", pattern: 'name: "reconcile", cron: "\\*/5 \\* \\* \\* \\*"', in: ["apps/server/src/jobs.ts"], op: "==", limit: 1 },
+      // 공통
+      { id: "G-K3.12", how: "test", requires: ["local-services"], desc: "TC-S5.T2.i 어댑터 키 수정 본문에 scopes 없음 (1단계 회귀, 테스트 둘)", cmd: 'pnpm test:contract -t "TC-S5.T2.i"', expectPassed: 2 },
+      { id: "G-K3.13", how: "cmd", desc: "타입 검사", cmd: "pnpm -r typecheck" },
+      // 재현 빨강
+      { id: "G-K3.22", how: "cmd", desc: "재현 빨강: TC-K3.T2.f 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K3.20 --since seal:K2" },
+      { id: "G-K3.23", how: "cmd", desc: "재현 빨강: TC-K3.T3.f 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K3.16 --since seal:K2" },
+      // K3 리뷰 고침 (#1~#9)
+      { id: "G-K3.24", how: "test", requires: ["local-services"], desc: "TC-K3.T2.g 정지·해제 반영이 admin 이유를 건드리지 않는다 (네 DB, 리뷰 #9)", cmd: 'pnpm -C apps/server test:db -t "TC-K3.T2.g" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-K3.25", how: "test", desc: "TC-K3.T2.h 분배의 limit 켜기 실패는 active·pending·큐 1분 뒤 (리뷰 #9)", cmd: 'pnpm -C apps/server test -t "TC-K3.T2.h"', expectPassed: 1 },
+      { id: "G-K3.26", how: "test", desc: "TC-K3.T2.i 사라진 키(404)가 다른 키 켜기를 막지 않는다·alert.key_missing (리뷰 #6)", cmd: 'pnpm -C apps/server test -t "TC-K3.T2.i"', expectPassed: 1 },
+      { id: "G-K3.27", how: "test", desc: "TC-K3.T3.i manage 범위 키는 이유와 상관없이 admin 고정 (리뷰 #1, V10)", cmd: 'pnpm -C apps/server test -t "TC-K3.T3.i"', expectPassed: 1 },
+      { id: "G-K3.28", how: "test", desc: "TC-K3.T3.j 점검 시간 예산·이어 가기·끊겨도 알림 (리뷰 #2)", cmd: 'pnpm -C apps/server test -t "TC-K3.T3.j"', expectPassed: 1 },
+      { id: "G-K3.29", how: "test", requires: ["local-services"], desc: "TC-K3.T3.k listKeys 는 limit 없이 모든 키 (계약, V28, 리뷰 #3)", cmd: 'pnpm test:contract -t "TC-K3.T3.k"', expectPassed: 1 },
+      { id: "G-K3.30", how: "test", desc: "TC-K3.T3.l 키 목록이 total 보다 적으면 형식 오류 (V28, 리뷰 #3)", cmd: 'pnpm -C packages/omniroute test -t "TC-K3.T3.l"', expectPassed: 1 },
+      { id: "G-K3.31", how: "test", desc: "TC-K3.T3.m 옛 목록 값으로 synced 를 적지 않는다 (리뷰 #4)", cmd: 'pnpm -C apps/server test -t "TC-K3.T3.m"', expectPassed: 1 },
+      { id: "G-K3.32", how: "test", desc: "TC-K3.T3.n 이유 없는 꺼진 키는 alert.key_stuck 하루 한 번 (리뷰 #8)", cmd: 'pnpm -C apps/server test -t "TC-K3.T3.n"', expectPassed: 1 },
+      { id: "G-K3.33", how: "cmd", desc: "재현 빨강: TC-K3.T2.i 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K3.26 --since seal:K2" },
+      { id: "G-K3.34", how: "cmd", desc: "재현 빨강: TC-K3.T3.i 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K3.27 --since seal:K2" },
+      { id: "G-K3.35", how: "cmd", desc: "재현 빨강: TC-K3.T3.j 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K3.28 --since seal:K2" },
+      { id: "G-K3.36", how: "cmd", desc: "재현 빨강: TC-K3.T3.l 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K3.30 --since seal:K2" },
+      { id: "G-K3.37", how: "cmd", desc: "재현 빨강: TC-K3.T3.m 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K3.31 --since seal:K2" },
+      { id: "G-K3.38", how: "cmd", desc: "재현 빨강: TC-K3.T3.n 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K3.32 --since seal:K2" },
+      // K3.T4 CI 단계 잡과 ruleset 필수 검사
+      { id: "G-K3.14", how: "grep", desc: "TC-K3.T4.a CI 단계 잡 (K3)", pattern: "^\\s+run: node scripts/gate\\.mjs K3\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
+      { id: "G-K3.15", how: "cmd", desc: "TC-K3.T4.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
+    ],
   },
   K4: {
     needs: ["K3"],

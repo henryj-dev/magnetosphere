@@ -29,8 +29,12 @@ export const createdKeySchema = z.object({
   name: z.string(),
 });
 
-/** GET /api/keys. scopes 는 정합성 점검이 manage·admin 이 붙은 키를 찾는 데 쓴다 (계획서 5.8) */
+/**
+ * GET /api/keys. scopes 는 정합성 점검이 manage·admin 이 붙은 키를 찾는 데 쓴다 (계획서 5.8).
+ * total 은 키 전체 수다. limit 을 주지 않으면 모든 키가 한 번에 온다 (V28). 어댑터는 keys 가 total 보다 적으면 오류로 끝낸다
+ */
 export const keyListSchema = z.object({
+  total: z.number().int().nonnegative(),
   keys: z.array(
     z.object({
       id: z.string().min(1),

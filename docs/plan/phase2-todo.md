@@ -1000,12 +1000,12 @@ TC-K2.T5.b  ruleset 필수 검사가 이 잡을 포함한다
 
 ---
 
-# K3 — 키 목표 상태·반영·정합성 점검 🔒 (K2 필요)
+# K3 — 키 목표 상태·반영·정합성 점검 🔓 (K2 필요)
 
 **브랜치** `p2/k3`.
 **outputs** `apps/server/src/keys/**`, `apps/server/test/keys/**`, `apps/server/test/contract/keys/**`.
 
-### ☐ K3.T1 — 목표 상태 함수
+### ☑ K3.T1 — 목표 상태 함수
 선행 없음 · 산출 `apps/server/src/keys/target.ts` · 되돌리기 커밋 1개
 
 【작업】
@@ -1022,10 +1022,10 @@ TC-K3.T1.b  정지를 풀면 user_status 때문에, 한도가 생기면 limit �
 ```
 
 【통과】
-- [ ] G-K3.1 · G-K3.2 통과
+- [x] G-K3.1 · G-K3.2 통과
 
-### ☐ K3.T2 — 반영: 즉시 실행, 실패하면 큐
-선행 K3.T1 · 산출 `apps/server/src/keys/apply.ts` · 되돌리기 커밋 1개
+### ☑ K3.T2 — 반영: 즉시 실행, 실패하면 큐
+선행 K3.T1 · 산출 `apps/server/src/keys/apply.ts` · 되돌리기 커밋 1개 · 장치 요구 `Red: TC-K3.T2.f`, `Red: TC-K3.T2.i`
 
 【작업】
 1. `applyKey(keyId)`: 목표 계산 → OmniRoute 상태가 다르면 즉시 `setKeyActive`. 목표가 삭제됨이면 즉시 `setKeyActive(false)` 하고 `key.delete` 작업을 끈 시각 + 2분 뒤로 잡는다 (계획서 v5.6 5.2, V18: 끈 뒤 60초가 지나야 DELETE 해도 옛 원문 키가 다시 열리지 않는다). 켜기 직전 `rebalanceMember`(K2.T4)로 예산을 먼저 건다. 2xx 면 `sync_state = synced`, 실패하면 `pending` + `key.apply_state` 작업(첫 재시도 1분, Q2). K2.T6 분배의 limit 끄기·켜기를 이 함수로 바꾼다. 끄기·정지는 반영이 끝나야 "완료" — API 응답은 `sync_state`를 그대로 준다 (화면 "반영 중" 표시는 4단계·7단계). 커밋.
@@ -1047,15 +1047,28 @@ TC-K3.T2.d  켜기 전에 예산을 건다
 TC-K3.T2.e  삭제는 끄기 먼저, DELETE 는 끈 뒤 2분이 지나서다 (V18 의존)
   단언:  목표 삭제됨 → 응답 전 setKeyActive(false) 1건·deleteKey 0건, key.delete 작업 next_run_at − 끈 시각 == 120,000ms, 그 작업 실행 → deleteKey 1건
   검출:  바로 DELETE 해 OmniRoute 키 검증 캐시(60초) 동안 옛 원문 키가 예산·기록 없이 통과하는 것 (V18 rawKeyAfterDelete 200)
+TC-K3.T2.f  작업 큐가 삭제 목표 키를 끄면 key.delete 를 끈 뒤 2분으로 잡는다 (V18 의존)
+  단언:  state deleted 키의 key.apply_state 실행 → setKeyActive(false) 1건, key.delete 작업 next_run_at − 끈 시각 == 120,000ms, sync_state synced
+  검출:  K1 핸들러가 삭제 목표 키를 끄기만 하고 key.delete 를 잡지 않아, 즉시 반영의 끄기가 실패해 큐로 넘어간 삭제가 OmniRoute 에 꺼진 키로 영영 남는 것
+TC-K3.T2.g  정지·해제 반영이 admin 이유를 건드리지 않는다 (네 DB, K3 리뷰 #9)
+  단언:  회원 suspended, 키 둘(disabled·admin, active) → applyKey 둘 → (disabled, admin)·(disabled, user_status) → 회원 active → applyKey 둘 → (disabled, admin)·(active, NULL)
+  검출:  normalize 가 이유를 가리지 않고 user_status 로 덮어, 정지 해제가 관리자가 끈 키까지 켜는 것
+TC-K3.T2.h  1분 분배의 limit 켜기가 실패하면 active·pending 으로 남고 큐가 1분 뒤 다시 켠다 (K3 리뷰 #9)
+  단언:  limit 키, 한도 회복 → [getAnalytics, setBudget, setKeyActive(true)] 중 마지막 503 → state active·disabled_reason NULL·sync_state pending, key.apply_state next_run_at − 분배 시각 == 60,000ms
+  검출:  DB 를 먼저 active 로 적은 뒤 켜기 실패를 삼켜, 꺼진 키가 "켜짐·synced" 로 보이거나 아무도 다시 켜지 않는 것
+TC-K3.T2.i  OmniRoute 에서 사라진 키 하나가 회원의 다른 키 켜기를 막지 않는다 (K3 리뷰 #6)
+  단언:  월 한도 5 회원, 켤 키 A·setBudget 이 404 인 키 B → applyKey(A) → A 켜짐·synced, B sync_state missing, alert.key_missing 1행(target B, 두 번 반영해도 1행)
+  검출:  404 를 일반 실패로 세어 rebalanceMember 가 던지고, 사라진 키 하나 때문에 그 회원의 다른 키가 영영 켜지지 않는 것
 ```
 
 【통과】
-- [ ] G-K3.3 ~ G-K3.6 · G-K3.18 통과
+- [x] G-K3.3 ~ G-K3.6 · G-K3.18 · G-K3.20 · G-K3.22 통과
+- [x] G-K3.24 ~ G-K3.26 · G-K3.33 통과 (K3 리뷰)
 
-### ☐ K3.T3 — 정합성 점검 (5분)
+### ☑ K3.T3 — 정합성 점검 (5분)
 
 > K1 메모 (K1 재검토): 작업 큐는 두 경우를 스스로 끝까지 맞추지 않고 이 점검에 맡긴다. (1) `key.apply_state` 핸들러의 "걸고 다시 읽기"는 두 번까지라, 그 사이 목표가 계속 바뀌면 어긋남이 남을 수 있다. (2) 한 tick 안에서 앞 작업이 오래 걸려 뒤 작업의 실패가 늦게 적히면, 다음 시도 전까지 OmniRoute 상태가 목표와 어긋난 채 남는다. 이 점검이 5분마다 모든 키를 목표 상태로 맞추므로 두 어긋남은 최대 5분이다. 이 단계의 TC 는 이 두 경우를 덮어야 한다.
-선행 K3.T2 · 산출 `apps/server/src/keys/reconcile.ts`, `apps/server/test/contract/keys/**` · 되돌리기 커밋 1개
+선행 K3.T2 · 산출 `apps/server/src/keys/reconcile.ts`, `apps/server/test/contract/keys/**` · 되돌리기 커밋 1개 · 장치 요구 `Red: TC-K3.T3.f`, `Red: TC-K3.T3.i·j·l·m·n`
 
 【작업】
 1. `reconcile` 본문: `listKeys()` → 매핑된 키마다 실제 `isActive`를 목표와 비교해 `applyKey` (`sync_state failed` 키 포함, Q3). 매핑 없는 `m_` 키 → `audit_log` `alert.unknown_m_key` (Q6), 삭제·변경 없음. `m_` 키 중 `scopes`에 `manage`·`admin`이 있으면 끄고 `alert.manage_scope_key` (5.8). 회원 상태 변화(DB 에서 바뀐 정지·탈퇴)도 이 점검이 반영한다. 임대·펜싱 아래서 돈다. `JOBS`에 `{ name: "reconcile", cron: "*/5 * * * *" }`를 등록한다 (1단계 `JOB_CRON`과 wrangler crons 의 `"*/5 * * * *"`가 이미 있다). 커밋.
@@ -1083,12 +1096,34 @@ TC-K3.T3.e  탈퇴 회원 키는 점검이 삭제한다 (V18 의존)
 TC-K3.T3.g  재시도를 다 쓴 키도 점검이 다시 맞춘다 (Q3 의존)
   단언:  sync_state failed 인 키(목표 off, OmniRoute isActive true) → reconcile 1회 → setKeyActive(false) 1건, sync_state synced
   검출:  failed 를 "포기"로 읽어 정지한 회원의 키가 다음 점검에서도 켜진 채 남는 것
+TC-K3.T3.h  작업 큐가 남긴 어긋남을 점검이 맞춘다 (K1 메모)
+  단언:  ① key.apply_state 실행 중 목표가 매번 뒤집혀 핸들러가 다시 읽기 상한(APPLY_ROUNDS)에서 끝나 OmniRoute ≠ 목표 ② 끄기 재시도가 10분 뒤로 잡힌(늦게 적힌 실패) 키 → reconcile 1회 → 둘 다 목표대로, sync_state synced
+  검출:  점검이 sync_state·실제 isActive 를 보지 않고 큐에 맡겨, 큐가 스스로 끝까지 맞추지 않는 두 경우의 어긋남이 다음 시도(최대 30분)나 영영 남는 것
+TC-K3.T3.i  manage 범위 키는 꺼진 이유와 상관없이 admin 으로 고정한다 (K3 리뷰 #1, V10)
+  단언:  회원이 끈 키(member)에 scopes [manage] → reconcile → disabled_reason admin, alert.manage_scope_key 1행, 회원 켜기 요청 → KeyConflictError(409)
+  검출:  member 로 꺼진 키는 admin 으로 바꾸지 않아, 회원이 다시 켜면 admin 급 키가 다음 점검까지 최대 5분 열리는 것
+TC-K3.T3.j  점검은 시간 예산 안에서 멈추고 다음 실행이 이어 가며, 끊겨도 꺼진 키의 알림은 남는다 (K3 리뷰 #2)
+  단언:  어긋난 키 다섯·한 실행에 셋(budgetMs) → 첫 실행 stopped true, 두 번째 stopped false, 다섯 모두 꺼짐. 매핑 없는 manage 키를 끈 다음 키에서 임대를 잃음 → 점검 실패, alert.manage_scope_key 1행
+  검출:  시간 예산·이어 갈 위치가 없어 Workers 실행 시간 상한에 매번 앞쪽 키만 보고 끊기는 것, 알림을 끝에 몰아 써서 끊기면 키는 꺼졌는데 알림이 없는 것
+TC-K3.T3.k  listKeys 는 limit 없이 모든 키를 한 번에 받는다 (계약, V28)
+  단언:  OmniRoute 키 120개 이상 → listKeys 한 번 → 만든 키가 모두 있고 개수 ≥ 120
+  검출:  목록이 기본 개수에서 잘려 뒤쪽 키(정지 회원 키·manage 키)를 점검이 영영 보지 못하는 것
+TC-K3.T3.l  키 목록이 total 보다 적으면 형식 오류로 끝낸다 (V28, fail-closed)
+  단언:  { keys 1개, total 2 } → OmniRouteFormatError, total 없음도 오류. 대조 { keys 1개, total 1 } → 그 키
+  검출:  OmniRoute 가 페이지를 나누기 시작해도 잘린 목록을 전부로 읽는 것
+TC-K3.T3.m  옛 목록 값으로 synced 를 적지 않는다 (K3 리뷰 #4)
+  단언:  sync_state pending·목표 off 키, 목록 isActive false(옛 값)·실제 켜짐 → reconcile → setKeyActive(false) 1건, 실제 꺼짐, synced
+  검출:  점검 시작 때 읽은 목록 값만 믿고 부르지 않은 채 synced 로 적어, 켜진 키가 "맞춰짐"으로 남는 것
+TC-K3.T3.n  disabled 인데 이유가 없는 키는 alert.key_stuck 을 하루 한 번 남긴다 (K3 리뷰 #8)
+  단언:  state disabled·disabled_reason NULL 키 → reconcile 두 번(같은 날) → alert.key_stuck 1행, setKeyActive 0건
+  검출:  누가 왜 껐는지 모르는 키가 fail-closed 로 영영 꺼진 채 아무도 모르는 것
 ```
 
 【통과】
-- [ ] G-K3.7 ~ G-K3.11 · G-K3.16 · G-K3.17 · G-K3.19 통과
+- [x] G-K3.7 ~ G-K3.11 · G-K3.16 · G-K3.17 · G-K3.19 · G-K3.21 · G-K3.23 통과
+- [x] G-K3.27 ~ G-K3.32 · G-K3.34 ~ G-K3.38 통과 (K3 리뷰)
 
-### ☐ K3.T4 — K3 CI 잡과 봉인
+### ◐ K3.T4 — K3 CI 잡과 봉인
 선행 K3.T1 ~ K3.T3 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
 
 【작업】
@@ -1113,20 +1148,30 @@ TC-K3.T4.b  ruleset 필수 검사가 이 잡을 포함한다
 
 | id | 검사 | 명령 | 통과 기준 |
 |---|---|---|---|
-| G-K3.1 · 2 | TC-K3.T1.a · b | `pnpm -C apps/server test -t "TC-K3.T1.<x>"` | 각 통과 = 1 (a 는 12 칸 표 한 테스트) |
+| G-K3.1 · 2 | TC-K3.T1.a · b | `pnpm -C apps/server test -t "TC-K3.T1.<x>"` | 각 통과 = 1 (a 는 36 칸 표 한 테스트) |
 | G-K3.3 ~ 6 | TC-K3.T2.a ~ d | `pnpm -C apps/server test -t "TC-K3.T2.<x>"` | 각 통과 = 1, b 는 next_run_at − now == 60,000ms |
 | G-K3.18 | TC-K3.T2.e 삭제 순서 | `pnpm -C apps/server test -t "TC-K3.T2.e"` | 통과 = 1, 끄기 뒤 120,000ms |
+| G-K3.20 | TC-K3.T2.f 큐의 삭제 반영 | `pnpm -C apps/server test -t "TC-K3.T2.f"` | 통과 = 1 |
+| G-K3.24 | TC-K3.T2.g admin 이유 유지 | [L] `pnpm -C apps/server test:db -t "TC-K3.T2.g" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
+| G-K3.25 · 26 | TC-K3.T2.h · i | `pnpm -C apps/server test -t "TC-K3.T2.<x>"` | 각 통과 = 1 |
 | G-K3.7 | TC-K3.T3.a 어긋난 상태 맞춤 | [L] `pnpm test:contract -t "TC-K3.T3.a"` | 통과 = 1 |
 | G-K3.8 | TC-K3.T3.b 매핑 없는 m_ 키 | `pnpm -C apps/server test -t "TC-K3.T3.b"` | 통과 = 1 |
 | G-K3.9 | TC-K3.T3.c scopes manage 감지 | [L] `pnpm test:contract -t "TC-K3.T3.c"` | 통과 = 1 |
 | G-K3.10 | TC-K3.T3.d 임대 잃으면 멈춤 | `pnpm -C apps/server test -t "TC-K3.T3.d"` | 통과 = 1 |
 | G-K3.11 | TC-K3.T3.e 탈퇴 회원 키 | [L] `pnpm -C apps/server test:db -t "TC-K3.T3.e" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
 | G-K3.19 | TC-K3.T3.g failed 키 다시 맞춤 | `pnpm -C apps/server test -t "TC-K3.T3.g"` | 통과 = 1 |
-| G-K3.12 | 어댑터 키 수정 본문에 scopes 없음 (1단계 회귀) | [L] `pnpm test:contract -t "TC-S5.T2.i"` | 통과 = 1 |
+| G-K3.21 | TC-K3.T3.h 큐가 남긴 어긋남 | `pnpm -C apps/server test -t "TC-K3.T3.h"` | 통과 = 1 |
+| G-K3.27 · 28 | TC-K3.T3.i · j | `pnpm -C apps/server test -t "TC-K3.T3.<x>"` | 각 통과 = 1 |
+| G-K3.29 | TC-K3.T3.k 목록 전부 (V28) | [L] `pnpm test:contract -t "TC-K3.T3.k"` | 통과 = 1 |
+| G-K3.30 | TC-K3.T3.l 목록 개수 검사 | `pnpm -C packages/omniroute test -t "TC-K3.T3.l"` | 통과 = 1 |
+| G-K3.31 · 32 | TC-K3.T3.m · n | `pnpm -C apps/server test -t "TC-K3.T3.<x>"` | 각 통과 = 1 |
+| G-K3.12 | 어댑터 키 수정 본문에 scopes 없음 (1단계 회귀) | [L] `pnpm test:contract -t "TC-S5.T2.i"` | 통과 = 2 (TC-S5.T2.i 는 테스트 둘) |
 | G-K3.13 | 타입 검사 | `pnpm -r typecheck` | 종료코드 0 |
 | G-K3.14 | TC-K3.T4.a CI 단계 잡 | grep `^\s+run: node scripts/gate\.mjs K3\b` in ci.yml | == 1 |
 | G-K3.16 | TC-K3.T3.f 점검 5분 등록 | `pnpm -C apps/server test -t "TC-K3.T3.f" && pnpm -C apps/server test -t "TC-K1.T4.b"` | 통과 = 2 |
 | G-K3.17 | 5분 주기 상수 | grep `name: "reconcile", cron: "\*/5 \* \* \* \*"` in `apps/server/src/jobs.ts` | == 1 |
+| G-K3.22 · 23 | 재현 빨강 TC-K3.T2.f · TC-K3.T3.f | `node scripts/check-red.mjs --check G-K3.20 · G-K3.16 --since seal:K2` | 종료코드 0 |
+| G-K3.33 ~ 38 | 재현 빨강 TC-K3.T2.i · T3.i · T3.j · T3.l · T3.m · T3.n | `node scripts/check-red.mjs --check G-K3.26 · 27 · 28 · 30 · 31 · 32 --since seal:K2` | 종료코드 0 |
 | G-K3.15 | ruleset · TC-K3.T4.b | `node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere` | 종료코드 0 |
 
 `node scripts/gate.mjs K3 --seal`
@@ -1567,13 +1612,14 @@ TC-K6.T3.c  1·2단계 봉인이 모두 유효하고 처음 커밋부터 순서 
 | TC-K0.T7.a, TC-K2.T6.h, TC-K2.T6.k, TC-K2.T7.a ~ d | V15 측정·호출 방식 (v5.7: 오늘 창 + usage_daily) | 계획서 5.3 실행 시점 개정 |
 | TC-K2.T6.e | V18 삭제 키 기록 유지 | 계획서가 대안(삭제 전 사용액 보존) 결정, K1 스키마 |
 | TC-K0.T9.a, TC-K4.T7.c, TC-K5.T2.d | V19 regenerate id·지출 유지·옛 원문 키 | 계획서 5.2 개정 (v5.6: 재발급 = 새 키 + 옛 키 삭제), K4 재발급 |
-| TC-K0.T8.a, TC-K3.T2.e, TC-K3.T3.e, TC-K4.T7.b, TC-K4.T5.a | V18 삭제 뒤 옛 원문 키·키 검증 캐시 60초 | 계획서 5.2 개정 (v5.6: 끄고 60초 뒤 DELETE), K3 반영·K4 삭제 |
+| TC-K0.T8.a, TC-K3.T2.e, TC-K3.T2.f, TC-K3.T3.e, TC-K4.T7.b, TC-K4.T5.a | V18 삭제 뒤 옛 원문 키·키 검증 캐시 60초 | 계획서 5.2 개정 (v5.6: 끄고 60초 뒤 DELETE), K3 반영·K4 삭제 |
+| TC-K3.T3.k, TC-K3.T3.l | V28 키 목록은 limit 없이 전부·total | K3 리뷰 #3 (설계를 막지 않음) |
 | TC-K0.T10.a·b·c, TC-K2.T2.a | V20 시간대·경계값 | 계획서 5.3 개정 (Q1 과 함께) |
 | TC-K1.T3.a, TC-K1.T4.a, TC-K3.T2.b | Q2 재시도 간격 1분·2분·10분·30분, 실행기 1분 | 계획서 v5.6 5.7 |
 | TC-K1.T3.b, TC-K3.T3.g | Q3 재시도 소진 → failed, 점검이 다시 맞춤, 30분 오래 실패 | 계획서 v5.6 5.7 |
 | TC-K2.T1.b, TC-K2.T1.d, TC-K2.T6.f, TC-K2.T6.j, TC-K3.T1.a, TC-K3.T1.b | Q1 남은 한도 0 이면 키 끄기(limit), 회복하면 켜기 | 계획서 v5.6 5.3·5.7 |
 | TC-K2.T2.c | Q5 1분 분배가 달 바뀜 판단 | 계획서 v5.6 5.3 |
-| TC-K1.T3.b, TC-K3.T3.b, TC-K3.T3.c | Q6 알림 = audit_log alert.<종류> | 계획서 v5.6 5.7 |
+| TC-K1.T3.b, TC-K3.T3.b, TC-K3.T3.c, TC-K3.T2.i, TC-K3.T3.n | Q6 알림 = audit_log alert.<종류> | 계획서 v5.6 5.7 |
 | TC-K4.T4.b | Q4 발급 요청 수 회원 10회·IP 30회 / 1시간 | 계획서 v5.6 5.2·7장 |
 
 ## 코드 미확인 TC 목록

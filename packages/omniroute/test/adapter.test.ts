@@ -67,7 +67,7 @@ describe("TC-S5.T2.f 응답 형식이 바뀌면 조용히 넘어가지 않고 �
 describe("TC-S5.T2.i 어댑터는 키 범위(scopes)를 보내지 않는다", () => {
   it("모든 함수의 요청 본문에 scopes 가 없고, 키 수정 본문은 isActive 또는 name 하나뿐이다", async () => {
     const { fetch, sent } = fakeFetch({
-      "GET /api/keys": { body: { keys: [{ id: "k1", name: "m_1", isActive: true, scopes: ["self:usage"] }] } },
+      "GET /api/keys": { body: { keys: [{ id: "k1", name: "m_1", isActive: true, scopes: ["self:usage"] }], total: 1 } },
       "POST /api/keys": { status: 201, body: { id: "k1", key: "sk-abc", name: "m_1" } },
       "PATCH *": { body: { isActive: false, name: "m_2" } },
       "DELETE *": { body: { success: true } },
@@ -210,5 +210,18 @@ describe("K2 리뷰 M3 clearBudget 은 월 예산 0(무제한)을 보낸다", ()
     expect(sent).toHaveLength(0);
     await c.clearBudget("k1");
     expect(JSON.parse(String(sent[0].body))).toMatchObject({ apiKeyId: "k1", monthlyLimitUsd: 0, resetInterval: "monthly" });
+  });
+});
+
+describe("TC-K3.T3.l 키 목록이 total 보다 적으면 형식 오류로 끝낸다 (V28, fail-closed)", () => {
+  it("keys 1개·total 2 → OmniRouteFormatError, total 이 없어도 오류. 대조: keys 1개·total 1 이면 그대로", async () => {
+    const key = { id: "k1", name: "m_1", isActive: true, scopes: [] };
+    const list = (body: unknown) => {
+      const { fetch } = fakeFetch({ "GET /api/keys": { body } });
+      return createClient({ baseUrl: "http://omni.test", credential: { token: "oma_live_x" }, fetch }).listKeys();
+    };
+    await expect(list({ keys: [key], total: 2 })).rejects.toThrow(OmniRouteFormatError);
+    await expect(list({ keys: [key] })).rejects.toThrow(OmniRouteFormatError);
+    expect((await list({ keys: [key], total: 1 })).map((k) => k.id)).toEqual(["k1"]);
   });
 });

@@ -1,0 +1,22 @@
+{
+  "item": "V28",
+  "question": "GET /api/keys 는 기본 개수 제한·페이지 나눔이 있는가 (정합성 점검이 listKeys 한 번으로 모든 키를 보는가, K3 리뷰 #3)",
+  "answer": {
+    "defaultLimit": null,
+    "pagingParams": ["limit", "offset"],
+    "pagedOnlyWhenLimitGiven": true,
+    "responseHasTotal": true,
+    "totalSource": "SELECT count(*) as cnt FROM api_keys (목록과 따로 읽는다)",
+    "designImpact": "limit 을 주지 않으면 모든 키가 한 번에 온다. 어댑터 listKeys 는 limit 없이 한 번 부르고, 받은 키가 total 보다 적으면 OmniRouteFormatError 로 끝낸다 (잘린 목록으로 점검하지 않는다, fail-closed). 목록과 total 사이에 키가 생겨 keys 가 더 많은 것은 받는다"
+  },
+  "evidence": [
+    "소스(.build/next/server/app/api/keys/route.js GET): searchParams limit·offset 을 읽어, limit 이 양의 정수일 때만 getApiKeys(limit, offset). 응답 { keys, total: getApiKeysCount(), allowKeyReveal }",
+    "소스(chunks/27730.js getApiKeys): limit 이 있으면 \"SELECT * FROM api_keys ORDER BY created_at LIMIT ? OFFSET ?\", 없으면 getAllKeys = \"SELECT * FROM api_keys ORDER BY created_at\" (제한 없음). getApiKeysCount = \"SELECT count(*) as cnt FROM api_keys\"",
+    "계약 환경 실측 (2026-10-10, OmniRoute 3.8.51): 키 120개 이상에서 listKeys(limit 없음) 한 번에 만든 키가 모두 있고 keys.length == total (TC-K3.T3.k)",
+    "음성 대조: 어댑터가 ?limit=50 으로 부르면 keys 50 < total 이라 OmniRouteFormatError, 개수 검사를 빼면 만든 키가 목록에서 빠져 TC-K3.T3.k 실패",
+    "apps/server/test/contract/keys/keys.contract.ts (TC-K3.T3.k), packages/omniroute/test/adapter.test.ts (TC-K3.T3.l)"
+  ],
+  "blocking": false,
+  "was_blocking": false,
+  "resolved_in": null
+}
