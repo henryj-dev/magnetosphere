@@ -25,7 +25,7 @@ import { and, eq, gte, lt } from "drizzle-orm";
 import type { Analytics } from "@magnetosphere/omniroute";
 import { LeaseLostError, type Lease } from "@magnetosphere/runtime/lease";
 import type { DbHandle } from "@magnetosphere/runtime/types";
-import { round6 } from "./compute.ts";
+import { ceil6, round6 } from "./compute.ts";
 import { addDays, dayKey, dayOf, monthStart } from "./month.ts";
 import { deleteSetting, holds, readSetting, upsert, writeSetting } from "./store.ts";
 
@@ -79,7 +79,8 @@ export async function mappedKeyIds(h: DbHandle): Promise<Set<string>> {
 export function costsOf(a: Analytics, mapped: ReadonlySet<string>): Map<string, number> {
   const out = new Map<string, number>();
   for (const r of a.byApiKey) if (r.apiKeyId !== null && mapped.has(r.apiKeyId)) out.set(r.apiKeyId, (out.get(r.apiKeyId) ?? 0) + r.cost);
-  for (const [k, v] of out) out.set(k, round6(v));
+  // 사용액은 올린다 (한도를 넘지 않는 쪽, compute.ts)
+  for (const [k, v] of out) out.set(k, ceil6(v));
   return out;
 }
 

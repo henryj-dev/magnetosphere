@@ -63,7 +63,7 @@ describe("TC-K2.T1.e 부동소수 오차로 남은 한도가 생기지 않는다
     const b = computeBudgets({ limitUsd: 0.3, keys: [{ id: "A", state: "active", spentUsd: 0.1 }, { id: "B", state: "active", spentUsd: 0.19999999 }] });
     expect({ remaining: b.remaining, exhausted: b.exhausted, budgets: b.budgets.size }).toEqual({ remaining: 0, exhausted: true, budgets: 0 });
     const c = computeBudgets({ limitUsd: 1, keys: [{ id: "A", state: "active", spentUsd: 0.1234567 }, { id: "B", state: "active", spentUsd: 0.0000004 }] });
-    expect(c.remaining).toBe(0.876543);
+    expect(c.remaining, "사용액 0.1234571 올림 0.123458 → 남은 0.876542 (TC-K2.T1.f 방향)").toBe(0.876542);
     for (const v of c.budgets.values()) expect(decimals(v), String(v)).toBeLessThanOrEqual(6);
   });
 });
