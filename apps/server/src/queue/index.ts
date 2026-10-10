@@ -15,8 +15,10 @@
 // 키별 순서 (K1 리뷰 #1, TC-K1.T3.f)
 //   - key.apply_state 는 값을 싣지 않는다 (payload { keyId }). 실행할 때 api_keys·회원 상태로 목표를 다시 계산해 건다 (target.ts).
 //     그래서 오래된 재시도가 더 새 반영을 덮지 않는다.
-//   - 같은 키의 미완료 key.apply_state 가 있으면 새로 넣지 않고 그 id 를 돌려준다 (합치기). 동시에 넣어 둘이 생겨도
-//     둘 다 실행 시점의 목표를 걸므로 결과는 같다.
+//   - 같은 키의 미완료 key.apply_state 가 있으면 새로 넣지 않고 그 작업에 합친다: generation + 1, attempts = 0(남은 시도 새로),
+//     next_run_at = min(기존, 지금). 동시에 넣어 둘이 생겨도 둘 다 실행 시점의 목표를 걸므로 결과는 같다.
+//   - 결과 쓰기(완료·재시도·실패)는 차지할 때 읽은 generation·attempts 가 그대로일 때만 한다. 실행 중에 합쳐졌으면 0행이고
+//     (stale 로 센다) 합치기가 이미 next_run_at 을 당겨 두었으므로 곧바로 다시 돈다 — 새 목표로 (K1 재검토, TC-K1.T3.j·k).
 //   - 같은 키에 미완료 key.delete 가 있으면 key.apply_state 는 켜지 않는다 (delete 가 이긴다).
 // 차지 (TC-K1.T3.c)
 //   - 실행기 둘이 동시에 돌아도 작업마다 핸들러는 한 번이다. 작업 하나를 "attempts 가 내가 읽은 값일 때만" 바꾸는 UPDATE 로
@@ -60,6 +62,8 @@ export interface QueuedJob {
   payload: JobPayload;
   /** 이번 시도를 포함한 시도 횟수 */
   attempts: number;
+  /** 차지할 때 읽은 세대. 결과 쓰기는 이 값이 그대로일 때만 */
+  generation: number;
 }
 
 export type Handler = (payload: JobPayload, ctx: { job: QueuedJob; db: DbHandle; signal?: AbortSignal }) => Promise<void>;
@@ -81,12 +85,25 @@ export async function enqueue(h: DbHandle, action: JobAction, payload: JobPayloa
     if (!keyId) throw new TypeError("key.apply_state 는 payload.keyId(api_keys.id)가 필요하다");
     // 값은 싣지 않는다. 넣는 쪽이 준 active 등은 버린다 (실행할 때 다시 계산한다)
     payload = { keyId };
-    const [pending] = await h.db
-      .select({ id: t.id })
-      .from(t)
-      .where(and(eq(t.keyId, keyId), eq(t.action, action), isNull(t.doneAt), isNull(t.failedAt)))
-      .limit(1);
-    if (pending) return pending.id;
+    const at = opts.runAt ?? opts.now ?? new Date();
+    // 고르고 바꾸는 사이에 그 작업이 끝나면(0행) 다시 고른다. 없으면 새로 넣는다
+    for (let i = 0; i < 3; i++) {
+      const [pending] = await h.db
+        .select({ id: t.id, generation: t.generation, nextRunAt: t.nextRunAt })
+        .from(t)
+        .where(and(eq(t.keyId, keyId), eq(t.action, action), isNull(t.doneAt), isNull(t.failedAt)))
+        .limit(1);
+      if (!pending) break;
+      const merged = await updatedRows(
+        h,
+        h.db
+          .update(t)
+          .set({ generation: pending.generation + 1, attempts: 0, nextRunAt: pending.nextRunAt < at ? pending.nextRunAt : at })
+          .where(and(eq(t.id, pending.id), eq(t.generation, pending.generation), isNull(t.doneAt), isNull(t.failedAt))),
+        t.id,
+      );
+      if (merged === 1) return pending.id;
+    }
   }
   const id = crypto.randomUUID();
   await h.db.insert(t).values({ id, action, payload: JSON.stringify(payload), keyId, attempts: 0, nextRunAt: opts.runAt ?? opts.now ?? new Date() });
@@ -128,13 +145,15 @@ export interface RunDueResult {
   failed: number;
   /** 결과를 쓰지 못한 작업 수 (DB 오류). 차지 시각 뒤 다시 집힌다 */
   errors: number;
+  /** 결과 쓰기가 0행인 작업 수 (실행 중에 합쳐져 세대가 바뀜·임대 상실). 시도로 세지 않는다 */
+  stale: number;
 }
 
 /** 지금 돌 차례인 작업(done_at·failed_at NULL, next_run_at ≤ now + DUE_GRACE_MS)을 하나씩 차지해 돈다 */
 export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: RunDueOptions = {}): Promise<RunDueResult> {
   const t = h.schema.omnirouteJobs;
   const guard = (cond: SQL | undefined) => (opts.lease ? and(cond, fenced(h, opts.lease)) : cond);
-  const result: RunDueResult = { done: 0, retried: 0, failed: 0, errors: 0 };
+  const result: RunDueResult = { done: 0, retried: 0, failed: 0, errors: 0, stale: 0 };
   const onError = opts.onError ?? ((id: string, e: unknown) => console.error(`[queue] 작업 ${id} 결과를 쓰지 못했다`, e));
   const clock = opts.clock ?? (() => now.getTime());
   const due = and(isNull(t.doneAt), isNull(t.failedAt), lte(t.nextRunAt, new Date(now.getTime() + DUE_GRACE_MS)));
@@ -149,7 +168,7 @@ export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: R
       h.db
         .update(t)
         .set({ attempts: row.attempts + 1, nextRunAt: claimUntil })
-        .where(guard(and(eq(t.id, row.id), eq(t.attempts, row.attempts), due))),
+        .where(guard(and(eq(t.id, row.id), eq(t.attempts, row.attempts), eq(t.generation, row.generation), due))),
       t.id,
     );
     if (claimed !== 1) {
@@ -169,8 +188,9 @@ export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: R
       permanent = "payload JSON 아님";
     }
     if (!permanent && !handlers[row.action as JobAction]) permanent = "모르는 작업";
-    const job: QueuedJob = { id: row.id, action: row.action, payload: payload ?? { keyId: row.keyId ?? undefined }, attempts: row.attempts + 1 };
-    const mine = guard(and(eq(t.id, job.id), eq(t.attempts, job.attempts)));
+    const job: QueuedJob = { id: row.id, action: row.action, payload: payload ?? { keyId: row.keyId ?? undefined }, attempts: row.attempts + 1, generation: row.generation };
+    const mine = guard(and(eq(t.id, job.id), eq(t.attempts, job.attempts), eq(t.generation, job.generation), isNull(t.doneAt), isNull(t.failedAt)));
+    const count = (n: number, key: "done" | "retried" | "failed") => (n === 1 ? result[key]++ : result.stale++);
     let outcome: unknown = null;
     if (!permanent) {
       try {
@@ -186,33 +206,26 @@ export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: R
       await h.db
         .update(t)
         .set({ attempts: row.attempts, nextRunAt: row.nextRunAt })
-        .where(and(eq(t.id, job.id), eq(t.attempts, job.attempts), eq(t.nextRunAt, claimUntil), isNull(t.doneAt), isNull(t.failedAt)))
+        .where(and(eq(t.id, job.id), eq(t.attempts, job.attempts), eq(t.generation, job.generation), eq(t.nextRunAt, claimUntil), isNull(t.doneAt), isNull(t.failedAt)))
         .catch((e: unknown) => onError(job.id, e));
       break;
     }
     try {
       if (permanent) {
-        await markFailed(h, row, job, permanent, new Date(clock()), opts.lease);
-        result.failed++;
+        count(await markFailed(h, row, job, permanent, new Date(clock()), opts.lease), "failed");
         continue;
       }
       if (outcome === null) {
-        await h.db.update(t).set({ doneAt: new Date(clock()), lastError: null }).where(mine);
-        result.done++;
+        count(await updatedRows(h, h.db.update(t).set({ doneAt: new Date(clock()), lastError: null }).where(mine), t.id), "done");
         continue;
       }
       const lastError = describeError(outcome);
       const failedTime = clock();
       if (job.attempts <= RETRY_DELAYS_MS.length) {
-        await h.db
-          .update(t)
-          .set({ lastError, nextRunAt: new Date(failedTime + RETRY_DELAYS_MS[job.attempts - 1]) })
-          .where(mine);
-        result.retried++;
+        count(await updatedRows(h, h.db.update(t).set({ lastError, nextRunAt: new Date(failedTime + RETRY_DELAYS_MS[job.attempts - 1]) }).where(mine), t.id), "retried");
       } else {
         // 4번째 재시도도 실패. next_run_at 은 이번 시도 전 값으로 되돌린다 (차지할 때 바꾼 값)
-        await markFailed(h, row, job, lastError, new Date(failedTime), opts.lease);
-        result.failed++;
+        count(await markFailed(h, row, job, lastError, new Date(failedTime), opts.lease), "failed");
       }
     } catch (e) {
       result.errors++;
@@ -230,15 +243,15 @@ async function stillMine(h: DbHandle, lease: Lease): Promise<boolean> {
 
 /**
  * 재시도를 다 쓴 작업: failed_at, 대상 키 sync_state = failed, 알림(audit_log alert.job_failed)을 한 번에 쓴다 (계획서 v5.6 Q3·Q6).
- * 셋 다 "이 작업이 내 차지(attempts)이고 임대가 내 것"일 때만 바뀐다. 첫 문장이 0행이면 뒤 두 문장도 0행이다
+ * 셋 다 "이 작업이 내 차지(attempts·generation)이고 임대가 내 것"일 때만 바뀐다. 첫 문장이 바꾼 행 수(0 또는 1)를 돌려준다. 첫 문장이 0행이면 뒤 두 문장도 0행이다
  * (뒤 문장은 "이 차지의 failed_at 이 찍혔다"를 조건으로 둔다). sqlite·mysql·pg 는 트랜잭션, D1 은 batch(한 트랜잭션)로 돈다.
  */
-async function markFailed(h: DbHandle, row: { nextRunAt: Date }, job: QueuedJob, lastError: string, at: Date, lease: Lease | undefined) {
+async function markFailed(h: DbHandle, row: { nextRunAt: Date }, job: QueuedJob, lastError: string, at: Date, lease: Lease | undefined): Promise<number> {
   const s = h.schema;
   const t = s.omnirouteJobs;
   const fence = lease ? fenced(h, lease) : undefined;
-  const claimed = and(eq(t.id, job.id), eq(t.attempts, job.attempts), isNull(t.doneAt), isNull(t.failedAt), fence);
-  const failedNow = and(eq(t.id, job.id), eq(t.attempts, job.attempts), isNotNull(t.failedAt));
+  const claimed = and(eq(t.id, job.id), eq(t.attempts, job.attempts), eq(t.generation, job.generation), isNull(t.doneAt), isNull(t.failedAt), fence);
+  const failedNow = and(eq(t.id, job.id), eq(t.attempts, job.attempts), eq(t.generation, job.generation), isNotNull(t.failedAt));
   const keyId = typeof job.payload.keyId === "string" && job.payload.keyId !== "" ? job.payload.keyId : null;
   const detail = JSON.stringify({ action: job.action, attempts: job.attempts, keyId, error: lastError });
   const statements = (db: any) => [
@@ -260,10 +273,13 @@ async function markFailed(h: DbHandle, row: { nextRunAt: Date }, job: QueuedJob,
     ),
   ];
   if (h.kind === "d1") {
-    await h.db.batch(statements(h.db));
-    return;
+    const res = await h.db.batch(statements(h.db));
+    return Number(res[0]?.meta?.changes ?? 0);
   }
-  await h.db.transaction(async (tx: any) => {
-    for (const q of statements(tx)) await q;
+  return h.db.transaction(async (tx: any) => {
+    const [first, ...rest] = statements(tx);
+    const n = await updatedRows(h, first, t.id);
+    for (const q of rest) await q;
+    return n;
   });
 }
