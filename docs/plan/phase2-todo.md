@@ -1739,3 +1739,15 @@ TC-K6.T5.b  S6 조합 불일치 음성 대조는 [combo-set] 로 잡힌다 (K6 �
 | TC-K1.T4.c | `wrangler dev --test-scheduled`의 `/__scheduled` 경로가 이 저장소 wrangler 버전에서 cron 별로 동작하는지 | K1.T4 |
 | TC-K5.T1.a | 고정할 `@anthropic-ai/claude-code` 버전의 인자(`--setting-sources`, `--max-turns`)가 V16 때와 같은지 | K5.T1 |
 | TC-K5.T2.a ~ d | `tests/e2e/run.mjs`에 `--scenario` 인자를 더할 자리 (지금은 조합 하나의 고정 흐름) | K5.T2 |
+
+## 2단계 뒤 보안 고침 — 설치 뒤 공개 가입 차단 (3단계로 넘기는 메모)
+
+2단계를 봉인한 뒤(main `e307b4e`) 찾았다. 설치 뒤에도 `/api/auth/sign-up/email`이 열려 있었고, 가입한 회원은 `monthly_limit_usd` NULL(무제한)이라 이메일 인증 뒤 운영자 OmniRoute 를 한도 없이 쓸 수 있었다. 3단계(가입 정책·초대) 전까지의 임시 규칙:
+- 설치 뒤 `/sign-up/*`는 `signup_mode`가 무엇이든(설정 행이 없어도) 403 `signup_closed`다. 서버 경로 검사(`apps/server/src/app.ts`)와 Better Auth `hooks.before`(`packages/auth`)가 이메일과 관계없이 같은 응답을 낸다 (TC-SEC.1.a·b).
+- Better Auth 가 만드는 모든 사용자 행(`databaseHooks.user.create.before`: 이메일 가입, `auth.api.signUpEmail`, OAuth·SSO JIT)은 관리자가 있으면 거부되고, `monthly_limit_usd`가 비어 있으면 `default_limit_usd`(행이 없으면 시드값 5)를 넣는다 (TC-SEC.1.b·c). 관리자가 `PATCH /api/admin/users/:id`로 null(무제한)을 고르는 것은 그대로다.
+- 판정은 `packages/db/src/signup.ts` 한 곳이다. 공개 가입을 받는 값(`PUBLIC_SIGNUP_MODES`)이 지금은 비어 있다.
+
+3단계가 이어받을 것
+- Q1: (가)로 이미 막혔다. M3.T1 의 재현 빨강은 정책별 판정 표로 시작한다. `open`·`domain_allowlist`를 넣을 때 `PUBLIC_SIGNUP_MODES`와 두 차단 지점을 함께 고친다. 초대 수락(`auth.api.signUpEmail` 서버 호출)은 지금 훅에 막히므로 M2 가 초대 가입을 통과시키는 표시를 훅에 넣어야 한다.
+- Q16: 가입 때 `default_limit_usd`를 복사하는 (가)를 미리 넣었다. `default_limit_usd` null(무제한 기본값)은 지금 시드값 5 로 본다 — 설정 API(M1)를 만들 때 정한다.
+- 운영 코드는 `seedAppSettings`를 부르지 않는다 (`app_settings`에 `signup_mode`·`default_limit_usd` 행이 없다). 지금 판정은 행이 없어도 안전한 쪽으로 정해 두었다.

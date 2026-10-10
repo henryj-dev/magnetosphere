@@ -117,7 +117,7 @@ describe("TC-S4.T4.d 관리자가 있으면 설치 토큰을 만들지 않는다
 describe("TC-S4.T4.e 설치 전에는 가입을 막고, 이미 있는 이메일로는 관리자를 만들지 않는다", () => {
   const SIGNUP = { email: "early@example.com", password: "early-password-123", name: "early" };
 
-  it("관리자가 없으면 /api/auth/sign-up/email 과 경로 변형 → 403(또는 Better Auth 404), user 0. 설치 뒤에는 403 아님", async () => {
+  it("관리자가 없으면 /api/auth/sign-up/email 과 경로 변형 → 403(또는 Better Auth 404), user 0. 설치 뒤에는 setup_required 가 아니라 signup_closed", async () => {
     const r = await boot();
     const variants = ["/api/auth/sign-up/email", "/api/auth/sign-up/email/", "/api/auth//sign-up/email", "/api/auth/Sign-Up/email", "/api/auth/sign%2Dup/email"];
     for (const p of variants) {
@@ -128,9 +128,10 @@ describe("TC-S4.T4.e 설치 전에는 가입을 막고, 이미 있는 이메일�
     expect(await sql(r.t, "SELECT id FROM user")).toHaveLength(0);
 
     expect((await post(r, "/api/setup", { token: tokenIn(r.logs), ...ADMIN })).status).toBe(201);
+    // 설치 뒤 공개 가입은 3단계 전까지 닫혀 있다 (TC-SEC.1.a)
     const after = await post(r, "/api/auth/sign-up/email", SIGNUP);
-    expect(after.status).toBe(200);
-    expect(await sql(r.t, "SELECT email FROM user WHERE email = 'early@example.com'")).toHaveLength(1);
+    expect({ status: after.status, body: await after.json() }).toEqual({ status: 403, body: { error: "signup_closed" } });
+    expect(await sql(r.t, "SELECT email FROM user WHERE email = 'early@example.com'")).toHaveLength(0);
   });
 
   it("같은 이메일 계정이 먼저 있으면 /setup → 409 email_taken (500 아님), 토큰은 남아 다른 이메일로 설치된다", async () => {
