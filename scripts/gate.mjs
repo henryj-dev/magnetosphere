@@ -262,7 +262,8 @@ const CHECKS = {
     const exclude = (c.exclude ?? []).map(globToRegExp);
     const files = paths.flatMap((p) => walk(root, p)).filter((f) => !exclude.some((x) => x.test(f)));
     if (files.length === 0) return { ok: false, measured: "대상 파일 0개", limit };
-    const re = new RegExp(c.pattern, "g");
+    // ^·$ 는 줄의 시작·끝이다 (m). 2단계 GATE 의 줄 단위 패턴(^\s+run: …)이 파일 시작에만 걸려 늘 0 이 되지 않게
+    const re = new RegExp(c.pattern, "gm");
     let n = 0;
     for (const f of files) n += (fs.readFileSync(path.join(root, f), "utf8").match(re) ?? []).length;
     return { ok: compare(n, op, c.limit), measured: n, limit };

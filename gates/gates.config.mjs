@@ -283,6 +283,7 @@ export const GATES = {
       { id: "G-K0.7", how: "test", desc: "TC-K0.T1.b 여러 vitest 요약을 합산", cmd: nodeTest("scripts/gate.test.mjs", "TC-K0.T1.b"), expectPassed: 1 },
       { id: "G-K0.8", how: "test", desc: "TC-K0.T1.c strictTests 단계의 expectPassed 없는 test 검사 실패", cmd: nodeTest("scripts/gate.test.mjs", "TC-K0.T1.c"), expectPassed: 1 },
       { id: "G-K0.9", how: "test", desc: "TC-K0.T1.d expectPassed 없는 1단계 검사는 통과 ≥ 1 그대로", cmd: nodeTest("scripts/gate.test.mjs", "TC-K0.T1.d"), expectPassed: 1 },
+      { id: "G-K0.37", how: "test", desc: "TC-K0.T1.e grep 검사의 ^·$ 는 줄 단위", cmd: nodeTest("scripts/gate.test.mjs", "TC-K0.T1.e"), expectPassed: 1 },
       // K0.T2 봉인된 단계만 CI 단계 잡 요구
       { id: "G-K0.10", how: "test", desc: "TC-K0.T2.a·b 봉인된 단계만 단계 잡 요구 (음성 대조 포함)", cmd: "node --test --test-reporter=tap test/check-ci-matrix.test.mjs", expectPassed: 2 },
       // K0.T3 main 에서 앞 실행을 취소하지 않음 (S7 리뷰 L5)
@@ -316,6 +317,7 @@ export const GATES = {
       { id: "G-K0.34", how: "test", desc: "TC-K0.T14.a·b·c 재현 빨강 확인기 음성 대조", cmd: "node --test --test-reporter=tap test/check-red.test.mjs", expectPassed: 3 },
       { id: "G-K0.35", how: "cmd", desc: "재현 빨강: TC-K0.T1.a 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K0.6 --since seal:S7" },
       { id: "G-K0.36", how: "cmd", desc: "재현 빨강: TC-K0.T3.a 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K0.11 --since seal:S7" },
+      { id: "G-K0.38", how: "cmd", desc: "재현 빨강: TC-K0.T1.e 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K0.37 --since seal:S7" },
       // 이 단계의 CI 잡과 스크립트 테스트 전부
       { id: "G-K0.32", how: "grep", desc: "TC-K0.T15.a CI 단계 잡 (K0)", pattern: "^\\s+run: node scripts/gate\\.mjs K0\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
       { id: "G-K0.33", how: "cmd", desc: "스크립트 테스트 전부", cmd: 'node --test --test-reporter=tap "scripts/*.test.mjs"' },
