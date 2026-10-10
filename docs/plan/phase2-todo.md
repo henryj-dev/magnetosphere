@@ -828,10 +828,13 @@ TC-K2.T7.h  분할 대조의 하루 창이 시간 초과면 그날만 다음 실
 TC-K2.T7.i  대조 응답에 없는 키의 저장값은 지우지 않는다 (K2 리뷰 열린 질문)
   단언:  저장값 A 04-03 0.01·B 04-04 0.02, 대조 응답에 A 만 → B 0.02 그대로, alert 0행. byApiKey 는 개수 제한이 없다 (V15 evidence, 3.8.51 소스)
   검출:  응답에서 빠진 키(자료 없음)를 0 으로 덮어 그 키 몫이 회원 사용액에서 사라지는 것
+TC-K2.T7.j  지난달 분할 대조 상태는 새 달 첫 실행이 지운다 (재검토 L-b)
+  단언:  split { next 03-25, until 03-31 }, now 04-01T00:01 → split 지움, 같은 날 두 번째 실행까지 3월 하루 창 호출 0건
+  검출:  지난달 분할이 남아 새 달에도 매분 지난달 하루 창을 부르는 것
 ```
 
 【통과】
-- [ ] G-K2.27 ~ G-K2.31 · G-K2.33 ~ G-K2.36 통과
+- [ ] G-K2.27 ~ G-K2.31 · G-K2.33 ~ G-K2.36 · G-K2.55 통과
 
 ### ☑ K2.T6 — 1분 분배 작업 (v5.7: 오늘 창 + 지난 날 저장)
 선행 K2.T2 · K2.T7 · 산출 `apps/server/src/limits/rebalance.ts`, `packages/omniroute/src/**`(필터 없는 분석 호출), `apps/server/test/contract/limits/**` · 되돌리기 커밋 1개
@@ -839,6 +842,7 @@ TC-K2.T7.i  대조 응답에 없는 키의 저장값은 지우지 않는다 (K2 
 【작업】
 1. `budget_rebalance` 본문: 활성 키가 있는 회원과 `limit` 으로 꺼진 키가 있는 회원만, 계획서 v5.7 5.3 대로 분석은 오늘 창 하나만 부른다 (`startDate` 오늘 00:00 UTC, `endDate` 지금, `apiKeyIds` 없음, V15 decision). `byApiKey`를 `api_keys` 매핑으로 회원별로 묶고(삭제 키 포함), 회원 사용액 = K2.T7 `storedSpent`(이번 달 1일~어제 `usage_daily` 합) + 오늘 창 값. 날이 바뀐 첫 실행은 분석 전에 K2.T7 `confirmDays`를 부른다. 회원마다 `computeBudgets` → `exhausted`면 켜진 키를 `setKeyActive(false)`, `state disabled`·`disabled_reason limit` (Q1). 아니면 목표가 켜짐인 키 중 `budget_usd`와 다른 것만 `setBudget` → 펜싱 아래 `budget_usd` 기록, `limit` 으로 꺼진 키는 예산을 먼저 건 뒤 `setKeyActive(true)`, `state active`·`disabled_reason` NULL (회원·관리자·회원 상태로 꺼진 키는 건드리지 않는다). 이 끄기·켜기는 K3.T2 `applyKey`가 생기면 그것으로 바꾼다. 분석이 `OmniRouteFormatError`·`OmniRouteError`면 이번 실행은 예산을 하나도 바꾸지 않는다. 어댑터 변경이 필요하면(예: 필터 없는 분석) `packages/omniroute`에 두고 `G-S5.9`(어댑터 밖 관리 호출 0)를 지킨다. `JOBS`에 `{ name: "budget_rebalance", cron: "* * * * *" }`를 등록하고 `wrangler.toml` crons 에 `"* * * * *"`를 더한다 (TC-K1.T4.b 가 같음을 본다). 커밋.
 2. (K2 리뷰 M2·M3·L1) 한 실행은 1단계 남은 한도 0 회원의 끄기 전부, 2단계 예산·켜기(이번 달 예산을 아직 받지 못한 키가 있는 회원부터). 키별 `api_keys.budget_month`(예산을 건 달, 0002)가 이번 달이고 예산이 같으면 보내지 않는다(새 달 force 대신). 회원 하나의 예외는 그 회원만 실패로 세고 `alert.rebalance_failed` 1행. 시간 예산은 임대의 2/3(36,666ms), 넘으면 다음 회원을 시작하지 않고 다음 tick 에 이어 간다. setBudget 은 잡을 때 `budget_usd`를 비우고 성공한 뒤 `budget_at` 조건으로 값을 쓴다. 한도가 무제한(NULL)으로 바뀐 회원의 옛 예산은 어댑터 `clearBudget`(월 예산 0 = 무제한, V20)으로 푼다 — `setBudget`은 0 을 계속 거부하고, `clearBudget`은 이 경로에서만 쓴다(G-K2.42). 재현 커밋 `Red: TC-K2.T6.l TC-K2.T6.m TC-K2.T6.o TC-K2.T6.p` → 고침.
+3. (K2 재검토 H1·M-a·M-b·M-c·L-a·L-b) setBudget·clearBudget 사후 갱신이 0행이면 `budget_usd`·`budget_month`를 모두 비운다(늦게 도착한 호출이 더 새 계산을 덮었을 수 있음). 무제한 전환 때 값을 모르는 키(`budget_usd`·`budget_month` NULL, `budget_at` 있음)도 푼다. 최근 실패한 회원(`app_settings.budget_rebalance_failed`)은 정렬 맨 뒤. 같은 회원·같은 오류 알림은 하루 한 번(`budget_rebalance_alerted`), 계산이 깨진 회원의 켜진 키는 limit 으로 끈다(fail-closed). 연속 10번 실패하면 `alert.rebalance_stalled` 하루 한 번(`budget_rebalance_stalled`). 지난달 분할 대조 상태는 새 달 첫 확정 때 지운다. 재현 커밋 `Red: TC-K2.T6.t TC-K2.T6.u TC-K2.T6.q TC-K2.T6.r TC-K2.T6.s TC-K2.T7.j` → 고침.
 
 【테스트】
 ```
@@ -890,10 +894,25 @@ TC-K2.T6.p  무제한(NULL)으로 바뀐 회원의 옛 예산은 clearBudget 으
 TC-K2.T6.n  clearBudget 뒤 예산이 무제한이 된다 (계약, K2 리뷰 M3)
   단언:  한도 0.016, 키 A 3건 → 분배(예산 0.016) → 1건 200 → 다음 요청 예산 차단(429) → 한도 NULL → 분배 → 호출 [clearBudget] 하나 → 다음 요청 200
   검출:  clearBudget 이 0 대신 다른 값을 보내거나 resetInterval 을 빼 OmniRoute 에 옛 월 한도가 남는 것
+TC-K2.T6.t  늦게 도착한 clearBudget·setBudget 이 더 새 계산을 덮어도 다음 분배가 다시 건다 (재검토 H1)
+  단언:  한도 NULL 분배(t1)의 clearBudget 도중 한도 10·즉시 분배(t2) setBudget(10) → 늦은 clear 뒤 budget_usd·budget_month NULL, 다음 분배 setBudget(10). 반대로 한도 10 분배의 setBudget 도중 한도 NULL·즉시 분배 clearBudget → 다음 분배 clearBudget
+  검출:  사후 갱신 0행을 그냥 넘겨 DB 에는 새 예산(또는 풀림)이 이번 달 값으로 남고, OmniRoute 는 늦게 도착한 옛 호출 상태라 한 달 내내 무제한(또는 옛 예산)인 것
+TC-K2.T6.u  예산 값을 모르는(NULL) 키도 무제한 전환 때 푼다 (재검토 M-a)
+  단언:  한도 NULL, budget_usd·budget_month NULL·budget_at 있음 → clearBudget 1건, 다음 실행 0건. budget_at NULL 인 키 0건
+  검출:  setBudget 실패·임대 상실로 값을 모르게 된 키를 "예산 없음"으로 보고 넘어가 옛 예산에 계속 막히는 것
+TC-K2.T6.q  매번 실패하는 회원이 앞에 있어도 두 tick 안에 뒤 회원이 새 달 예산을 받는다 (재검토 M-b)
+  단언:  새 달, 첫 회원 키 3개가 setBudget 마다 15초 뒤 시간 초과(시간 예산 36,666ms), 뒤 회원 10 → 둘째 tick 이 뒤 회원 10명 모두 setBudget
+  검출:  실패한 회원이 "이번 달 예산을 못 받은 키"라 매번 정렬 맨 앞에 서고 시간 예산을 혼자 써 뒤 회원이 굶는 것
+TC-K2.T6.r  계산이 깨진 회원은 키를 limit 으로 끄고, 같은 오류 알림은 하루 한 번 (재검토 M-c)
+  단언:  음수 저장값 회원 → 첫 실행 setKeyActive(false)·limit, 같은 날 두 번 돌아도 alert.rebalance_failed 1행, 값이 고쳐지면 [setBudget, setKeyActive(true)]
+  검출:  계산이 깨진 회원의 키가 지난달 예산을 단 채 켜져 있고, 같은 알림이 매분 쌓여 다른 알림을 묻는 것
+TC-K2.T6.s  분배가 연속 10번 실패하면 alert.rebalance_stalled 를 하루 한 번 (재검토 L-a)
+  단언:  오늘 창 분석 OmniRouteError → 9번째까지 0행, 10번째 1행, 12번째도 1행, 성공하면 연속 수 0
+  검출:  분석이 계속 실패해 분배가 무기한 멈췄는데 아무도 모르는 것
 ```
 
 【통과】
-- [ ] G-K2.8 ~ G-K2.15 · G-K2.22 · G-K2.23 · G-K2.25 · G-K2.26 · G-K2.37 ~ G-K2.42 통과
+- [ ] G-K2.8 ~ G-K2.15 · G-K2.22 · G-K2.23 · G-K2.25 · G-K2.26 · G-K2.37 ~ G-K2.42 · G-K2.56 ~ G-K2.60 통과
 - [ ] G-K2.18 통과 (어댑터 밖 OmniRoute 관리 호출 0)
 
 ### ☑ K2.T4 — 즉시 분배 진입점
@@ -971,6 +990,9 @@ TC-K2.T5.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-K2.42 | clearBudget 은 무제한 전환 경로 한 곳 | grep `\.clearBudget\(` in `apps/server/src` | == 1 |
 | G-K2.43 | TC-K2.T4.c 즉시 분배 실패 (리뷰 M4) | `pnpm -C apps/server test -t "TC-K2.T4.c"` | 통과 = 1 |
 | G-K2.44 ~ 54 | 재현 빨강: TC-K2.T1.f · T7.f · T7.g · T7.h · T7.i · T6.l · T6.m · T6.o · T6.p · T4.c · T6.i | `node scripts/check-red.mjs --check <검사 ID> --since seal:K1` | 종료코드 0 |
+| G-K2.55 | TC-K2.T7.j 지난달 분할 지움 (재검토 L-b) | `pnpm -C apps/server test -t "TC-K2.T7.j"` | 통과 = 1 |
+| G-K2.56 ~ 60 | TC-K2.T6.t · u · q · r · s (재검토 H1·M-a·M-b·M-c·L-a) | `pnpm -C apps/server test -t "TC-K2.T6.<x>"` | 각 통과 = 1 |
+| G-K2.61 ~ 66 | 재현 빨강: TC-K2.T7.j · T6.t · T6.u · T6.q · T6.r · T6.s | `node scripts/check-red.mjs --check <검사 ID> --since seal:K1` | 종료코드 0 |
 
 `node scripts/gate.mjs K2 --seal`
 
