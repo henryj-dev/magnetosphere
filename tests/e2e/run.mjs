@@ -22,6 +22,7 @@ import os from "node:os";
 import path from "node:path";
 import { buildAppImage, createStack, dockerAvailable, ROOT } from "../deploy/stack.mjs";
 import { lastSetupToken, startWranglerDev } from "../../apps/server/test/wrangler-dev.mjs";
+import { composeUp } from "../../scripts/compose-up.mjs";
 
 const COMBOS = ["docker-sqlite", "docker-mysql", "docker-pg", "workers-d1", "workers-mysql", "workers-pg"];
 const CONTRACT = { url: "http://127.0.0.1:20170", password: "contract-initial-password-5c1e9a", compose: "tests/contract/docker-compose.yml" };
@@ -33,6 +34,11 @@ const log = (msg) => console.log(`[e2e] ${msg}`);
 function check(cond, msg) {
   if (!cond) throw new Error(msg);
   log(`ok  ${msg}`);
+}
+/** docker compose up -d --wait (레지스트리 5xx 는 5초·15초 쉬고 세 번까지, scripts/compose-up.mjs) */
+function up(file, services) {
+  const r = composeUp(path.join(ROOT, file), services);
+  if (r.status !== 0) throw new Error(`docker compose -f ${file} up ${services.join(" ")} 실패 (${r.status})`);
 }
 function sh(cmd, args, opts = {}) {
   const r = spawnSync(cmd, args, { cwd: ROOT, encoding: "utf8", ...opts });
@@ -99,7 +105,7 @@ async function dockerCombo(db, scenario) {
 function freshDatabase(kind) {
   const name = `mg_e2e_${randomBytes(4).toString("hex")}`;
   const service = kind === "mysql" ? "mysql" : "postgres";
-  sh("docker", ["compose", "-f", TEST_DB, "up", "-d", "--wait", service]);
+  up(TEST_DB, [service]);
   const run = (sql) =>
     kind === "mysql"
       ? sh("docker", ["compose", "-f", TEST_DB, "exec", "-T", "mysql", "mysql", "-uroot", "-pmgroot", "-e", sql])
@@ -111,7 +117,7 @@ function freshDatabase(kind) {
 
 async function workersCombo(env, scenario) {
   // 계약 환경 OmniRoute (이미 떠 있으면 그대로). 시나리오는 가짜 상위 서버 제공자·가격이 필요하다 (멱등)
-  sh("docker", ["compose", "-f", CONTRACT.compose, "up", "-d", "--wait", "omniroute"]);
+  up(CONTRACT.compose, ["omniroute"]);
   if (scenario) sh(process.execPath, ["tests/contract/setup.mjs"]);
   sh("pnpm", ["-C", "apps/web", "build"]);
   const persistTo = fs.mkdtempSync(path.join(os.tmpdir(), "mg-e2e-workers-"));

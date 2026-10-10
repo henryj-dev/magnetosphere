@@ -44,7 +44,17 @@ export const stackCompose = (stack, args, opts = {}) => sh("docker", [...compose
 
 /** 가짜 상위 서버를 붙여 묶음을 띄우고 묶음 OmniRoute 에 제공자·가격을 넣는다. stack.down() 이 --remove-orphans 로 mock 까지 내린다 */
 export function upWithMock(stack) {
-  stackCompose(stack, ["up", "-d", "--wait", "--no-build"]);
+  // 레지스트리가 이미지 받기에 잠깐 5xx 를 주면 5초·15초 쉬고 세 번까지 (scripts/compose-up.mjs 와 같은 간격. 그 도우미는 -f 하나만 받는다)
+  for (const [n, ms] of [[1, 5_000], [2, 15_000], [3, 0]]) {
+    try {
+      stackCompose(stack, ["up", "-d", "--wait", "--no-build"]);
+      break;
+    } catch (e) {
+      if (n === 3) throw e;
+      console.error(`[e2e] docker compose up 실패. ${ms / 1000}초 뒤 다시 띄운다 (${n}/3)\n${e.message.slice(0, 500)}`);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    }
+  }
   sh(process.execPath, ["tests/contract/setup.mjs"], {
     env: { ...process.env, OMNI_URL: STACK_OMNI_URL, OMNI_PASSWORD: stack.env.INITIAL_PASSWORD, MOCK_UPSTREAM_URL: "http://mock:18080" },
   });
