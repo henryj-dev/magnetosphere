@@ -89,6 +89,17 @@ describe("TC-K4.T1.c 되돌리기도 실패하면 큐에 넣고 켜진 채 남�
     const ork2 = [...e.om.keys.keys()].find((x) => x !== ork)!;
     expect(e.om.keys.get(ork2)?.isActive).toBe(false);
     expect(await jobs("key.rollback")).toHaveLength(2);
+
+    // 새 키를 켠 뒤 같은 분배에서 다른 키의 예산이 실패해도(rebalanceMember 가 던진다) 되돌리기가 실패하면 다시 끈다
+    const u3 = await addUser(e.h, { limitUsd: 5 });
+    const other = await seedKey(e, u3, { budgetUsd: 1 });
+    e.om.fail.setBudget = [down("setBudget")];
+    e.om.fail.deleteKey = [down("deleteKey")];
+    const r3 = await call(e, "POST", "/api/me/keys", { user: u3, body: {} });
+    expect(r3.status).toBe(502);
+    const ork3 = [...e.om.keys.keys()].find((x) => x !== ork && x !== ork2 && x !== other.ork)!;
+    expect(e.om.of("setKeyActive").filter((c) => c.id === ork3).map((c) => c.value), "켜진 뒤 실패한 경우").toContain(true);
+    expect(e.om.keys.get(ork3)?.isActive, "되돌리기 실패 뒤 켜진 채 남지 않는다").toBe(false);
   });
 });
 
