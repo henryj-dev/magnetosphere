@@ -67,3 +67,16 @@ describe("TC-K2.T1.e 부동소수 오차로 남은 한도가 생기지 않는다
     for (const v of c.budgets.values()) expect(decimals(v), String(v)).toBeLessThanOrEqual(6);
   });
 });
+
+describe("TC-K2.T1.f 사용액은 올림, 남은 한도는 내림 (1e-6 단위)", () => {
+  it("한도 1·사용액 0.9999991 → 사용액 1, 남은 0(끄기). 한도 1·0.0000001 → 사용액 0.000001, 남은 0.999999. 한도 0.0000019·0 → 남은 0.000001. 0.1 + 0.2 의 부동소수 꼬리는 올리지 않는다", () => {
+    const a = computeBudgets({ limitUsd: 1, keys: [{ id: "A", state: "active", spentUsd: 0.9999991 }] });
+    expect({ memberSpent: a.memberSpent, remaining: a.remaining, exhausted: a.exhausted }).toEqual({ memberSpent: 1, remaining: 0, exhausted: true });
+    const b = computeBudgets({ limitUsd: 1, keys: [{ id: "A", state: "active", spentUsd: 0.0000001 }] });
+    expect({ memberSpent: b.memberSpent, remaining: b.remaining, budget: b.budgets.get("A") }).toEqual({ memberSpent: 0.000001, remaining: 0.999999, budget: 1 });
+    const c = computeBudgets({ limitUsd: 0.0000019, keys: [{ id: "A", state: "active", spentUsd: 0 }] });
+    expect(c.remaining).toBe(0.000001);
+    const d = computeBudgets({ limitUsd: 1, keys: [{ id: "A", state: "active", spentUsd: 0.1 }, { id: "B", state: "active", spentUsd: 0.2 }] });
+    expect({ memberSpent: d.memberSpent, remaining: d.remaining }).toEqual({ memberSpent: 0.3, remaining: 0.7 });
+  });
+});
