@@ -1,4 +1,5 @@
 // K2.T6 1분 분배 (계획서 v5.7 5.3). SQLite 파일 DB, 가짜 어댑터·시계. 실제 OmniRoute 는 test/contract/limits.
+import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createClient, OmniRouteFormatError } from "@magnetosphere/omniroute";
 import { acquireLease } from "@magnetosphere/runtime/lease";
@@ -108,5 +109,95 @@ describe("TC-K2.T6.k 1분 분배는 오늘 창 하나만 부른다 (V15 의존)"
     expect(o.of("getAnalytics")).toEqual([{ fn: "getAnalytics", apiKeyIds: undefined, start: "2026-04-10T00:00:00.000Z", end: NOW.toISOString() }]);
     // 사용액 = 저장 1 + 0.25 (이번 달) + 오늘 0.5 = 1.75 → 남은 3.25 → A 예산 1.5 + 3.25. 지난달 9 는 넣지 않는다
     expect((await keyRow(h, "ork-A")).budgetUsd).toBe(4.75);
+  });
+});
+
+// ---- K2 리뷰 M2·L1·M3 ----
+
+describe("TC-K2.T6.l 임대 안에 다 못 끝내는 회원 수도 두 tick 이면 모든 키가 새 달 예산(또는 꺼짐)을 받는다", () => {
+  it("새 달 첫 실행, 회원 20(마지막 회원은 한도 초과). tick 마다 OmniRoute 변경 15건째에 임대를 잃는다 → 두 tick 뒤 켜진 키 19개 모두 4월 setBudget, 초과 회원 키 꺼짐, 둘째 tick 은 첫 tick 이 한 키를 다시 보내지 않는다", async () => {
+    await writeSetting(h, CONFIRMED_KEY, "2026-04-01", new Date("2026-04-01T00:00:30Z"));
+    await writeSetting(h, REBALANCE_MONTH_KEY, "2026-03", new Date("2026-03-31T23:59:00Z"));
+    const orks: string[] = [];
+    for (let i = 1; i <= 19; i++) {
+      const ork = `ork-${String(i).padStart(2, "0")}`;
+      orks.push(ork);
+      // 지난달에 건 예산이 남아 있다 (OmniRoute 지출 카운터는 4월 1일에 0 이 됐다)
+      await addMember(h, 10, [{ ork, budgetUsd: 10 }]);
+    }
+    await addMember(h, 1, [{ ork: "ork-over" }]);
+    const tick = async (now: Date) => {
+      const ac = new AbortController();
+      let changes = 0;
+      let t = 0;
+      const o = fakeOmni(() => ({ "ork-over": 2 }), {
+        onChange: () => {
+          t += 1_000;
+          if (++changes >= 15) {
+            ac.abort(new Error("임대를 잃었다"));
+            throw ac.signal.reason;
+          }
+        },
+      });
+      await rebalanceAll({ db: h, now, client: o.client, signal: ac.signal, clock: () => t, budgetMs: 12_000 });
+      return o;
+    };
+    const first = await tick(new Date("2026-04-01T00:01:00Z"));
+    expect(first.of("setKeyActive"), "초과 회원 끄기가 먼저").toEqual([{ fn: "setKeyActive", id: "ork-over", value: false }]);
+    const second = await tick(new Date("2026-04-01T00:02:00Z"));
+    const sentFirst = new Set(first.of("setBudget").map((c) => c.id));
+    const sentSecond = second.of("setBudget").map((c) => c.id as string);
+    expect(sentSecond.filter((id) => sentFirst.has(id)), "둘째 tick 이 다시 보낸 키").toEqual([]);
+    expect([...sentFirst, ...sentSecond].sort()).toEqual(orks);
+    expect(await keyRow(h, "ork-over")).toMatchObject({ state: "disabled", reason: "limit" });
+  });
+});
+
+describe("TC-K2.T6.m 회원 하나의 예외가 다른 회원을 막지 않는다", () => {
+  it("첫 회원 저장값이 깨짐(음수 비용) → 그 회원만 실패로 세고 alert.rebalance_failed 1행, 둘째 회원 키는 setBudget", async () => {
+    await confirmedToday();
+    const bad = await addMember(h, 5, [{ ork: "ork-bad" }]);
+    await addMember(h, 5, [{ ork: "ork-ok" }]);
+    await h.db.insert(h.schema.usageDaily).values({ keyId: "ork-bad", day: "2026-04-03", costUsd: -1, updatedAt: new Date() });
+    const o = fakeOmni(() => ({}));
+    const r = await rebalanceAll({ db: h, now: NOW, client: o.client });
+    expect(o.of("setBudget").map((c) => c.id)).toEqual(["ork-ok"]);
+    expect(r.failedMembers).toBe(1);
+    const alerts = await h.db.select().from(h.schema.auditLog).where(eq(h.schema.auditLog.action, "alert.rebalance_failed"));
+    expect(alerts.map((a: any) => JSON.parse(a.detail).userIds)).toEqual([[bad.userId]]);
+  });
+});
+
+describe("TC-K2.T6.o 임대를 잃어 끊긴 setBudget 은 다음 실행이 다시 보낸다", () => {
+  it("setBudget 도중 임대 상실 → budget_usd 는 비어 있다(NULL), 다음 실행이 같은 예산을 다시 setBudget", async () => {
+    await confirmedToday();
+    await writeSetting(h, REBALANCE_MONTH_KEY, "2026-04", NOW);
+    await addMember(h, 5, [{ ork: "ork-A" }]);
+    const ac = new AbortController();
+    const lost = fakeOmni(() => ({}), {
+      onChange: () => {
+        ac.abort(new Error("임대를 잃었다"));
+        throw ac.signal.reason;
+      },
+    });
+    await expect(rebalanceAll({ db: h, now: NOW, client: lost.client, signal: ac.signal })).rejects.toThrow("임대를 잃었다");
+    expect((await keyRow(h, "ork-A")).budgetUsd).toBeNull();
+    const again = fakeOmni(() => ({}));
+    await rebalanceAll({ db: h, now: new Date(NOW.getTime() + 60_000), client: again.client });
+    expect(again.of("setBudget").map((c) => [c.id, c.value])).toEqual([["ork-A", 5]]);
+    expect((await keyRow(h, "ork-A")).budgetUsd).toBe(5);
+  });
+});
+
+describe("TC-K2.T6.p 무제한(NULL)으로 바뀐 회원의 옛 예산은 clearBudget 으로 푼다", () => {
+  it("한도 NULL, 켜진 키 A(budget_usd 5)·limit 으로 꺼진 키 B(budget_usd 3) → A [clearBudget], B [clearBudget, setKeyActive(true)], 두 행 budget_usd NULL. 예산 없는 키는 부르지 않는다", async () => {
+    await confirmedToday();
+    await addMember(h, null, [{ ork: "ork-A", budgetUsd: 5 }, { ork: "ork-B", state: "disabled", reason: "limit", budgetUsd: 3 }, { ork: "ork-C" }]);
+    const o = fakeOmni(() => ({ "ork-A": 50 }));
+    await rebalanceAll({ db: h, now: NOW, client: o.client });
+    const by = (id: string) => o.calls.filter((c) => c.id === id).map((c) => c.fn);
+    expect([by("ork-A"), by("ork-B"), by("ork-C")]).toEqual([["clearBudget"], ["clearBudget", "setKeyActive"], []]);
+    expect([(await keyRow(h, "ork-A")).budgetUsd, (await keyRow(h, "ork-B")).budgetUsd]).toEqual([null, null]);
+    expect(await keyRow(h, "ork-B")).toMatchObject({ state: "active", reason: null });
   });
 });

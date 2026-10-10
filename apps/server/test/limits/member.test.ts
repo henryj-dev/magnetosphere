@@ -63,3 +63,17 @@ describe("TC-K2.T4.b 즉시 분배와 1분 분배가 겹쳐도 옛 계산이 새
     expect((await keyRow(h, "ork-B")).budgetUsd).toBe(5);
   });
 });
+
+describe("TC-K2.T4.c 즉시 분배는 예산 실패를 삼키지 않는다", () => {
+  it("setBudget 이 OmniRouteError → rebalanceMember 가 던진다 (발급은 예산이 성공한 뒤에만 켠다, K4)", async () => {
+    const { OmniRouteError } = await import("@magnetosphere/omniroute");
+    const { userId } = await addMember(h, 5, [{ ork: "ork-A" }]);
+    const o = fakeOmni(() => ({}), {
+      onChange: (c) => {
+        if (c.fn === "setBudget") throw new OmniRouteError("POST", "budget", 503, null, "down");
+      },
+    });
+    await expect(rebalanceMember(h, userId, { now: new Date("2026-04-10T12:00:00Z"), client: o.client })).rejects.toThrow(/예산/);
+    expect((await keyRow(h, "ork-A")).budgetUsd).toBeNull();
+  });
+});

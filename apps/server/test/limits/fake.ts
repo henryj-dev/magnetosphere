@@ -42,7 +42,7 @@ export async function keyRow(h: DbHandle, ork: string) {
 }
 
 export interface OmniCall {
-  fn: "getAnalytics" | "setBudget" | "setKeyActive";
+  fn: "getAnalytics" | "setBudget" | "setKeyActive" | "clearBudget";
   id?: string;
   value?: number | boolean;
   apiKeyIds?: string[];
@@ -51,7 +51,11 @@ export interface OmniCall {
 }
 
 /** 가짜 어댑터. analytics(창) 가 byApiKey 비용(키 id → 비용) 또는 던질 오류를 돌려준다 */
-export function fakeOmni(analytics: (q: { apiKeyIds?: string[]; start: string; end: string; timeoutMs?: number }) => { [id: string]: number | undefined } | Error) {
+/** onChange: setBudget·setKeyActive·clearBudget 를 기록하기 전에 부른다. 던지면 그 호출이 실패한다 (임대 상실·OmniRoute 오류 흉내) */
+export function fakeOmni(
+  analytics: (q: { apiKeyIds?: string[]; start: string; end: string; timeoutMs?: number }) => { [id: string]: number | undefined } | Error,
+  opts: { onChange?: (call: OmniCall) => void } = {},
+) {
   const calls: OmniCall[] = [];
   const client = (opts?: { timeoutMs?: number }): LimitsClient => ({
     async getAnalytics(q) {
@@ -67,10 +71,19 @@ export function fakeOmni(analytics: (q: { apiKeyIds?: string[]; start: string; e
       return a;
     },
     async setBudget(id, b) {
-      calls.push({ fn: "setBudget", id, value: b.monthlyUsd });
+      const call: OmniCall = { fn: "setBudget", id, value: b.monthlyUsd };
+      opts.onChange?.(call);
+      calls.push(call);
+    },
+    async clearBudget(id) {
+      const call: OmniCall = { fn: "clearBudget", id };
+      opts.onChange?.(call);
+      calls.push(call);
     },
     async setKeyActive(id, active) {
-      calls.push({ fn: "setKeyActive", id, value: active });
+      const call: OmniCall = { fn: "setKeyActive", id, value: active };
+      opts.onChange?.(call);
+      calls.push(call);
     },
   });
   return { client, calls, of: (fn: OmniCall["fn"]) => calls.filter((c) => c.fn === fn) };
