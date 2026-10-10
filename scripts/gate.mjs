@@ -509,15 +509,21 @@ function writeSeal(root, phase, { waived, reason, checks }) {
 
 // ---------- 진입 ----------
 
-const args = parseArgs(process.argv.slice(2));
-const root = path.resolve(args.root ?? (git(process.cwd(), ["rev-parse", "--show-toplevel"], { allowFail: true }).out || process.cwd()));
+// scripts/check-red.mjs 가 test 판정(passedCount)과 명령 실행(run)을 같은 규칙으로 쓰려고 이 파일을 불러온다.
+// 직접 실행할 때만 아래가 돈다. argv[1] 은 심볼릭 링크를 풀어 비교한다 (/tmp → /private/tmp 등)
+export { passedCount, run };
 
-if (args["assert-order"]) {
-  await cmdAssertOrder(root, args.base, args.head);
-} else {
-  const gates = await loadGates(view(root));
-  if (args.status) cmdStatus({ root, gates, seals: view(root), tip: defaultTip(root) }, args.json === true);
-  else if (args["verify-seals"]) cmdVerifySeals(root, gates, args.rerun === true, args.since, args["skip-requires"] ?? null);
-  else if (args._[0]) cmdPhase(root, gates, args._[0], args);
-  else fail("사용법: gate <단계> [--seal|--explain|--waived <사유>] | --status [--json] | --assert-order [--base <ref>] [--head <ref>] | --verify-seals [--rerun]");
+if (process.argv[1] && fs.realpathSync(process.argv[1]) === SELF) {
+  const args = parseArgs(process.argv.slice(2));
+  const root = path.resolve(args.root ?? (git(process.cwd(), ["rev-parse", "--show-toplevel"], { allowFail: true }).out || process.cwd()));
+
+  if (args["assert-order"]) {
+    await cmdAssertOrder(root, args.base, args.head);
+  } else {
+    const gates = await loadGates(view(root));
+    if (args.status) cmdStatus({ root, gates, seals: view(root), tip: defaultTip(root) }, args.json === true);
+    else if (args["verify-seals"]) cmdVerifySeals(root, gates, args.rerun === true, args.since, args["skip-requires"] ?? null);
+    else if (args._[0]) cmdPhase(root, gates, args._[0], args);
+    else fail("사용법: gate <단계> [--seal|--explain|--waived <사유>] | --status [--json] | --assert-order [--base <ref>] [--head <ref>] | --verify-seals [--rerun]");
+  }
 }
