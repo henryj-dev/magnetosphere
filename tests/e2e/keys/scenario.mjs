@@ -16,13 +16,14 @@
 //   - 초과 폭: 몰아 쓰기는 키 예산(OmniRoute 차단)만으로 멈춘다. 분배가 키 예산을 "그 키 사용액 + 남은 한도"로 걸었으면
 //     합은 많아야 한도 + 남은 한도 + 요청 2건(≤ 0.04442)이고, 남은 한도 대신 한도 전체를 걸었으면 그 위로 넘는다 (K5 리뷰 M1).
 //   - 반응 시간: 키 예산 차단(429)은 분배 없이도 생긴다. 그래서 거부가 아니라 "분배가 키를 끈 것"(탐침 403)을 125초 안에 본다.
-//     탐침(env.mjs infer real=false)은 비용이 없다. 꺼진 키는 403, 켜진 키는 400 이다 (예산 차단은 탐침으로 보이지 않는다).
+//     탐침(env.mjs infer real=false)은 비용이 없다. 꺼진 키는 403, 켜진 키는 400 이다. 예산을 넘은 켜진 키는 빌드에 따라 다르다:
+//     arm64 는 모델 해석을 먼저 해 400, amd64(CI)는 예산 검사를 먼저 해 429 예산 차단이다 (둘 다 "아직 안 꺼짐"으로 본다).
 // 분배를 기다릴 때 Node(Docker)는 앱의 1분 경계 타이머 그대로, Workers 는 apps/server/wrangler.toml [triggers] crons 에 있는
 // 식만 그 식이 걸리는 1분 경계마다 /__scheduled 로 부른다 (wrangler dev --test-scheduled 는 Cron 을 스스로 돌리지 않는다).
 import fs from "node:fs";
 import path from "node:path";
 import { ROOT } from "../../deploy/stack.mjs";
-import { ADMIN, appHttp, check, d1File, dbOps, infer, limitRejected, log, OPENAI_COST, omniClient, permissionDenied, sleep, STACK_OMNI_URL } from "./env.mjs";
+import { ADMIN, appHttp, check, d1File, dbOps, infer, isBudgetBlocked, limitRejected, log, OPENAI_COST, omniClient, permissionDenied, sleep, STACK_OMNI_URL } from "./env.mjs";
 
 export const LIMIT = 0.02;
 export const MAX_KEYS = 2;
@@ -188,7 +189,7 @@ export async function runKeys(ctx) {
         if (permissionDenied(p)) {
           offAt.set(k, Date.now());
           log(`키 ${name(k)} 꺼짐 (탐침 403 permission_denied, T0 + ${Date.now() - t0}ms)`);
-        } else if (p.status !== 400) throw new Error(`탐침 응답이 예상과 다르다 ${p.status} ${JSON.stringify(p.json)}`);
+        } else if (p.status !== 400 && !isBudgetBlocked(p.status, p.json)) throw new Error(`탐침 응답이 예상과 다르다 ${p.status} ${JSON.stringify(p.json)}`);
       }
       await sleep(1000);
     }
