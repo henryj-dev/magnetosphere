@@ -255,11 +255,16 @@ export function createClient(o: ConnectOptions & { credential: Credential }) {
       }
     },
 
-    /** 키별 사용량 (스트리밍 포함, 0단계 추가 1). startDate·endDate 는 ISO 시각으로 보낸다 (날짜만 보내면 0 이 나온다) */
-    async getAnalytics(q: { apiKeyIds: string[]; startDate: Date | string; endDate: Date | string }): Promise<Analytics> {
-      if (!Array.isArray(q.apiKeyIds) || q.apiKeyIds.length === 0) throw new TypeError("apiKeyIds 가 비어 있다");
+    /**
+     * 키별 사용량 (스트리밍 포함, 0단계 추가 1). startDate·endDate 는 ISO 시각으로 보낸다 (날짜만 보내면 0 이 나온다).
+     * OmniRoute 는 timestamp >= startDate AND timestamp <= endDate 로 거른다 (양 끝 포함, 3.8.51).
+     * apiKeyIds 를 빼면 모든 키다 (1분 분배의 오늘 창, 계획서 v5.7 5.3). 주면 비어 있지 않아야 한다 — 빈 목록을 "전체"로 읽으면
+     * 회원 하나를 부르려다 모든 키 비용을 그 회원에게 더한다.
+     */
+    async getAnalytics(q: { apiKeyIds?: string[]; startDate: Date | string; endDate: Date | string }): Promise<Analytics> {
+      if (q.apiKeyIds !== undefined && (!Array.isArray(q.apiKeyIds) || q.apiKeyIds.length === 0)) throw new TypeError("apiKeyIds 가 비어 있다");
       const p = new URLSearchParams({
-        apiKeyIds: q.apiKeyIds.map(requireId).join(","),
+        ...(q.apiKeyIds ? { apiKeyIds: q.apiKeyIds.map(requireId).join(",") } : {}),
         startDate: isoTime("startDate", q.startDate),
         endDate: isoTime("endDate", q.endDate),
       });

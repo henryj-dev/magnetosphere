@@ -189,3 +189,15 @@ describe("TC-S5.T2.m 비용이 음수인 응답은 오류다", () => {
     expect((await createClient({ baseUrl: "http://omni.test", credential: { token: "t" }, fetch }).getAnalytics(range)).totalCost).toBe(0);
   });
 });
+
+describe("K2.T6 필터 없는 분석 호출 (1분 분배의 오늘 창, 계획서 v5.7 5.3)", () => {
+  it("apiKeyIds 를 빼면 쿼리에 apiKeyIds 가 없다. 빈 목록은 TypeError(요청 0건)", async () => {
+    const { fetch, sent } = fakeFetch({ "GET /api/usage/analytics": { body: ANALYTICS } });
+    const c = createClient({ baseUrl: "http://omni.test", credential: { token: "t" }, fetch });
+    await expect(c.getAnalytics({ ...range, apiKeyIds: [] })).rejects.toThrow(TypeError);
+    expect(sent).toHaveLength(0);
+    await c.getAnalytics({ startDate: range.startDate, endDate: range.endDate });
+    const q = new URL(sent[0].url).searchParams;
+    expect([...q.keys()].sort()).toEqual(["endDate", "startDate"]);
+  });
+});
