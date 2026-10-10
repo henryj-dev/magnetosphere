@@ -813,6 +813,9 @@ TC-K2.T7.c  대조가 제한 시간에 걸리면 날 단위로 나눈다
 TC-K2.T7.d  지난 날 합 + 오늘 == 분석 API 한 달 값이다 (계약, V15 의존)
   단언:  계약 환경, 키 A·B 요청 3건, 계약 OmniRoute usage_history 에 A 의 OpenAI 기록을 본떠 어제 12:00 과 오늘 00:00:00.000(자정 정각)에 넣음 → 실제 시계로 confirmDays → storedSpent([A,B], 이번 달 1일 ~ 오늘) + 오늘 창(자정 기록 포함 4건) == getAnalytics(apiKeyIds [A,B], 이번 달 1일 ~ 지금).totalCost (오차 1e-9). (K2 리뷰 L4: 가짜 '내일' 창은 미래라 늘 0 이었다)
   검출:  창 경계를 [시작, 끝] 둘 다 포함으로 잡아 자정 정각 기록을 두 번 세거나, byApiKey 비용과 summary 비용 계산이 달라 저장 합이 분석 API 한 달 값과 어긋나는 것
+  고침:  (2026-10-10, CI 38050586245) 기록이 잡혔는지 기다리는 settled 의 창이 [지금 − 24시간, 지금 + 60초]라, UTC 12:00 뒤(1일 제외)에
+         돌면 어제 12:00 기록이 기대값 쪽에서 빠져 0.00221 어긋났다. 시험 시각에 달린 시험 버그다 (운영 코드는 UTC 날·달 경계만 쓴다).
+         settled 를 이번 달 1일부터 세게 하고 기록 수(3 + 넣은 수)를 단언한다. 대조: daily.ts endOfDay 를 다음 날 00:00 으로 바꾸면 실패한다
 TC-K2.T7.e  다섯 DB 에 usage_daily 가 있다
   단언:  test:migrate --db sqlite,mysql,mariadb,pg,d1 → usage_daily (key_id, day) 기본 키, cost_usd DECIMAL(12,6)·SQLite REAL, 같은 (key_id, day) 두 번 저장은 갱신 1행
   검출:  한 DB 의 0002 마이그레이션이 빠져 그 조합에서 1분 분배가 "no such table usage_daily" 로 멈추는 것
