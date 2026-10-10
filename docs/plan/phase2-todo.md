@@ -1605,6 +1605,24 @@ TC-K6.T4.b  1분 작업 큐 실행기가 정리를 부른다
 - [x] G-K6.10 ~ G-K6.13 통과
 - 음성 대조 (커밋 안 함): `failed_at IS NULL` 조건 제거 · 펜싱 제거 · 보존 29일 → TC-K6.T4.a 네 DB 모두 실패. `queueJob` 에서 호출 제거 → TC-K6.T4.b 실패
 
+### ☑ K6.T5 — 키 시나리오 누락의 문제 코드 (K5 리뷰 L4)
+선행 없음 · 산출 없음 (기존 `scripts/check-ci-matrix.mjs`·`test/fixtures/ci-guard/e2e-keys-missing.yml`) · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-K6.T5.a`
+
+【작업】
+1. 픽스처 `e2e-keys-missing.yml` 을 `# expect: keys-scenario` 로. 꼬리줄 `Red: TC-K6.T5.a`. 커밋.
+2. `check-ci-matrix` 의 K5 키 시나리오 검사 세 줄(키 시나리오 조합 ≠ matrix.combo, `--scenario keys` 명령 줄 없음)을 `[combo-set]` 에서 `[keys-scenario]` 로. 커밋.
+
+【테스트】
+```
+TC-K6.T5.a  키 시나리오 누락 음성 대조는 [keys-scenario] 로만 잡힌다
+  단언:  check-ci-matrix --expect 6 → 0, check-ci-matrix --fixture test/fixtures/ci-guard/e2e-keys-missing.yml --expect 6 --expect-fail → 0 ([keys-scenario] 잡음)
+  검출:  키 시나리오 누락과 S6 조합 불일치가 같은 코드 combo-set 이라, 픽스처의 매트릭스 조합이 어긋나기만 해도 음성 대조가 "잡음" 으로 통과해 키 시나리오 검사가 고장 난 것을 놓치는 것
+```
+
+【통과】
+- [x] G-K6.15 · G-K6.16 통과. 1단계 G-S7.1(픽스처 폴더 21개)·K0 G-K0.10·11·K5 G-K5.9 그대로 초록
+- 음성 대조 (커밋 안 함): 키 시나리오 명령 줄은 있고 조합 하나(docker-sqlite)를 뺀 픽스처 → 고치기 전 코드에서 `# expect: combo-set` 은 "게이트 S6 E2E 조합이 빠졌다" 로 잡음(다른 이유로 통과), 고친 코드에서 `[keys-scenario]` 는 "키 시나리오 조합이 매트릭스에 없다" 로 잡음
+
 ## 🚪 GATE K6
 
 | id | 검사 | 명령 | 통과 기준 |
