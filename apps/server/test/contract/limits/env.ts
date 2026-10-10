@@ -44,6 +44,10 @@ export async function open(name: string): Promise<Ctx> {
       calls.push({ fn: "setBudget", id, value: b.monthlyUsd });
       await client.setBudget(id, b);
     },
+    async clearBudget(id) {
+      calls.push({ fn: "clearBudget", id });
+      await client.clearBudget(id);
+    },
     async setKeyActive(id, active) {
       calls.push({ fn: "setKeyActive", id, value: active });
       await client.setKeyActive(id, active);

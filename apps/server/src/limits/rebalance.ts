@@ -25,24 +25,28 @@
 import { and, eq, isNull, lt, or, type SQL } from "drizzle-orm";
 import { createClient } from "@magnetosphere/omniroute";
 import { createCipher } from "@magnetosphere/runtime/crypto";
-import { updatedRows, type Lease } from "@magnetosphere/runtime/lease";
+import { LeaseLostError, updatedRows, type Lease } from "@magnetosphere/runtime/lease";
 import type { DbHandle, Job, Runtime } from "@magnetosphere/runtime/types";
 import { requireSecret } from "../config.ts";
-import { enqueue } from "../queue/index.ts";
+import { describeError, enqueue } from "../queue/index.ts";
 import { readOmniRouteToken } from "../setup/omniroute.ts";
-import { computeBudgets } from "./compute.ts";
+import { computeBudgets, type Budgets } from "./compute.ts";
 import { confirmDays, costsOf, coveredUntil, storedSpent, type AnalyticsClient, type ClientFor, type ConfirmResult } from "./daily.ts";
 import { monthChanged, monthKey, monthStart, REBALANCE_MONTH_KEY } from "./month.ts";
-import { guard, readSetting, writeSetting } from "./store.ts";
+import { guard, holds, readSetting, writeSetting } from "./store.ts";
 
 /** OmniRoute 호출 하나의 제한 시간 (어댑터 기본값과 같다) */
 const CALL_TIMEOUT_MS = 15_000;
 /** budget_usd 와 새 예산이 이 안이면 같다 (DECIMAL(12,6) 반올림) */
 const SAME_USD = 5e-7;
+/** 한 실행의 시간 예산: 1분 작업 임대(55초)의 2/3. 넘기면 다음 회원을 시작하지 않고 다음 tick 에 이어 간다 (K2 리뷰 M2) */
+export const TIME_BUDGET_MS = Math.floor((55_000 * 2) / 3);
 
 /** 분배가 쓰는 어댑터 함수 */
 export interface LimitsClient extends AnalyticsClient {
   setBudget(id: string, budget: { monthlyUsd: number }): Promise<void>;
+  /** 무제한 전환에서만 (어댑터 clearBudget) */
+  clearBudget(id: string): Promise<void>;
   setKeyActive(id: string, active: boolean): Promise<void>;
 }
 
@@ -54,6 +58,7 @@ export interface KeyRow {
   disabledReason: string | null;
   budgetUsd: number | null;
   budgetAt: Date | null;
+  budgetMonth: string | null;
 }
 
 export interface MemberRow {
@@ -63,6 +68,8 @@ export interface MemberRow {
 
 export interface ApplyCounts {
   setBudget: number;
+  /** 무제한 전환으로 푼 예산 수 */
+  cleared: number;
   off: number;
   on: number;
   /** OmniRoute 호출이 실패한 키 수 (끄기는 작업 큐에 넣었다) */
@@ -76,14 +83,14 @@ export interface ApplyContext {
   client: ClientFor<LimitsClient>;
   /** 이 계산의 분석 시각 (budget_at 에 쓴다) */
   at: Date;
+  /** 이번 달 (UTC YYYY-MM, budget_month 에 쓴다) */
+  month: string;
   lease?: Lease;
   signal?: AbortSignal;
-  /** 새 달: 예산이 같아도 다시 건다 */
-  force?: boolean;
   counts: ApplyCounts;
 }
 
-export const emptyCounts = (): ApplyCounts => ({ setBudget: 0, off: 0, on: 0, failed: 0, stale: 0 });
+export const emptyCounts = (): ApplyCounts => ({ setBudget: 0, cleared: 0, off: 0, on: 0, failed: 0, stale: 0 });
 
 const toKey = (r: any): KeyRow => ({
   id: r.id,
@@ -93,6 +100,7 @@ const toKey = (r: any): KeyRow => ({
   disabledReason: r.disabledReason ?? null,
   budgetUsd: r.budgetUsd == null ? null : Number(r.budgetUsd),
   budgetAt: r.budgetAt ?? null,
+  budgetMonth: r.budgetMonth ?? null,
 });
 
 /** 회원 상태 active 인 회원의 키 전부 (삭제 포함)와 월 한도. userId 를 주면 그 회원만 */
@@ -109,6 +117,7 @@ export async function loadMembers(h: DbHandle, userId?: string): Promise<{ membe
       disabledReason: k.disabledReason,
       budgetUsd: k.budgetUsd,
       budgetAt: k.budgetAt,
+      budgetMonth: k.budgetMonth,
       limitUsd: u.monthlyLimitUsd,
     })
     .from(k)
@@ -137,10 +146,14 @@ const lost = (c: ApplyContext, e: unknown) => {
   if (c.signal?.aborted) throw c.signal.reason ?? e;
 };
 
-/** 예산을 쓰고 OmniRoute 에 건다. 걸었으면 true */
+/**
+ * 예산을 OmniRoute 에 걸고 적는다. 걸었으면 true.
+ * 잡을 때 budget_usd 를 비운다(NULL = OmniRoute 값을 모름). setBudget 이 성공한 뒤에만 budget_at 이 내 것일 때 값을 쓴다.
+ * 그래서 도중에 임대를 잃거나 실패해도 DB 에 새 값이 남지 않고, 다음 분배가 같은 값이라고 건너뛰지 않는다 (K2 리뷰 L1).
+ */
 async function setKeyBudget(c: ApplyContext, key: KeyRow, monthlyUsd: number): Promise<boolean> {
   const k = c.h.schema.apiKeys;
-  if ((await updateKey(c, key.id, { budgetUsd: monthlyUsd, budgetAt: c.at }, olderThan(c.h, c.at))) !== 1) {
+  if ((await updateKey(c, key.id, { budgetUsd: null, budgetAt: c.at }, olderThan(c.h, c.at))) !== 1) {
     c.counts.stale++;
     return false;
   }
@@ -148,15 +161,34 @@ async function setKeyBudget(c: ApplyContext, key: KeyRow, monthlyUsd: number): P
     await c.client().setBudget(key.omnirouteKeyId, { monthlyUsd });
   } catch (e) {
     lost(c, e);
-    // OmniRoute 에는 옛 예산이 남았다. 비워 두면 다음 1분 분배가 다시 건다
-    await updateKey(c, key.id, { budgetUsd: null }, eq(k.budgetAt, c.at));
     c.counts.failed++;
     return false;
   }
   c.counts.setBudget++;
-  // 부르는 사이 더 새 계산이 budget_at 을 바꿨으면 내 setBudget 이 그쪽 것을 덮었을 수 있다. 비워서 다음 분배가 다시 걸게 한다
-  const [now] = await c.h.db.select({ at: k.budgetAt }).from(k).where(eq(k.id, key.id));
-  if (now && (now.at === null || new Date(now.at).getTime() !== c.at.getTime())) await updateKey(c, key.id, { budgetUsd: null }, undefined);
+  // 부르는 사이 더 새 계산이 budget_at 을 가져갔으면 내 setBudget 이 그쪽 것을 덮었을 수 있다. 비워서 다음 분배가 다시 걸게 한다
+  if ((await updateKey(c, key.id, { budgetUsd: monthlyUsd, budgetMonth: c.month }, eq(k.budgetAt, c.at))) !== 1) await updateKey(c, key.id, { budgetUsd: null }, undefined);
+  return true;
+}
+
+/**
+ * 무제한(월 한도 NULL)으로 바뀐 회원 키의 옛 예산을 푼다 (K2 리뷰 M3). 성공한 뒤에만 budget_usd 를 비운다 —
+ * 실패하면 옛 예산 값이 남아 다음 분배가 다시 푼다. 풀었으면 true
+ */
+async function clearKeyBudget(c: ApplyContext, key: KeyRow): Promise<boolean> {
+  const k = c.h.schema.apiKeys;
+  if ((await updateKey(c, key.id, { budgetAt: c.at }, olderThan(c.h, c.at))) !== 1) {
+    c.counts.stale++;
+    return false;
+  }
+  try {
+    await c.client().clearBudget(key.omnirouteKeyId);
+  } catch (e) {
+    lost(c, e);
+    c.counts.failed++;
+    return false;
+  }
+  c.counts.cleared++;
+  await updateKey(c, key.id, { budgetUsd: null, budgetMonth: c.month }, eq(k.budgetAt, c.at));
   return true;
 }
 
@@ -179,7 +211,7 @@ async function turnOff(c: ApplyContext, key: KeyRow): Promise<void> {
   }
 }
 
-/** limit 으로 꺼진 키를 켠다. budgetClaimed 면 setKeyBudget 이 이미 budget_at 을 내 분석 시각으로 썼다 */
+/** limit 으로 꺼진 키를 켠다. budgetClaimed 면 setKeyBudget·clearKeyBudget 이 이미 budget_at 을 내 분석 시각으로 썼다 */
 async function turnOn(c: ApplyContext, key: KeyRow, budgetClaimed: boolean): Promise<void> {
   const k = c.h.schema.apiKeys;
   const limitOff = and(eq(k.state, "disabled"), eq(k.disabledReason, "limit"));
@@ -198,26 +230,48 @@ async function turnOn(c: ApplyContext, key: KeyRow, budgetClaimed: boolean): Pro
   else c.counts.stale++;
 }
 
-/** 회원 하나의 키에 계산 결과를 건다. spent 는 OmniRoute 키 id → 이번 달 사용액 */
-export async function applyMember(c: ApplyContext, member: MemberRow, keys: readonly KeyRow[], spent: ReadonlyMap<string, number>): Promise<void> {
-  const r = computeBudgets({ limitUsd: member.monthlyLimitUsd, keys: keys.map((k) => ({ id: k.id, state: k.state, spentUsd: spent.get(k.omnirouteKeyId) ?? 0 })) });
+/** 회원 하나의 계산 (키 사용액 → 남은 한도·예산). 깨진 값(음수 사용액·한도)이면 TypeError */
+export function planMember(member: MemberRow, keys: readonly KeyRow[], spent: ReadonlyMap<string, number>): Budgets {
+  return computeBudgets({ limitUsd: member.monthlyLimitUsd, keys: keys.map((k) => ({ id: k.id, state: k.state, spentUsd: spent.get(k.omnirouteKeyId) ?? 0 })) });
+}
+
+/** 이번 달 예산을 아직 받지 못한 (켜졌거나 limit 으로 꺼진) 키가 있는가 */
+const behind = (keys: readonly KeyRow[], month: string) =>
+  keys.some((k) => (k.state === "active" || (k.state === "disabled" && k.disabledReason === "limit")) && k.budgetMonth !== month);
+
+/** 회원 하나의 키에 계산 결과를 건다 */
+export async function applyPlan(c: ApplyContext, keys: readonly KeyRow[], r: Budgets): Promise<void> {
   for (const key of keys) {
     if (c.signal?.aborted) throw c.signal.reason;
     if (r.exhausted) {
       if (key.state === "active") await turnOff(c, key);
       continue;
     }
-    const want = r.budgets.get(key.id);
+    const limitOff = key.state === "disabled" && key.disabledReason === "limit";
+    if (key.state !== "active" && !limitOff) continue;
+    if (r.remaining === null) {
+      // 무제한: 옛 예산이 남아 있으면 풀고, limit 으로 꺼진 키는 그 뒤에 켠다
+      const hadBudget = key.budgetUsd !== null;
+      if (hadBudget && !(await clearKeyBudget(c, key))) continue;
+      if (limitOff) await turnOn(c, key, hadBudget);
+      continue;
+    }
+    const want = r.budgets.get(key.id) as number;
     if (key.state === "active") {
-      if (want === undefined) continue;
-      if (!c.force && key.budgetUsd !== null && Math.abs(key.budgetUsd - want) < SAME_USD) continue;
+      // 같은 달에 같은 예산을 이미 걸었으면 보내지 않는다. 새 달이면(budget_month 가 다르면) 같아도 다시 건다 (OmniRoute 월 지출이 0 이 됐다, V20)
+      if (key.budgetMonth === c.month && key.budgetUsd !== null && Math.abs(key.budgetUsd - want) < SAME_USD) continue;
       await setKeyBudget(c, key, want);
-    } else if (key.state === "disabled" && key.disabledReason === "limit") {
+    } else {
       // 예산을 먼저 건 뒤 켠다. 예산 없이 먼저 켜면 다음 분배까지 한도 밖 사용이 열린다
-      if (want !== undefined && !(await setKeyBudget(c, key, want))) continue;
-      await turnOn(c, key, want !== undefined);
+      if (!(await setKeyBudget(c, key, want))) continue;
+      await turnOn(c, key, true);
     }
   }
+}
+
+/** 회원 하나: 계산하고 건다 (즉시 분배 member.ts) */
+export async function applyMember(c: ApplyContext, member: MemberRow, keys: readonly KeyRow[], spent: ReadonlyMap<string, number>): Promise<void> {
+  await applyPlan(c, keys, planMember(member, keys, spent));
 }
 
 export interface RebalanceDeps {
@@ -226,32 +280,89 @@ export interface RebalanceDeps {
   client: ClientFor<LimitsClient>;
   lease?: Lease;
   signal?: AbortSignal;
+  /** 시간 예산을 재는 시계 (기본 실제 시계) */
+  clock?: () => number;
+  /** 이 시간이 지나면 다음 회원을 시작하지 않고 멈춘다 (기본 TIME_BUDGET_MS) */
+  budgetMs?: number;
 }
 
 export interface RebalanceResult extends ApplyCounts {
   members: number;
+  /** 예외로 건너뛴 회원 수 (alert.rebalance_failed) */
+  failedMembers: number;
+  /** 시간 예산을 넘겨 일부 회원을 다음 실행으로 미뤘다 */
+  stopped: boolean;
   monthChanged: boolean;
   confirm: ConfirmResult;
 }
 
-/** 1분 분배 한 번 */
+/**
+ * 1분 분배 한 번 (K2 리뷰 M2).
+ *   1단계: 남은 한도 0 인 회원의 켜진 키를 모두 끈다. 2단계: 예산·켜기. 이번 달 예산을 아직 받지 못한 키가 있는 회원부터.
+ *   회원 하나의 예외(깨진 값·DB 오류)는 그 회원만 실패로 세고 다음 회원으로 간다. 실패한 회원은 alert.rebalance_failed 1행에 남긴다.
+ *   임대를 잃으면(신호 끊김) 곧바로 멈춘다. 시간 예산(임대의 2/3)이 지나면 다음 회원을 시작하지 않고 멈춘다.
+ *   다음 실행은 budget_month 가 이번 달인 키를 건너뛰므로 멈춘 자리 뒤 회원부터 이어 간다.
+ */
 export async function rebalanceAll(d: RebalanceDeps): Promise<RebalanceResult> {
   const h = d.db;
+  const clock = d.clock ?? Date.now;
+  const startedAt = clock();
+  const budgetMs = d.budgetMs ?? TIME_BUDGET_MS;
+  const month = monthKey(d.now);
   const confirm = await confirmDays(h, d.now, d.client, { lease: d.lease, signal: d.signal });
   const changed = monthChanged(await readSetting<string>(h, REBALANCE_MONTH_KEY), d.now);
   const members = (await loadMembers(h)).filter((m) => needsRebalance(m.keys));
   const counts = emptyCounts();
+  const failed: { userId: string; error: string }[] = [];
+  let stopped = false;
   if (members.length > 0) {
     const from = await coveredUntil(h, d.now);
     const ids = members.flatMap((m) => m.keys.map((k) => k.omnirouteKeyId));
     const today = costsOf(await d.client().getAnalytics({ startDate: from, endDate: d.now }), new Set(ids));
     const stored = await storedSpent(h, ids, monthStart(d.now), from);
     const spent = new Map(ids.map((id) => [id, (stored.get(id) ?? 0) + (today.get(id) ?? 0)]));
-    const c: ApplyContext = { h, client: d.client, at: d.now, lease: d.lease, signal: d.signal, force: changed, counts };
-    for (const m of members) await applyMember(c, m.member, m.keys, spent);
+    const c: ApplyContext = { h, client: d.client, at: d.now, month, lease: d.lease, signal: d.signal, counts };
+    const plans: { m: (typeof members)[number]; r: Budgets }[] = [];
+    for (const m of members) {
+      try {
+        plans.push({ m, r: planMember(m.member, m.keys, spent) });
+      } catch (e) {
+        failed.push({ userId: m.member.id, error: describeError(e) });
+      }
+    }
+    const offFirst = plans.filter((p) => p.r.exhausted);
+    const rest = plans.filter((p) => !p.r.exhausted);
+    const order = [...offFirst, ...rest.filter((p) => behind(p.m.keys, month)), ...rest.filter((p) => !behind(p.m.keys, month))];
+    for (const p of order) {
+      if (clock() - startedAt >= budgetMs) {
+        stopped = true;
+        break;
+      }
+      try {
+        await applyPlan(c, p.m.keys, p.r);
+      } catch (e) {
+        if (d.signal?.aborted) throw d.signal.reason ?? e;
+        failed.push({ userId: p.m.member.id, error: describeError(e) });
+      }
+    }
   }
-  if (changed) await writeSetting(h, REBALANCE_MONTH_KEY, monthKey(d.now), d.now, d.lease);
-  return { ...counts, members: members.length, monthChanged: changed, confirm };
+  if (failed.length > 0) await alertFailed(h, d.lease, failed, d.now);
+  if (changed && !stopped) await writeSetting(h, REBALANCE_MONTH_KEY, month, d.now, d.lease);
+  return { ...counts, members: members.length, failedMembers: failed.length, stopped, monthChanged: changed, confirm };
+}
+
+/** 분배하지 못한 회원 (관리자 알림, 계획서 v5.6 Q6). 한 실행에 1행. 회원 id 와 오류는 앞 20개만 */
+async function alertFailed(h: DbHandle, lease: Lease | undefined, failed: { userId: string; error: string }[], now: Date): Promise<void> {
+  if (lease && !(await holds(h, lease))) throw new LeaseLostError(lease);
+  await h.db.insert(h.schema.auditLog).values({
+    id: crypto.randomUUID(),
+    actorId: null,
+    action: "alert.rebalance_failed",
+    target: null,
+    detail: JSON.stringify({ members: failed.length, userIds: failed.slice(0, 20).map((f) => f.userId), errors: failed.slice(0, 20).map((f) => f.error) }),
+    ip: null,
+    createdAt: now,
+  });
 }
 
 /** jobs.ts 의 budget_rebalance 본문. OmniRoute 연결(주소 + 설치 때 저장한 관리 토큰)이 없으면 할 일이 없다 */

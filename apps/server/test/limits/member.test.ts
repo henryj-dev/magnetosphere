@@ -58,7 +58,8 @@ describe("TC-K2.T4.b 즉시 분배와 1분 분배가 겹쳐도 옛 계산이 새
     const old = fakeOmni(() => ({ "ork-A": 0, "ork-B": 0 }));
     const r = await rebalanceAll({ db: h, now: t1, client: old.client });
     expect(old.of("setBudget"), "옛 계산의 setBudget").toEqual([]);
-    expect(r.stale).toBe(2);
+    // A 는 더 새 계산(t2)이 있어 0행. B 는 같은 달 같은 예산이라 보내지 않는다
+    expect(r.stale).toBe(1);
     expect(await keyRow(h, "ork-A")).toMatchObject({ budgetUsd: 4, budgetAt: t2 });
     expect((await keyRow(h, "ork-B")).budgetUsd).toBe(5);
   });

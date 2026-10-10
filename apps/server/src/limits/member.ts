@@ -3,9 +3,10 @@
 //   날이 바뀐 뒤 1분 분배가 아직 어제를 확정하지 않았으면 창을 마지막 확정 날부터 잡는다 (daily.ts coveredUntil).
 // 1분 분배와 같은 임대를 잡지 않는다. 겹침은 api_keys.budget_at(분석 시각) 조건이 막는다: 더 늦은 분석으로 이미 쓴 키는
 // 0행이고, 늦게 끝난 1분 분배가 이 계산을 옛 사용액으로 덮지 못한다 (rebalance.ts applyMember).
+// OmniRoute 반영이 하나라도 실패하면 던진다 (K2 리뷰 M4). 발급(K4)은 이것이 성공한 뒤에만 키를 켠다.
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import { costsOf, coveredUntil, storedSpent, type ClientFor } from "./daily.ts";
-import { monthStart } from "./month.ts";
+import { monthKey, monthStart } from "./month.ts";
 import { applyMember, emptyCounts, loadMembers, type ApplyCounts, type LimitsClient } from "./rebalance.ts";
 
 export async function rebalanceMember(h: DbHandle, userId: string, opts: { now?: Date; client: ClientFor<LimitsClient> }): Promise<ApplyCounts> {
@@ -18,6 +19,7 @@ export async function rebalanceMember(h: DbHandle, userId: string, opts: { now?:
   const today = costsOf(await opts.client().getAnalytics({ apiKeyIds: ids, startDate: from, endDate: now }), new Set(ids));
   const stored = await storedSpent(h, ids, monthStart(now), from);
   const spent = new Map(ids.map((id) => [id, (stored.get(id) ?? 0) + (today.get(id) ?? 0)]));
-  await applyMember({ h, client: opts.client, at: now, counts }, m.member, m.keys, spent);
+  await applyMember({ h, client: opts.client, at: now, month: monthKey(now), counts }, m.member, m.keys, spent);
+  if (counts.failed > 0) throw new Error(`즉시 분배: 예산·키 반영 ${counts.failed}건이 OmniRoute 에서 실패했다 (회원 ${userId})`);
   return counts;
 }
