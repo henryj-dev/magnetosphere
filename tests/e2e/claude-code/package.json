@@ -1,0 +1,9 @@
+{
+  "name": "magnetosphere-e2e-claude-code",
+  "version": "0.0.0",
+  "private": true,
+  "description": "K5.T1 E2E 가 쓰는 Claude Code CLI. 저장소 워크스페이스와 따로 설치한다 (pnpm-workspace.yaml 이 이 폴더를 따로 묶는다)",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.283"
+  }
+}

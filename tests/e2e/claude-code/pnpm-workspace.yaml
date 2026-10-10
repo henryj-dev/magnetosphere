@@ -1,0 +1,4 @@
+# K5.T1 E2E 의 Claude Code 설치 (저장소 최상위 워크스페이스와 따로). pnpm e2e --scenario claude-code 가 이 폴더에서 설치한다.
+# Claude Code 는 설치 스크립트(install.cjs)가 아키텍처별 바이너리를 bin/claude.exe 로 옮긴다. 그 스크립트만 허용한다.
+allowBuilds:
+  "@anthropic-ai/claude-code": true

@@ -1,0 +1,25 @@
+# 2단계 E2E 덧씌우기 (K5, pnpm e2e --combo docker-* --scenario keys|claude-code). tests/deploy/compose.test.yml 위에 얹는다.
+# - 묶음의 OmniRoute 에 가짜 상위 서버(tests/contract/mock-upstream.mjs)를 붙인다. 계약 환경과 같은 이미지의 node 로 돈다.
+# - 제공자·가격 등록(tests/contract/setup.mjs)과 시험의 분석 조회(어댑터)를 위해 OmniRoute 를 127.0.0.1:20173 에만 연다.
+#   이 컴퓨터의 localhost:20128 은 사람이 쓰는 OmniRoute 다. 쓰지 않는다.
+# 상대 경로는 첫 compose 파일(저장소 최상위 docker-compose.yml)의 폴더 기준이다.
+services:
+  omniroute:
+    ports:
+      - "127.0.0.1:20173:20128"
+    depends_on:
+      mock:
+        condition: service_healthy
+  mock:
+    image: diegosouzapw/omniroute:3.8.51@sha256:8bd462c9f60d8eda79329cfbb6ea7ea723505fe7721beb944f3d43835409e218
+    entrypoint: ["node", "/mock/mock-upstream.mjs"]
+    environment:
+      PORT: "18080"
+    volumes:
+      - ./tests/contract/mock-upstream.mjs:/mock/mock-upstream.mjs:ro
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:18080/v1/models').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
