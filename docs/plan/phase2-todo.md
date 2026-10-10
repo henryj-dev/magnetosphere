@@ -1517,7 +1517,10 @@ E2E 시나리오의 숫자: 한도 반영 ≤ 125,000ms = 지출 기록 60초 + 
 **브랜치** `p2/k6`.
 **outputs** 없음 (검사와 문서만).
 
-**K5 리뷰에서 넘김 (L4·L5·L6)** K5 리뷰의 낮은 등급 지적 셋은 K5 에서 고치지 않고 이 단계에서 검토한다. L6 의 근거가 되는 조합별 한도 반영 시간(reactMs)은 K5 PR(#10) 본문 표에 남겼다.
+**K5 리뷰에서 넘김 (L4·L5·L6)** K5 리뷰의 낮은 등급 지적 셋은 K5 에서 고치지 않고 이 단계에서 검토했다.
+- **L4 음성 대조 코드가 겹침 → 고침 (K6.T5)**. `test/fixtures/ci-guard/e2e-keys-missing.yml` 이 `# expect: combo-set` 이었다. S6 조합 불일치와 같은 코드라, 픽스처의 매트릭스 조합이 어긋나기만 해도 음성 대조가 "잡음" 으로 통과한다 (키 시나리오 검사가 고장 나도 모른다). `check-ci-matrix` 의 키 시나리오 검사에 코드 `[keys-scenario]` 를 따로 주었다.
+- **L5 compose 재시도가 모든 실패를 세 번까지 다시 함 → 일부 고침, 나머지 8단계**. `tests/e2e/keys/env.mjs` `upWithMock`, `ci.yml` `s1-seal` 계약 환경 띄우기, `scripts/compose-up.mjs` 셋이 레지스트리 오류든 healthcheck 실패든 가리지 않고 5초·15초 뒤 다시 띄운다. 느린 healthcheck 가 재시도에 묻힐 수 있다. 고친 것: 재시도마다 GitHub 경고 주석(`::warning title=docker compose up 재시도::…`)을 남겨 실행 요약에 보이게 했고, `s1-seal` 은 재시도 전에 `docker compose ps -a` 로 컨테이너 상태를 찍는다 (전에는 아무 줄도 없이 다시 했다). 넘긴 것: 레지스트리 오류(이미지 받기)만 골라 다시 하기. `compose-up.mjs` 는 출력을 그대로 흘려(stdio inherit) 오류 종류를 읽지 못하고, `docker compose pull` 을 따로 돌리면 미리 빌드한 app 이미지(`--no-build`)를 레지스트리에서 받으려 해 실행기마다 손이 간다. CI 매트릭스를 정리하는 8단계(공개 준비)에서 정한다.
+- **L6 125초 기준과 분배 지연의 여유 → 기록만 (코드 없음)**. CI 38075452076 의 한도 반영 시간 reactMs(몰아 쓰기 뒤, K5 PR #10 본문 표): docker-sqlite 17,151 · docker-mysql 49,693 · docker-pg 59,061 · workers-d1 28,685 · workers-mysql 11,506 · workers-pg 15,112ms. 가장 나쁜 docker-pg 도 기준 125,000ms(지출 기록 60초 + 분배 1분 + 5초) 대비 여유 65,939ms(기준의 53%)다. 구성상 최악은 지출 기록 60초를 꽉 채우고 분배 tick 하나를 놓친 경우(약 120초)라 여유가 이론상으로는 5초까지 줄 수 있다. 실측이 기준의 절반 아래라 기준을 바꾸지 않는다. 어느 조합이든 100,000ms 를 넘기기 시작하면 V15 와 G-K2.15 를 다시 잰다 (「막혔을 때」 "분배가 1분 안에 안 끝남").
 
 **백로그 (K1 리뷰 #9)** 끝난 작업(`omniroute_jobs.done_at`) 정리: 기본 30일이 지난 완료 작업을 지우는 주기 정리를 둘지, 감사 로그(`audit_log`)로 대신할 수 있는지(완료 작업에 남는 정보가 감사 로그에 이미 있는가) 검토하고 정한다. 실패 작업(`failed_at`)은 정리하지 않는다 (오래 실패 화면, 7단계).
 - **결정: 주기 정리 (K6.T4)**. 감사 로그로는 대신하지 못한다 — 끝난 작업이 담은 것(action·payload 의 키 id·시도 횟수·끝난 시각)은 `audit_log`에 없다. 큐가 `audit_log`에 쓰는 것은 실패(`alert.job_failed`)뿐이고, 키 API 는 끄기·켜기·삭제를 `audit_log`에 쓰지 않는다. 그래도 끝난 행은 아무도 다시 읽지 않는다: 미완료 작업 찾기(`runDue`·키별 합치기·delete 우선)는 모두 `done_at IS NULL` 이고, 반영 결과는 `api_keys`(state·sync_state)에 남는다. 남겨 둘 값이 없는 행이 키 삭제마다(`key.delete`) 하나씩 끝없이 쌓이므로, 운영자가 최근 반영 이력을 볼 수 있는 30일만 두고 지운다. 정리는 1분 작업 큐 실행기 안에서 같은 임대로 펜싱해 한 문장 `DELETE` 로 한다 (작고, 새 주기·cron 을 더하지 않는다).
@@ -1560,7 +1563,7 @@ TC-K6.T2.a  운영 문서에 한계 두 줄이 있다
 - [x] G-K6.3 · G-K6.14 통과 (G-K6.14 는 TC 단언의 둘째 줄 "추정 ≥ 1" 이다)
 - 음성 대조 (커밋 안 함): 두 문장을 "남은 한도 곱하기 키 수"·"값" 으로 바꾸면 G-K6.3 (0 / == 1)·G-K6.14 (0 / >= 1) 실패
 
-### ☐ K6.T3 — 2단계 전체 봉인·순서·필수 검사
+### ◐ K6.T3 — 2단계 전체 봉인·순서·필수 검사
 선행 K6.T1 · K6.T2 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
 
 【작업】
@@ -1582,7 +1585,8 @@ TC-K6.T3.c  1·2단계 봉인이 모두 유효하고 처음 커밋부터 순서 
 ```
 
 【통과】
-- [ ] G-K6.4 ~ G-K6.8 통과
+- [ ] G-K6.4 ~ G-K6.8 통과 (G-K6.7 은 ruleset 에 `재발 방지 (K6 게이트)` 를 넣은 뒤)
+- 음성 대조 (커밋 안 함): ci.yml 에서 `run: node scripts/gate.mjs K6 --explain` 줄 삭제 → G-K6.8 실패 (0 / == 1). `apps/server/src/jobs.ts` 에 `"/api/keys"` 한 줄 → G-K6.9 실패 (1 / == 0). G-K6.4 의 같은 식에 아직 봉인 안 된 K6 를 넣으면 "봉인 무효·없음: K6" 종료코드 1. G-K6.6 은 G-S7.5 와 같은 명령이고 거부 동작은 TC-S0.T3(G-K0.5)가 본다
 
 ### ☑ K6.T4 — 끝난 작업 정리 (K1 리뷰 #9)
 선행 없음 · 산출 없음 (기존 `apps/server/src/queue/index.ts`·`runner.ts`) · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-K6.T4.a, TC-K6.T4.b`
@@ -1636,6 +1640,13 @@ TC-K6.T5.a  키 시나리오 누락 음성 대조는 [keys-scenario] 로만 잡�
 | G-K6.7 | ruleset 필수 검사·머지 커밋만 · TC-K6.T3.b | `node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere` | 종료코드 0 |
 | G-K6.8 | TC-K6.T3.a CI 단계 잡 | grep `^\s+run: node scripts/gate\.mjs K6\b` in ci.yml | == 1 |
 | G-K6.9 | 어댑터 밖 관리 호출 0 (2단계 코드 포함) | G-K4.23 과 같음 | == 0 |
+| G-K6.10 | TC-K6.T4.a 끝난 작업 정리 (네 DB) | [L] `pnpm -C apps/server test:db -t "TC-K6.T4.a" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
+| G-K6.11 | TC-K6.T4.b 실행기가 정리를 부름 | `pnpm -C apps/server test -t "TC-K6.T4.b"` | 통과 = 1 |
+| G-K6.12 | 재현 빨강 TC-K6.T4.a | `node scripts/check-red.mjs --check G-K6.10 --since seal:K5` | 종료코드 0 |
+| G-K6.13 | 재현 빨강 TC-K6.T4.b | `node scripts/check-red.mjs --check G-K6.11 --since seal:K5` | 종료코드 0 |
+| G-K6.14 | TC-K6.T2.a 운영 문서 추정치 | grep `추정` in `deploy/README.md` | ≥ 1 |
+| G-K6.15 | TC-K6.T5.a 키 시나리오 누락 코드 | `node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-guard/e2e-keys-missing.yml --expect 6 --expect-fail` | 종료코드 0 ([keys-scenario]) |
+| G-K6.16 | 재현 빨강 TC-K6.T5.a | `node scripts/check-red.mjs --check G-K6.15 --since seal:K5` | 종료코드 0 |
 
 `node scripts/gate.mjs K6 --seal`
 
@@ -1676,6 +1687,8 @@ TC-K6.T5.a  키 시나리오 누락 음성 대조는 [keys-scenario] 로만 잡�
 - **잠긴 단계의 `outputs`를 아직 병합 안 된 브랜치에서 고쳐야 함**: pre-push 훅은 원격 브랜치 끝을 기준으로 잡아 그 시점에 잠긴 단계 설정 변경을 거부한다 (이 문서의 `p2/plan` 에서 실제로 겪었다). 봉인 파일이 없는 계획 브랜치라면 원격 브랜치를 지우고 다시 올린다 (기준이 `origin/main`이 된다). PR 은 `gh pr reopen`으로 다시 연다. `--no-verify`로 넘기지 않는다 — push 이벤트의 `gate.yml`이 같은 기준으로 다시 막는다.
 - **Docker 메모리(4GB) 부족**: 계약 환경 OmniRoute·mock, 시험 DB 셋, mailpit 이 이미 떠 있다. V15 측정용 OmniRoute(20171)·E2E 묶음은 하나씩 띄우고 끝나면 내린다. `docker compose -f docker-compose.test.yml stop mariadb`로 당장 안 쓰는 DB 를 멈춘다.
 - **amd64·arm64 결과가 다름**: 예산 차단 판정은 K0.T11 도우미만 쓴다. 상태코드가 다르면(429 가 아님) 빌드 차이가 차단 동작까지 번진 것이니 8단계로 미룬 digest 고정 결정을 앞당긴다.
+  - 관찰 (K5, CI amd64): OmniRoute 3.8.51 amd64 빌드는 모델 해석보다 예산 검사를 먼저 한다. 예산을 넘긴 켜진 키로 모르는 모델 탐침을 보내면 amd64 는 429 예산 차단, arm64(로컬)는 400 이다 (커밋 f0d87bd). 또 키 검증 캐시(60초)가 식은 뒤의 꺼진 키는 403 이 아니라 401 `AUTH_002` 로 거부된다 (CI 38073891012, 커밋 a1c01e0. 예산 차단 응답은 캐시를 다시 채우지 않는다). 둘 다 이 항목의 "amd64·arm64 결과가 다름" 이다. 예산 차단 상태 자체는 두 아키텍처 모두 429 다: K0.T11 도우미 `isBudgetBlocked`(`tests/contract/budget-block.mjs`)가 429 만 차단으로 보고, 이 도우미를 쓰는 계약 시험(G-K2.11 등)이 로컬 arm64·CI amd64 둘 다에서 초록이며 K5 E2E 여섯 조합도 CI 에서 초록이다. 그래서 위 규칙("429 가 아니면 앞당긴다")에는 아직 걸리지 않는다. 다만 꺼진 키의 거부 상태(403 → 401)와 검사 순서가 아키텍처마다 달라지는 것이 처음 보였으므로, 8단계로 미룬 아키텍처별 digest 고정 결정은 앞당겨야 할 수 있다. 3단계(정지)·4단계(사용량 화면)가 거부 상태를 회원에게 보여 주기 전에 다시 본다.
+- **알려진 흔들림 G-S6.29**: K5 PR CI 38073891012 에서 G-S6.29(TC-S6.T3.f 설치 시도 횟수 제한, Workers 쪽)가 "wrangler dev 가 끝났다 (종료코드 1)" 로 한 번 실패했고, 같은 실행의 E2E workers-d1 도 wrangler dev 를 띄우다 실패했다. 다음 실행(38075448900)에서 코드 변경 없이 통과했다. 시험 실패가 아니라 wrangler dev 기동 실패다. 다시 보이면 `--explain` 의 wrangler dev 출력 끝부분을 남기고, 두 번째부터는 원인(포트·로컬 D1 파일 잠금 등)을 찾는다. 재시도로 덮지 않는다.
 - **분배가 1분 안에 안 끝남**: V15 `decision`과 G-K2.15 를 다시 잰다. 기준을 넘으면 계획서 5.3 실행 시점을 개정한다 (주기를 늘리면 G-K1.16·최종 목표표 "한도 반영 시간"도 같이 바뀐다).
 - **일정 부족**: 단계를 건너뛰지 않는다. 면제 가능한 단계가 없다. 범위를 줄이려면 계획서를 개정하고 해당 작업을 `(폐기)`로 표시한다.
 - **사용자 OmniRoute(`localhost:20128`)와 충돌**: 모든 시험은 20170(계약)·20171(측정)에서 돈다. 20128 을 쓰는 검사가 보이면 그 검사가 잘못된 것이다.

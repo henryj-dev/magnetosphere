@@ -620,6 +620,13 @@ export const GATES = {
       { id: "G-K6.2", how: "grep", desc: "TC-K6.T1.b 꺼진 테스트·미구현 표식 0 (2단계 경로 포함)", pattern: "\\.(only|skip|skipIf|todo)\\(|\\.(skip|only)\\.|runIf\\(|\\b(skip|todo)\\s*:\\s*true|\\b(xit|xdescribe|xtest)\\(|TODO|FIXME|not implemented", in: ["apps", "packages", "tests", "scripts", "test"], exclude: ["apps/web/build/**", "**/.svelte-kit/**", "**/.wrangler/**", "**/dist/**", "scripts/gate.test.mjs"], op: "==", limit: 0 },
       // K6.T2 운영 문서에 계획서 5.3 한계 두 줄
       { id: "G-K6.3", how: "grep", desc: "TC-K6.T2.a 운영 문서에 몰아 쓰기 초과 폭", pattern: "남은 한도 × 동시에 쓰는 키 수", in: ["deploy/README.md"], op: "==", limit: 1 },
+      // K6.T3 1·2단계 봉인·순서·필수 검사
+      { id: "G-K6.4", how: "cmd", desc: "TC-K6.T3.c 2단계 봉인 K0~K5 모두 유효", cmd: `node -e 'const r=JSON.parse(require("child_process").execFileSync(process.execPath,["scripts/gate.mjs","--status","--json"],{encoding:"utf8"}));const want=["K0","K1","K2","K3","K4","K5"];const bad=want.filter(p=>r.find(x=>x.phase===p)?.state!=="sealed");if(bad.length){console.error("봉인 무효·없음: "+bad.join(", "));process.exit(1)}console.log("K0~K5 봉인 유효")'` },
+      { id: "G-K6.5", how: "cmd", desc: "TC-K6.T3.c 1단계 봉인 S0~S7 모두 유효", cmd: `node -e 'const r=JSON.parse(require("child_process").execFileSync(process.execPath,["scripts/gate.mjs","--status","--json"],{encoding:"utf8"}));const want=["S0","S1","S2","S3","S4","S5","S6","S7"];const bad=want.filter(p=>r.find(x=>x.phase===p)?.state!=="sealed");if(bad.length){console.error("봉인 무효·없음: "+bad.join(", "));process.exit(1)}console.log("S0~S7 봉인 유효")'` },
+      { id: "G-K6.6", how: "cmd", desc: "TC-K6.T3.c 처음 커밋부터 순서 위반 없음", cmd: 'node scripts/gate.mjs --assert-order --base "$(git rev-list --max-parents=0 HEAD)"' },
+      { id: "G-K6.7", how: "cmd", desc: "TC-K6.T3.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
+      { id: "G-K6.8", how: "grep", desc: "TC-K6.T3.a CI 단계 잡 (K6)", pattern: "^\\s+run: node scripts/gate\\.mjs K6\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
+      { id: "G-K6.9", how: "grep", desc: "어댑터 밖 OmniRoute 관리 호출 0 (2단계 코드 포함, G-K4.23 과 같은 규칙)", pattern: "/api/(keys|usage)", in: ["apps", "packages"], exclude: ["packages/omniroute/**"], op: "==", limit: 0 },
       // K6.T4 끝난 작업 정리 (K1 리뷰 #9 백로그 결정: 주기 정리, 30일). 실패 작업은 지우지 않는다
       { id: "G-K6.10", how: "test", requires: ["local-services"], desc: "TC-K6.T4.a done_at 30일 넘은 작업만 지움·실패 작업 남김·펜싱 (네 DB)", cmd: 'pnpm -C apps/server test:db -t "TC-K6.T4.a" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
       { id: "G-K6.11", how: "test", desc: "TC-K6.T4.b 1분 작업 큐 실행기가 정리를 부른다", cmd: 'pnpm -C apps/server test -t "TC-K6.T4.b"', expectPassed: 1 },
