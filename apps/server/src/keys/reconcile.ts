@@ -13,6 +13,7 @@
 //        키 state 가 회원 상태와 맞지 않으면 applyKey (actual = 읽은 isActive). 회원 상태 변화(DB 에서 바꾼 정지·탈퇴)도 여기서
 //        반영된다. 목표가 삭제됨인데 OmniRoute 에 남은 키는 끄고 key.delete 를 잡는다(이미 기다리는 작업이 없을 때).
 //      - 매핑된 키가 disabled 인데 disabled_reason 이 없으면 alert.key_stuck (누가 왜 껐는지 모르는 키, 켜지 않는다).
+//   2'. 그 전에 발급(K4) 도중 죽어 남은 자리 행과 그 m_ 키를 치운다 (sweepSlots, K4 보안 리뷰 M2).
 //   3. 알림(keys/alerts.ts)은 찾은 자리에서 바로 쓴다. 같은 종류·같은 키를 하루(UTC) 한 번만 남긴다.
 // 시간 예산 (K3 리뷰 #2): 키는 id 순으로 보고, 실행 시간이 budgetMs(임대의 2/3)를 넘으면 다음 키를 시작하지 않고 마지막으로 본 키 id 를
 //   app_settings(CURSOR_KEY)에 적고 멈춘다. 다음 실행은 그 뒤부터 이어 가고, 끝까지 보면 위치를 지운다. 그래서 키가 많아도
@@ -22,7 +23,7 @@
 // 목록은 실행 처음에 한 번 읽은 것이라 그 뒤 요청이 바꾼 키와 다를 수 있다. 그래도 거는 값은 늘 applyKey 가 그 자리에서 다시 읽은
 // 목표다 — 옛 목록 때문에 새 목표를 거스르지 않는다 (옛 목록은 "다시 걸어 볼 키"를 고르는 데만 쓴다).
 // 임대를 잃으면(signal) 다음 키를 시작하지 않고 던진다. 쓰기는 모두 펜싱한다.
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, like, lt, ne } from "drizzle-orm";
 import { createClient, type KeyInfo } from "@magnetosphere/omniroute";
 import { createCipher } from "@magnetosphere/runtime/crypto";
 import { LeaseLostError, updatedRows, type Lease } from "@magnetosphere/runtime/lease";
@@ -30,10 +31,11 @@ import type { DbHandle, Job, Runtime } from "@magnetosphere/runtime/types";
 import { requireSecret } from "../config.ts";
 import type { ClientFor } from "../limits/daily.ts";
 import type { LimitsClient } from "../limits/rebalance.ts";
-import { deleteSetting, guard, readSetting, writeSetting } from "../limits/store.ts";
+import { deleteSetting, guard, holds, readSetting, writeSetting } from "../limits/store.ts";
 import { readOmniRouteToken } from "../setup/omniroute.ts";
 import { alertOnce } from "./alerts.ts";
-import { applyKey } from "./apply.ts";
+import { applyKey, PENDING_KEY_PREFIX } from "./apply.ts";
+import { enqueue, KEY_DELETE_DELAY_MS } from "../queue/index.ts";
 import { readTarget, type KeyTargetRow } from "./target.ts";
 
 /** OmniRoute 호출 하나의 제한 시간 (어댑터 기본값과 같다) */
@@ -44,6 +46,8 @@ const DANGEROUS_SCOPES = new Set(["manage", "admin"]);
 const MEMBER_PREFIX = "m_";
 /** 시간 예산에 걸려 멈춘 자리 (마지막으로 본 OmniRoute 키 id) */
 export const CURSOR_KEY = "reconcile_cursor";
+/** 발급 자리 행(K4)이 이보다 오래되면 발급이 죽은 것으로 보고 치운다. 발급 한 번은 OmniRoute 호출 몇 개라 길어야 1분 남짓이다 */
+export const STALE_SLOT_MS = 10 * 60_000;
 /** 한 실행의 시간 예산: 5분 작업 임대(295초)의 2/3 */
 export const RECONCILE_BUDGET_MS = Math.floor(((5 * 60_000 - 5_000) * 2) / 3);
 
@@ -114,6 +118,7 @@ export async function reconcile(d: ReconcileDeps): Promise<ReconcileResult> {
   const k = h.schema.apiKeys;
   const mapped = new Map<string, string>((await h.db.select({ id: k.id, ork: k.omnirouteKeyId }).from(k)).map((r: { id: string; ork: string }) => [r.ork, r.id]));
   const result: ReconcileResult = { keys: list.length, applied: 0, failed: 0, unknown: 0, manageScope: 0, alerts: 0, stopped: false };
+  const swept = await sweepSlots(d, list, mapped);
   // 앞 실행이 멈춘 자리 뒤부터. 그 뒤에 키가 없으면(지워짐) 처음부터
   const cursor = await readSetting<string>(h, CURSOR_KEY);
   const from = cursor === undefined ? 0 : list.findIndex((x) => x.id > cursor);
@@ -137,6 +142,7 @@ export async function reconcile(d: ReconcileDeps): Promise<ReconcileResult> {
       if (r.syncState === "synced") result.applied++;
       else if (r.syncState === "pending") result.failed++;
     };
+    if (swept.has(key.id)) continue;
     const keyId = mapped.get(key.id);
     const named = key.name.startsWith(MEMBER_PREFIX);
     if (!keyId && !named) continue;
@@ -178,6 +184,40 @@ export async function reconcile(d: ReconcileDeps): Promise<ReconcileResult> {
   if (result.stopped && lastSeen !== undefined) await writeSetting(h, CURSOR_KEY, lastSeen, new Date(clock()), d.lease);
   else if (cursor !== undefined) await deleteSetting(h, CURSOR_KEY, d.lease);
   return result;
+}
+
+/**
+ * 발급(K4 routes/issue.ts) 도중 죽어 남은 자리 행 정리 (K4 보안 리뷰 M2). STALE_SLOT_MS 보다 오래된 pending- 행마다
+ *   - 이름이 m_<회원 id 8>_<자리 행 id 8> 인 매핑 없는 OmniRoute 키(createKey 직후 죽은 경우)를 끄고 key.delete 를 끈 뒤 2분으로 잡는다 (V18).
+ *     이 키는 회원 앱이 만든 것이 이름과 자리 행으로 확인되므로 "운영자 키일 수 있다"(Q6)는 예외에 들지 않는다 (계획서 5.7).
+ *   - 그다음 자리 행을 지운다 (최대 개수 한 칸을 돌려준다). 끄기·작업 넣기가 실패하면 행을 남겨 다음 점검이 다시 본다.
+ * 치운 OmniRoute 키 id 를 돌려준다 (본 점검이 unknown_m_key 로 다시 알리지 않게)
+ */
+async function sweepSlots(d: ReconcileDeps, list: readonly KeyInfo[], mapped: ReadonlyMap<string, string>): Promise<Set<string>> {
+  const h = d.db;
+  const k = h.schema.apiKeys;
+  const swept = new Set<string>();
+  const stale: { id: string; userId: string }[] = await h.db
+    .select({ id: k.id, userId: k.userId })
+    .from(k)
+    .where(and(like(k.omnirouteKeyId, `${PENDING_KEY_PREFIX}%`), lt(k.createdAt, new Date(d.now.getTime() - STALE_SLOT_MS))));
+  for (const row of stale) {
+    if (d.signal?.aborted) throw d.signal.reason ?? new Error("임대를 잃었다");
+    const name = `${MEMBER_PREFIX}${row.userId.slice(0, 8)}_${row.id.slice(0, 8)}`;
+    try {
+      for (const key of list.filter((x) => x.name === name && !mapped.has(x.id))) {
+        if (key.isActive) await d.client().setKeyActive(key.id, false);
+        if (d.lease && !(await holds(h, d.lease))) throw new LeaseLostError(d.lease);
+        await enqueue(h, "key.delete", { keyId: row.id, omnirouteKeyId: key.id }, { runAt: new Date(d.now.getTime() + KEY_DELETE_DELAY_MS), now: d.now });
+        swept.add(key.id);
+      }
+      await h.db.delete(k).where(guard(h, d.lease, and(eq(k.id, row.id), like(k.omnirouteKeyId, `${PENDING_KEY_PREFIX}%`))));
+    } catch (e) {
+      if (d.signal?.aborted || e instanceof LeaseLostError) throw e;
+      // 다음 점검이 다시 본다
+    }
+  }
+  return swept;
 }
 
 /** jobs.ts 의 reconcile 본문. OmniRoute 연결(주소 + 설치 때 저장한 관리 토큰)이 없으면 할 일이 없다 */
