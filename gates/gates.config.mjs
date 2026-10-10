@@ -613,6 +613,11 @@ export const GATES = {
     waivable: false,
     strictTests: true,
     outputs: [],
-    checks: [],
+    checks: [
+      // K6.T1 임시 코드 회수. 시험 주입점은 함수 인자(now·fetch·signal)만. 환경 변수로 켜는 시험 갈림길·가짜 시계를 운영 코드에 두지 않는다
+      { id: "G-K6.1", how: "grep", desc: "TC-K6.T1.a 운영 코드에 시험 갈림길 0", pattern: "process\\.env\\.(TEST_|E2E_|FAKE_|MG_TEST)|globalThis\\.__test", in: ["apps/server/src", "packages/auth/src", "packages/db/src", "packages/omniroute/src", "packages/runtime/src"], op: "==", limit: 0 },
+      // G-S7.3 과 같은 패턴·제외. 1단계 경로에 2단계가 더한 test/ 를 함께 본다
+      { id: "G-K6.2", how: "grep", desc: "TC-K6.T1.b 꺼진 테스트·미구현 표식 0 (2단계 경로 포함)", pattern: "\\.(only|skip|skipIf|todo)\\(|\\.(skip|only)\\.|runIf\\(|\\b(skip|todo)\\s*:\\s*true|\\b(xit|xdescribe|xtest)\\(|TODO|FIXME|not implemented", in: ["apps", "packages", "tests", "scripts", "test"], exclude: ["apps/web/build/**", "**/.svelte-kit/**", "**/.wrangler/**", "**/dist/**", "scripts/gate.test.mjs"], op: "==", limit: 0 },
+    ],
   },
 };
