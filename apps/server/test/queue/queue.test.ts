@@ -251,3 +251,16 @@ describe("TC-K1.T3.n key.* 작업은 keyId 없이 넣을 수 없다 (delete 우�
     expect(set).toEqual([false]);
   });
 });
+
+describe("TC-K1.T3.o 핸들러 표 밖의 action 은 프로토타입 함수로 돌지 않는다", () => {
+  it('action "toString"·"constructor" 작업 → done 이 아니라 failed "모르는 작업"', async () => {
+    const j = h.schema.omnirouteJobs;
+    for (const action of ["toString", "constructor", "hasOwnProperty"]) {
+      const id = randomUUID();
+      await h.db.insert(j).values({ id, action, payload: "{}", attempts: 0, nextRunAt: T0 });
+      await runDue(h, all(async () => {}), T0);
+      const r = await jobRow(id);
+      expect({ action, done: r.doneAt, failed: r.failedAt instanceof Date, lastError: r.lastError }).toEqual({ action, done: null, failed: true, lastError: "모르는 작업" });
+    }
+  });
+});
