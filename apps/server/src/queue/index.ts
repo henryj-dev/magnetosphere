@@ -23,6 +23,7 @@
 //     차지한다 (attempts + 1, next_run_at = 지금 + CLAIM_MS). 0행이면 다른 실행기가 먼저 차지한 것이다.
 //   - 차지한 채 프로세스가 죽으면 CLAIM_MS 뒤에 다시 집힌다. 그 시도도 attempts 에 센다.
 //   - 임대(lease)를 주면 모든 쓰기에 fenced() 를 붙인다. 임대를 잃은 실행기의 쓰기는 0행이다 (K1.T2).
+//   - 임대를 잃어 신호가 끊긴 시도는 세지 않는다. 차지를 풀어 attempts·next_run_at 을 되돌린다 (K1 리뷰 #8).
 // last_error 에는 OmniRoute 오류 코드·상태만 남긴다. OmniRouteError.message 는 응답 본문 300자를 담아 관리 토큰·원문 키가
 // 섞일 수 있다 (TC-K1.T3.e).
 import { and, asc, eq, exists, isNotNull, isNull, lte, sql, type SQL } from "drizzle-orm";
@@ -142,11 +143,12 @@ export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: R
     if (opts.signal?.aborted) break;
     const [row] = await h.db.select().from(t).where(due).orderBy(asc(t.nextRunAt), asc(t.id)).limit(1);
     if (!row) break;
+    const claimUntil = new Date(now.getTime() + CLAIM_MS);
     const claimed = await updatedRows(
       h,
       h.db
         .update(t)
-        .set({ attempts: row.attempts + 1, nextRunAt: new Date(now.getTime() + CLAIM_MS) })
+        .set({ attempts: row.attempts + 1, nextRunAt: claimUntil })
         .where(guard(and(eq(t.id, row.id), eq(t.attempts, row.attempts), due))),
       t.id,
     );
@@ -176,6 +178,17 @@ export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: R
       } catch (e) {
         outcome = e ?? new Error("unknown");
       }
+    }
+    if (opts.signal?.aborted) {
+      // 임대를 잃어 끊겼다 (K1 리뷰 #8, TC-K1.T3.i). 이 시도는 세지 않는다: 차지를 풀어 attempts·next_run_at 을 차지 전 값으로
+      // 되돌린다. 펜싱하지 않는 대신 "내 차지가 그대로일 때"(attempts·next_run_at·미완료)만 바꾼다. 다른 실행기가 이 작업을
+      // 다시 차지했거나 결과를 썼으면 0행이다. 끊긴 뒤에는 다음 작업을 집지 않는다
+      await h.db
+        .update(t)
+        .set({ attempts: row.attempts, nextRunAt: row.nextRunAt })
+        .where(and(eq(t.id, job.id), eq(t.attempts, job.attempts), eq(t.nextRunAt, claimUntil), isNull(t.doneAt), isNull(t.failedAt)))
+        .catch((e: unknown) => onError(job.id, e));
+      break;
     }
     try {
       if (permanent) {
