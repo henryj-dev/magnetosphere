@@ -157,17 +157,32 @@ export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: R
       missed.add(row.id);
       continue;
     }
-    const job: QueuedJob = { id: row.id, action: row.action, payload: JSON.parse(row.payload), attempts: row.attempts + 1 };
+    // payload 를 못 읽거나 모르는 작업이면 다시 해도 같다. 재시도 없이 곧바로 failed 로 둔다 (K1 리뷰 #5, TC-K1.T3.h)
+    let payload: JobPayload | null = null;
+    let permanent: string | null = null;
+    try {
+      payload = JSON.parse(row.payload);
+      if (typeof payload !== "object" || payload === null || Array.isArray(payload)) throw new SyntaxError("객체가 아니다");
+    } catch {
+      permanent = "payload JSON 아님";
+    }
+    if (!permanent && !handlers[row.action as JobAction]) permanent = "모르는 작업";
+    const job: QueuedJob = { id: row.id, action: row.action, payload: payload ?? { keyId: row.keyId ?? undefined }, attempts: row.attempts + 1 };
     const mine = guard(and(eq(t.id, job.id), eq(t.attempts, job.attempts)));
     let outcome: unknown = null;
-    try {
-      const handler = handlers[job.action];
-      if (!handler) throw new TypeError(`모르는 작업: ${job.action}`);
-      await handler(job.payload, { job, db: h, signal: opts.signal });
-    } catch (e) {
-      outcome = e ?? new Error("unknown");
+    if (!permanent) {
+      try {
+        await handlers[job.action](job.payload, { job, db: h, signal: opts.signal });
+      } catch (e) {
+        outcome = e ?? new Error("unknown");
+      }
     }
     try {
+      if (permanent) {
+        await markFailed(h, row, job, permanent, new Date(clock()), opts.lease);
+        result.failed++;
+        continue;
+      }
       if (outcome === null) {
         await h.db.update(t).set({ doneAt: new Date(clock()), lastError: null }).where(mine);
         result.done++;
@@ -211,7 +226,7 @@ async function markFailed(h: DbHandle, row: { nextRunAt: Date }, job: QueuedJob,
   const fence = lease ? fenced(h, lease) : undefined;
   const claimed = and(eq(t.id, job.id), eq(t.attempts, job.attempts), isNull(t.doneAt), isNull(t.failedAt), fence);
   const failedNow = and(eq(t.id, job.id), eq(t.attempts, job.attempts), isNotNull(t.failedAt));
-  const keyId = typeof job.payload.keyId === "string" ? job.payload.keyId : null;
+  const keyId = typeof job.payload.keyId === "string" && job.payload.keyId !== "" ? job.payload.keyId : null;
   const detail = JSON.stringify({ action: job.action, attempts: job.attempts, keyId, error: lastError });
   const statements = (db: any) => [
     db.update(t).set({ lastError, failedAt: at, nextRunAt: row.nextRunAt }).where(claimed),
