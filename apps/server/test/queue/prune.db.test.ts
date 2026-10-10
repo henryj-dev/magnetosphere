@@ -1,5 +1,6 @@
 // K6.T4 끝난 작업 정리 (K1 리뷰 #9). done_at 이 30일(DONE_RETENTION_MS) 넘게 지난 작업만 지운다.
 // 실패 작업(failed_at)은 지우지 않는다 (오래 실패 화면, 7단계). 임대를 잃은 실행기의 정리는 0행이다.
+// 한 번에 지우는 행은 500 까지다 (K6 리뷰 L1, TC-K6.T4.c).
 // pnpm test:db, 네 DB. 시각 비교가 DB 방언(timestamp 칼럼)마다 같은지 본다.
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -56,5 +57,22 @@ describe.each(enabledDbs())("%s", (kind: DbKind) => {
     expect(await acquireLease(h, "omniroute_jobs", `b-${kind}`, 55_000, later)).not.toBeNull();
     expect(await pruneDone(h, later, { lease: lease! })).toBe(0);
     expect((await h.db.select({ id: j.id }).from(j)).map((r: { id: string }) => r.id)).toContain(older.id);
+  });
+
+  it(`TC-K6.T4.c ${LABEL[kind]}: 한 번에 최대 500행만 지운다 — 600행이면 500 → 100 → 0`, async () => {
+    const j = h.schema.omnirouteJobs;
+    await h.db.delete(j);
+    const now = new Date("2026-10-11T00:00:00.000Z");
+    const doneAt = new Date(now.getTime() - DONE_RETENTION_MS * 2);
+    const rows = Array.from({ length: 600 }, () => ({ id: randomUUID(), action: "budget.set", payload: "{}", attempts: 1, nextRunAt: doneAt, doneAt }));
+    // D1·SQLite 의 바인드 변수 상한을 넘지 않게 100행씩 넣는다
+    for (let i = 0; i < rows.length; i += 100) await h.db.insert(j).values(rows.slice(i, i + 100));
+    const count = async () => (await h.db.select({ id: j.id }).from(j)).length;
+    // 1분 tick 하나가 오래 쥐는 큰 DELETE 를 만들지 않는다. 남은 것은 다음 tick 이 이어서 지운다
+    expect(await pruneDone(h, now)).toBe(500);
+    expect(await count()).toBe(100);
+    expect(await pruneDone(h, now)).toBe(100);
+    expect(await pruneDone(h, now)).toBe(0);
+    expect(await count()).toBe(0);
   });
 });
