@@ -36,9 +36,15 @@ export interface DbCase {
 }
 
 const SKIP_SQLITE = /^(sqlite_|__drizzle|d1_migrations$|_cf_)/;
-// 공백과 괄호·쉼표 둘레 공백을 없앤다. SQLite 는 ALTER TABLE ADD 를 원래 CREATE 문 끝에 ", `칼럼` …" 으로 덧붙여
-// 저장하므로(0001 의 fence·failed_at) 같은 구조라도 공백 자리가 CREATE 로 바로 만든 것과 다르다
-const norm = (sql: unknown) => String(sql ?? "").replace(/\s+/g, " ").replace(/\s*([(),])\s*/g, "$1").trim();
+// 공백과 괄호·쉼표 둘레 공백을 맞춘다. SQLite 는 ALTER TABLE ADD 를 원래 CREATE 문 끝에 ", `칼럼` …" 으로 덧붙여
+// 저장하므로(0001 의 fence·failed_at 등) 같은 구조라도 공백 자리가 CREATE 로 바로 만든 것과 다르다.
+// 작은따옴표 문자열 리터럴('…', 안의 '' 포함) 안은 건드리지 않는다. DEFAULT 'a, b' 와 'a,b' 는 다른 기본값이다 (TC-K1.T1.c)
+export const norm = (sql: unknown) =>
+  String(sql ?? "")
+    .split(/('(?:[^']|'')*')/)
+    .map((part, i) => (i % 2 ? part : part.replace(/\s+/g, " ").replace(/\s*([(),])\s*/g, "$1")))
+    .join("")
+    .trim();
 const sqliteTables = (names: string[]) => names.filter((n) => !SKIP_SQLITE.test(n)).sort();
 const SQLITE_MASTER = "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL ORDER BY type, name";
 const sqliteStructure = (rows: Record<string, unknown>[]) =>
