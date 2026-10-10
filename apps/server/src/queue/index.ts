@@ -9,6 +9,9 @@
 //   - 4번째 재시도(다섯 번째 시도)도 실패하면 failed_at = 지금, 대상 키 sync_state = failed, audit_log alert.job_failed 1행.
 //     next_run_at 은 그대로 둔다. failed_at 이 있는 작업은 runDue 가 다시 집지 않는다 (정합성 점검이 키를 다시 맞춘다, 5.7).
 //   - failed_at 에서 30분이 지나면 "오래 실패"다 (isLongFailed, 관리 화면은 7단계).
+//   - failed_at·키 sync_state·알림은 한 트랜잭션(D1 은 batch)으로 함께 남거나 함께 되돌려진다 (K1 리뷰 #4, TC-K1.T3.g).
+//     알림 없는 failed 는 아무도 모르는 실패라서다. 되돌려진 작업은 차지 시각(CLAIM_MS) 뒤 다시 집혀 실패 처리를 다시 한다.
+//   - 한 작업의 처리(쓰기) 예외는 그 작업에서 잡아 errors 로 세고 다음 작업으로 간다. tick 하나가 끊기지 않는다.
 // 키별 순서 (K1 리뷰 #1, TC-K1.T3.f)
 //   - key.apply_state 는 값을 싣지 않는다 (payload { keyId }). 실행할 때 api_keys·회원 상태로 목표를 다시 계산해 건다 (target.ts).
 //     그래서 오래된 재시도가 더 새 반영을 덮지 않는다.
@@ -22,7 +25,7 @@
 //   - 임대(lease)를 주면 모든 쓰기에 fenced() 를 붙인다. 임대를 잃은 실행기의 쓰기는 0행이다 (K1.T2).
 // last_error 에는 OmniRoute 오류 코드·상태만 남긴다. OmniRouteError.message 는 응답 본문 300자를 담아 관리 토큰·원문 키가
 // 섞일 수 있다 (TC-K1.T3.e).
-import { and, asc, eq, isNull, lte, type SQL } from "drizzle-orm";
+import { and, asc, eq, exists, isNotNull, isNull, lte, sql, type SQL } from "drizzle-orm";
 import { OmniRouteError, OmniRouteFormatError } from "@magnetosphere/omniroute";
 import { fenced, updatedRows, type Lease } from "@magnetosphere/runtime/lease";
 import type { DbHandle } from "@magnetosphere/runtime/types";
@@ -112,6 +115,8 @@ export interface RunDueOptions {
   lease?: Lease;
   /** 끊기면 다음 작업을 집지 않는다. 핸들러에도 넘긴다 */
   signal?: AbortSignal;
+  /** 작업 결과 쓰기 실패 (기본 console.error). 작업 id 와 오류 */
+  onError?: (jobId: string, e: unknown) => void;
   /** 실패·완료 시각을 재는 시계 (기본: now 고정). 실행기는 실제 시계를 넘긴다. 재시도 간격은 실패 시각에서 잰다 */
   clock?: () => number;
 }
@@ -120,13 +125,16 @@ export interface RunDueResult {
   done: number;
   retried: number;
   failed: number;
+  /** 결과를 쓰지 못한 작업 수 (DB 오류). 차지 시각 뒤 다시 집힌다 */
+  errors: number;
 }
 
 /** 지금 돌 차례인 작업(done_at·failed_at NULL, next_run_at ≤ now + DUE_GRACE_MS)을 하나씩 차지해 돈다 */
 export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: RunDueOptions = {}): Promise<RunDueResult> {
   const t = h.schema.omnirouteJobs;
   const guard = (cond: SQL | undefined) => (opts.lease ? and(cond, fenced(h, opts.lease)) : cond);
-  const result: RunDueResult = { done: 0, retried: 0, failed: 0 };
+  const result: RunDueResult = { done: 0, retried: 0, failed: 0, errors: 0 };
+  const onError = opts.onError ?? ((id: string, e: unknown) => console.error(`[queue] 작업 ${id} 결과를 쓰지 못했다`, e));
   const clock = opts.clock ?? (() => now.getTime());
   const due = and(isNull(t.doneAt), isNull(t.failedAt), lte(t.nextRunAt, new Date(now.getTime() + DUE_GRACE_MS)));
   const missed = new Set<string>();
@@ -151,14 +159,21 @@ export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: R
     }
     const job: QueuedJob = { id: row.id, action: row.action, payload: JSON.parse(row.payload), attempts: row.attempts + 1 };
     const mine = guard(and(eq(t.id, job.id), eq(t.attempts, job.attempts)));
+    let outcome: unknown = null;
     try {
       const handler = handlers[job.action];
       if (!handler) throw new TypeError(`모르는 작업: ${job.action}`);
       await handler(job.payload, { job, db: h, signal: opts.signal });
-      await h.db.update(t).set({ doneAt: new Date(clock()), lastError: null }).where(mine);
-      result.done++;
     } catch (e) {
-      const lastError = describeError(e);
+      outcome = e ?? new Error("unknown");
+    }
+    try {
+      if (outcome === null) {
+        await h.db.update(t).set({ doneAt: new Date(clock()), lastError: null }).where(mine);
+        result.done++;
+        continue;
+      }
+      const lastError = describeError(outcome);
       const failedTime = clock();
       if (job.attempts <= RETRY_DELAYS_MS.length) {
         await h.db
@@ -168,10 +183,12 @@ export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: R
         result.retried++;
       } else {
         // 4번째 재시도도 실패. next_run_at 은 이번 시도 전 값으로 되돌린다 (차지할 때 바꾼 값)
-        const n = await updatedRows(h, h.db.update(t).set({ lastError, failedAt: new Date(failedTime), nextRunAt: row.nextRunAt }).where(mine), t.id);
-        if (n === 1) await markFailed(h, job, lastError, new Date(failedTime), opts.lease);
+        await markFailed(h, row, job, lastError, new Date(failedTime), opts.lease);
         result.failed++;
       }
+    } catch (e) {
+      result.errors++;
+      onError(job.id, e);
     }
   }
   return result;
@@ -183,19 +200,42 @@ async function stillMine(h: DbHandle, lease: Lease): Promise<boolean> {
   return rows.length === 1;
 }
 
-/** 재시도를 다 쓴 작업: 대상 키를 failed 로 드러내고 관리자에게 알린다 (계획서 v5.6 Q3·Q6) */
-async function markFailed(h: DbHandle, job: QueuedJob, lastError: string, now: Date, lease: Lease | undefined) {
+/**
+ * 재시도를 다 쓴 작업: failed_at, 대상 키 sync_state = failed, 알림(audit_log alert.job_failed)을 한 번에 쓴다 (계획서 v5.6 Q3·Q6).
+ * 셋 다 "이 작업이 내 차지(attempts)이고 임대가 내 것"일 때만 바뀐다. 첫 문장이 0행이면 뒤 두 문장도 0행이다
+ * (뒤 문장은 "이 차지의 failed_at 이 찍혔다"를 조건으로 둔다). sqlite·mysql·pg 는 트랜잭션, D1 은 batch(한 트랜잭션)로 돈다.
+ */
+async function markFailed(h: DbHandle, row: { nextRunAt: Date }, job: QueuedJob, lastError: string, at: Date, lease: Lease | undefined) {
   const s = h.schema;
-  if (typeof job.payload.keyId === "string") {
-    const where = and(eq(s.apiKeys.id, job.payload.keyId), lease ? fenced(h, lease) : undefined);
-    await h.db.update(s.apiKeys).set({ syncState: "failed" }).where(where);
+  const t = s.omnirouteJobs;
+  const fence = lease ? fenced(h, lease) : undefined;
+  const claimed = and(eq(t.id, job.id), eq(t.attempts, job.attempts), isNull(t.doneAt), isNull(t.failedAt), fence);
+  const failedNow = and(eq(t.id, job.id), eq(t.attempts, job.attempts), isNotNull(t.failedAt));
+  const keyId = typeof job.payload.keyId === "string" ? job.payload.keyId : null;
+  const detail = JSON.stringify({ action: job.action, attempts: job.attempts, keyId, error: lastError });
+  const statements = (db: any) => [
+    db.update(t).set({ lastError, failedAt: at, nextRunAt: row.nextRunAt }).where(claimed),
+    ...(keyId ? [db.update(s.apiKeys).set({ syncState: "failed" }).where(and(eq(s.apiKeys.id, keyId), exists(db.select({ one: sql`1` }).from(t).where(failedNow))))] : []),
+    db.insert(s.auditLog).select(
+      db
+        .select({
+          id: sql`${crypto.randomUUID()}`.as("id"),
+          actorId: sql`null`.as("actor_id"),
+          action: sql`${"alert.job_failed"}`.as("action"),
+          target: t.id,
+          detail: sql`${detail}`.as("detail"),
+          ip: sql`null`.as("ip"),
+          createdAt: t.failedAt,
+        })
+        .from(t)
+        .where(failedNow),
+    ),
+  ];
+  if (h.kind === "d1") {
+    await h.db.batch(statements(h.db));
+    return;
   }
-  await h.db.insert(s.auditLog).values({
-    id: crypto.randomUUID(),
-    actorId: null,
-    action: "alert.job_failed",
-    target: job.id,
-    detail: JSON.stringify({ action: job.action, attempts: job.attempts, keyId: job.payload.keyId ?? null, error: lastError }),
-    createdAt: now,
+  await h.db.transaction(async (tx: any) => {
+    for (const q of statements(tx)) await q;
   });
 }

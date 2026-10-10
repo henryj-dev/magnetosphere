@@ -94,7 +94,7 @@ describe("TC-K1.T3.b 재시도를 다 써도 실패하면 대상 키가 failed �
     const failedAt = seen[4].failedAt!;
     expect(failedAt).toBeInstanceOf(Date);
     // 한참 뒤에 돌려도 다시 집지 않는다
-    expect(await runDue(h, handlers, new Date(failedAt.getTime() + 24 * 3600_000))).toEqual({ done: 0, retried: 0, failed: 0 });
+    expect(await runDue(h, handlers, new Date(failedAt.getTime() + 24 * 3600_000))).toEqual({ done: 0, retried: 0, failed: 0, errors: 0 });
     expect(calls.n).toBe(5);
 
     const [key] = await h.db.select({ syncState: h.schema.apiKeys.syncState }).from(h.schema.apiKeys).where(eq(h.schema.apiKeys.id, keyId));
@@ -117,11 +117,11 @@ describe("TC-K1.T3.d 성공한 작업은 done_at 이 찍히고 다시 돌지 않
     const later = await enqueue(h, "budget.set", { omnirouteKeyId: "k", monthlyUsd: 2 }, { runAt: new Date(T0.getTime() + 60_000) });
     const calls: string[] = [];
     const handlers = all(async (_p, { job }) => void calls.push(job.id));
-    expect(await runDue(h, handlers, T0)).toEqual({ done: 1, retried: 0, failed: 0 });
+    expect(await runDue(h, handlers, T0)).toEqual({ done: 1, retried: 0, failed: 0, errors: 0 });
     const r = await jobRow(id);
     expect({ doneAt: r.doneAt?.getTime(), attempts: r.attempts, lastError: r.lastError }).toEqual({ doneAt: T0.getTime(), attempts: 1, lastError: null });
     // 차례 비교에는 30초 유예가 있다 (DUE_GRACE_MS). 유예 밖이면 아직 아니다
-    expect(await runDue(h, handlers, new Date(T0.getTime() + 60_000 - DUE_GRACE_MS - 1))).toEqual({ done: 0, retried: 0, failed: 0 });
+    expect(await runDue(h, handlers, new Date(T0.getTime() + 60_000 - DUE_GRACE_MS - 1))).toEqual({ done: 0, retried: 0, failed: 0, errors: 0 });
     expect(calls).toEqual([id]);
     await runDue(h, handlers, new Date(T0.getTime() + 60_000));
     expect(calls).toEqual([id, later]);
