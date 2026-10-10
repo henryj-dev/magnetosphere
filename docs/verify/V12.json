@@ -14,15 +14,26 @@
     ],
     "scope": "제공자 연결 하나. 다른 연결로 가는 요청은 그 풀의 합계에 들어가지 않는다",
     "window": "고정 길이 2버킷 슬라이딩 창 (달력 월이 아니다)",
-    "blockResponse": "arm64 빌드: 본문 없는 500 (로그 \"[quotaShare] blocked … [schedule-budget]\", 응답 만들기에서 TypeError). 소스상 의도는 429",
+    "blockResponse": "arm64 빌드: 본문 없는 500 (로그 \"[quotaShare] blocked … [schedule-budget]\", 응답 만들기에서 TypeError). 소스상 의도는 429. amd64 빌드에는 일정(schedules) 경로와 [schedule-budget] 코드가 없다",
     "fitsMemberLimit": false,
-    "decision": "5.3 남은 한도 분배를 그대로 쓴다. 회원 한도는 모든 제공자·달력 월 기준인데 풀은 연결 하나·슬라이딩 창이고, 차단 응답도 깨져 있다"
+    "decision": "5.3 남은 한도 분배를 그대로 쓴다. 회원 한도는 모든 제공자·달력 월 기준인데 풀은 연결 하나·슬라이딩 창이고, 같은 3.8.51 digest 라도 amd64 빌드에는 일정 예산이 없으며, arm64 빌드의 차단 응답은 깨져 있다",
+    "byArch": {
+      "arm64": {
+        "schedulesApi": true,
+        "sharedBlocking": true
+      },
+      "x64": {
+        "schedulesApi": false,
+        "sharedBlocking": false
+      }
+    }
   },
   "evidence": [
     "소스(이미지 /app/src/lib/quota/sqliteQuotaStore.ts): poolConsumedTotal() 이 같은 dimensionKey(poolId:sched:…)의 소비를 모든 apiKeyId 에 걸쳐 합산, 2버킷 슬라이딩 창 (effective = prev × (1 − elapsed/window) + curr)",
     "소스(chunks/10877.js enforceQuotaShare): poolConsumedTotal >= budgetValue 이면 {kind:\"block\", httpStatus:429, reason:\"Scheduled usd budget … [schedule-budget]\"}",
     "소스(/app/src/lib/quota/spendRecorder.ts): 소비 기록은 apiKeyId 와 connectionId 가 둘 다 있을 때만, 응답 뒤 setImmediate 로",
     "계약 환경 실측 (2026-10-10, arm64): conn-mko 에 풀(키 A·B weight 50 hard) + 일정 예산 usd 0.005 monthly → A 2건(0.00442)·B 1건 200, 그 뒤 A·B 다음 요청 500 (본문 없음), 풀 밖 키 C 는 200. 예산 1.0 대조에서는 같은 순서가 모두 200",
+    "CI(amd64, 2026-10-10 run 38014182652): PUT /api/quota/pools/{id}/schedules → 404 unknown_route. 같은 digest 의 amd64 이미지(docker run --platform linux/amd64)에 app/api/quota/pools/[id]/schedules 가 없고 chunks 에 \"schedule-budget\" 문자열이 없다 (log·usage 만)",
     "GET /api/quota/pools 200 ({pools:[],total:0}), /api/budget-groups·/api/key-groups·/api/teams·/api/budgets 404 unknown_route",
     "packages/omniroute/test/contract/verify/v12.contract.ts (TC-K0.T5.a)"
   ],

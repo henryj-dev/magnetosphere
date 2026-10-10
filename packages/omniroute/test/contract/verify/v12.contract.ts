@@ -17,7 +17,7 @@ afterAll(async () => {
 });
 
 describe("TC-K0.T5.a V12 관찰이 V12.json answer 와 같다 (V12 의존)", () => {
-  it("answer.api 존재, 후보 경로 404, 풀에 키 A·B 와 금액 예산 0.005 → A 2건·B 1건 뒤 A 다음 요청 차단 == sharedBlocking (풀 밖 키 C 는 통과)", async () => {
+  it("answer.api 존재, 후보 경로 404, 풀에 키 A·B 와 금액 예산 0.005 → A 2건·B 1건 뒤 A 다음 요청 차단 == byArch[아키텍처].sharedBlocking (풀 밖 키 C 는 통과)", async () => {
     expect((await raw(s, "GET", answer.api)).status).toBe(answer.exists ? 200 : 404);
     for (const p of answer.absentPaths as string[]) expect((await raw(s, "GET", p)).status, p).toBe(404);
 
@@ -34,10 +34,14 @@ describe("TC-K0.T5.a V12 관찰이 V12.json answer 와 같다 (V12 의존)", () 
     });
     expect(pool.status, JSON.stringify(pool.json)).toBe(201);
     poolId = pool.json.pool.id;
+    // 같은 3.8.51 digest 라도 아키텍처마다 다른 빌드다 (S7 CI 실측). amd64 빌드에는 일정 예산 경로가 없다 (V12 byArch)
+    const want = answer.byArch[process.arch];
+    expect(want, `V12 byArch 에 ${process.arch} 결과가 없다`).toBeDefined();
     const sched = await raw(s, "PUT", `${answer.api}/${poolId}/schedules`, {
       schedules: [{ days: [0, 1, 2, 3, 4, 5, 6], startMinute: 0, endMinute: 1440, budgetValue: 0.005, budgetUnit: "usd", budgetWindow: "monthly" }],
     });
-    expect(sched.status, JSON.stringify(sched.json)).toBe(200);
+    expect([200, 404], JSON.stringify(sched.json)).toContain(sched.status);
+    expect(sched.status === 200).toBe(want.schedulesApi);
 
     // A 2건(0.00442)은 A 혼자로는 예산 밑이다. B 1건을 더하면 풀 합계 0.00663 ≥ 0.005
     const statuses: number[] = [];
@@ -50,8 +54,8 @@ describe("TC-K0.T5.a V12 관찰이 V12.json answer 와 같다 (V12 의존)", () 
     const next = await infer(A.key, "openai");
     const control = await infer(C.key, "openai");
     expect(control.status).toBe(200);
-    expect(next.status !== 200).toBe(answer.sharedBlocking);
+    expect(next.status !== 200).toBe(want.sharedBlocking);
     // 3.8.51 arm64 빌드는 이 차단을 429 가 아니라 본문 없는 500 으로 낸다 (OmniRoute 로그 "[quotaShare] blocked … [schedule-budget]")
-    expect(next.status === 429 || next.status === 500, `${next.status} ${next.body.slice(0, 200)}`).toBe(true);
+    if (want.sharedBlocking) expect(next.status === 429 || next.status === 500, `${next.status} ${next.body.slice(0, 200)}`).toBe(true);
   });
 });
