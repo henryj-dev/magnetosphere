@@ -89,10 +89,21 @@ export function fenced(h: DbHandle, lease: Lease): SQL {
   );
 }
 
+/** p 가 ms 안에 끝나지 않으면 fallback 으로 끝낸다 (p 는 계속 돌지만 기다리지 않는다) */
+function within<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((resolve) => (timer = setTimeout(() => resolve(fallback), ms)));
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
+}
+
 /**
  * 작업 fn 을 돌리는 동안 ttlMs / 3 마다 renew 를 부른다. renew 가 false 이거나 예외면 fn 에 넘긴 신호를 끊는다.
  * fn 이 끝나면 하트비트를 멈춘다. 신호를 끊었으면 그 이유(LeaseLostError 등)를 던진다 — 임대를 잃은 작업은 실패다.
- * DB 를 모르는 하트비트 부분만 따로 둔다 (TC-K1.T2.c 가 가짜 renew 로 본다).
+ * DB 가 멈춰도 끊는다 (K1 리뷰 #3, TC-K1.T2.e):
+ *   - renew 하나는 ttlMs / 3 안에 끝나야 한다. 넘기면 실패로 본다 (늘렸는지 모르는 채로 쓰지 않는다).
+ *   - 로컬 마감: 마지막으로 늘린 시각(처음은 holdLease 를 부른 시각 = 임대를 잡은 직후) + ttlMs − ttlMs / 6.
+ *     이 시각까지 다음 갱신이 성공하지 않으면 끊는다. DB 의 만료(ttlMs)보다 먼저 멈춰 다른 인스턴스가 잡기 전에 손을 뗀다.
+ * DB 를 모르는 하트비트 부분만 따로 둔다 (TC-K1.T2.c·e 가 가짜 renew 로 본다).
  */
 export async function holdLease(
   renew: () => Promise<boolean>,
@@ -101,29 +112,40 @@ export async function holdLease(
   lost: () => Error = () => new Error("임대를 잃었다"),
 ): Promise<void> {
   const ac = new AbortController();
+  const step = Math.max(1, Math.floor(ttlMs / 3));
+  const margin = Math.floor(ttlMs / 6);
   let done = false;
   let beating = false;
+  const stop = () => {
+    if (!done && !ac.signal.aborted) ac.abort(lost());
+  };
+  let deadline = setTimeout(stop, ttlMs - margin);
   const beat = async () => {
-    // 앞 하트비트가 아직 DB 를 기다리면 겹쳐 보내지 않는다
+    // 앞 하트비트가 아직 끝나지 않았으면 겹쳐 보내지 않는다 (renew 하나는 step 안에 끝난다)
     if (beating || done || ac.signal.aborted) return;
     beating = true;
+    const startedAt = performance.now();
     let ok = false;
     try {
-      ok = await renew();
+      ok = await within(renew(), step, false);
     } catch {
       // 늘렸는지 모르면 잃은 것으로 본다. 모르는 채로 쓰는 것보다 멈추는 쪽이 안전하다
       ok = false;
     } finally {
       beating = false;
     }
-    if (!ok && !done) ac.abort(lost());
+    if (!ok) return stop();
+    // 늘리기 질의를 보낸 시각부터 ttlMs 가 DB 의 새 만료다. 그 시각을 기준으로 마감을 다시 건다
+    clearTimeout(deadline);
+    if (!done) deadline = setTimeout(stop, Math.max(0, ttlMs - margin - (performance.now() - startedAt)));
   };
-  const timer = setInterval(() => void beat(), Math.max(1, Math.floor(ttlMs / 3)));
+  const timer = setInterval(() => void beat(), step);
   try {
     await fn(ac.signal);
   } finally {
     done = true;
     clearInterval(timer);
+    clearTimeout(deadline);
   }
   if (ac.signal.aborted) throw ac.signal.reason;
 }
@@ -149,12 +171,15 @@ export async function runLeased(
   } finally {
     const t = h.schema.jobLeases;
     const until = new Date(Math.max(now(), startedAt + ttlMs));
-    // 되돌리기가 실패해도(DB 끊김) 임대는 늘린 만료에 스스로 풀린다. 작업의 결과·예외를 이것으로 덮지 않는다
-    await h.db
-      .update(t)
-      .set({ lockedUntil: until })
-      .where(and(eq(t.name, lease.name), eq(t.holder, lease.holder), eq(t.fence, lease.fence), gt(t.lockedUntil, until)))
-      .catch(() => undefined);
+    // 되돌리기가 실패하거나 멈춰도(DB 끊김) 임대는 늘린 만료에 스스로 풀린다. 작업의 결과·예외를 이것으로 덮지 않고,
+    // ttlMs / 3 넘게 기다리지 않는다 (멈춘 DB 에 붙들려 이 인스턴스의 다음 경계가 막히지 않게)
+    const restore = Promise.resolve(
+      h.db
+        .update(t)
+        .set({ lockedUntil: until })
+        .where(and(eq(t.name, lease.name), eq(t.holder, lease.holder), eq(t.fence, lease.fence), gt(t.lockedUntil, until))),
+    ).catch(() => undefined);
+    await within(restore, Math.max(1, Math.floor(ttlMs / 3)), undefined);
   }
   return true;
 }
