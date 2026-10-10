@@ -11,8 +11,10 @@
 // 워크플로를 YAML 로 읽어(yaml 패키지, 버전 고정) 다음을 본다. [] 안은 문제 코드다.
 //   matrix   E2E 매트릭스 잡이 하나이고 matrix.combo 가 --expect 개, 게이트 설정 S6 의 `pnpm e2e --combo <조합>` 검사와 같은 집합이다
 //            [combo-count·combo-set·matrix-shape]. include·exclude 로 조합을 바꾸지 않는다 [matrix-shape].
-//   stage    S1 을 뺀 모든 단계를 어떤 스텝이 `node scripts/gate.mjs <단계>` 로 돈다 [stage-missing]. --skip-requires 는 쓰지 않고
+//   stage    봉인 파일이 있는(면제 아닌) 단계 중 S1 을 뺀 모든 단계를 어떤 스텝이 `node scripts/gate.mjs <단계>` 로 돈다 [stage-missing]. --skip-requires 는 쓰지 않고
 //            [skip-requires], --skip-ids 로 뺄 수 있는 것은 매트릭스가 대신 도는 E2E 검사뿐이다 [skip-ids].
+//            아직 봉인하지 않은 단계는 요구하지 않는다 — 그 단계 게이트는 아직 빨강이다. 봉인 파일을 커밋하는 순간부터
+//            단계 잡이 필수다 (2단계 실행판 K0.T2). --seal-dir <폴더> 로 봉인 폴더를 바꿀 수 있다 (기본 gates/seals, 음성 대조용).
 //   guard    게이트·E2E 명령이 조용히 빠지거나 실패가 삼켜지지 않는다. 그 명령을 가진 잡·스텝에
 //            if 가 없고 [job-if·step-if], continue-on-error 가 없고 [continue-on-error], shell 을 바꾸지 않는다 [swallow].
 //            명령은 run 줄의 시작에 있고 [not-command] (echo 등으로 감싸지 않음), 그 줄에 ||·;·| ·끝의 & 가 없고,
@@ -30,13 +32,14 @@ const DEFAULT = ".github/workflows/ci.yml";
 const WORKFLOWS = ".github/workflows";
 
 function parseArgs(argv) {
-  const out = { file: null, dir: null, expect: null, expectFail: false };
+  const out = { file: null, dir: null, expect: null, expectFail: false, sealDir: "gates/seals" };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--fixture" || a === "--file") out.file = argv[++i];
     else if (a === "--fixture-dir") out.dir = argv[++i];
     else if (a === "--expect") out.expect = Number(argv[++i]);
     else if (a === "--expect-fail") out.expectFail = true;
+    else if (a === "--seal-dir") out.sealDir = argv[++i];
     else throw new Error(`알 수 없는 인자: ${a}`);
   }
   if (!Number.isInteger(out.expect) || out.expect < 1) throw new Error("--expect <조합 수> 가 필요하다");
@@ -44,14 +47,25 @@ function parseArgs(argv) {
   return out;
 }
 
-/** 게이트 설정: 단계 목록과 S6 의 E2E 검사 { id, combo } */
-async function gateInfo() {
+/** 봉인 파일이 있고 면제 봉인이 아닌 단계인지. 봉인 내용의 진위는 gate --verify-seals 가 따로 본다 */
+function sealed(sealDir, phase) {
+  const p = path.resolve(ROOT, sealDir, `${phase}.json`);
+  if (!fs.existsSync(p)) return false;
+  try {
+    return JSON.parse(fs.readFileSync(p, "utf8")).waived !== true;
+  } catch {
+    return true; // 깨진 봉인 파일도 단계 잡을 요구한다 (조용히 빠지지 않게)
+  }
+}
+
+/** 게이트 설정: 단계 잡을 요구할 단계 목록(봉인된 단계)과 S6 의 E2E 검사 { id, combo } */
+async function gateInfo(sealDir) {
   const { GATES } = await import(pathToFileURL(path.join(ROOT, "gates/gates.config.mjs")).href);
   const checks = (GATES.S6?.checks ?? [])
     .map((c) => ({ id: c.id, m: /^pnpm e2e --combo (\S+)$/.exec(c.cmd ?? "") }))
     .filter((c) => c.m)
     .map((c) => ({ id: c.id, combo: c.m[1] }));
-  return { phases: Object.keys(GATES), checks };
+  return { phases: Object.keys(GATES).filter((p) => sealed(sealDir, p)), checks };
 }
 
 const GATE_RE = /scripts\/gate\.mjs/;
@@ -199,7 +213,7 @@ try {
   console.error(`check-ci-matrix: ${e.message}`);
   process.exit(2);
 }
-const gates = await gateInfo();
+const gates = await gateInfo(args.sealDir);
 
 if (args.expectFail) {
   const files = args.dir
