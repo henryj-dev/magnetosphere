@@ -9,6 +9,7 @@ import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { ROOT } from "../../deploy/stack.mjs";
 import { createClient, loginWithPassword } from "../../../packages/omniroute/src/index.ts";
 import { isBudgetBlocked } from "../../contract/budget-block.mjs";
@@ -108,12 +109,20 @@ export function dbOps(where) {
   };
 }
 
-/** Workers 로컬 D1 파일 (wrangler dev --persist-to 의 miniflare D1). 하나여야 한다 */
+/** Workers 로컬 D1 파일 (wrangler dev --persist-to 의 miniflare D1). 회원 앱 테이블(api_keys)이 있는 파일 하나여야 한다 */
 export function d1File(persistTo) {
   const dir = path.join(persistTo, "v3/d1/miniflare-D1DatabaseObject");
-  const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(".sqlite")) : [];
-  if (files.length !== 1) throw new Error(`로컬 D1 파일이 ${files.length}개 (${dir})`);
-  return path.join(dir, files[0]);
+  const files = (fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => f.endsWith(".sqlite")) : []).map((f) => path.join(dir, f));
+  const app = files.filter((f) => {
+    const db = new DatabaseSync(f, { readOnly: true });
+    try {
+      return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'api_keys'").get();
+    } finally {
+      db.close();
+    }
+  });
+  if (app.length !== 1) throw new Error(`api_keys 가 있는 로컬 D1 파일이 ${app.length}개 (${files.join(", ")})`);
+  return app[0];
 }
 
 /** 회원 앱 HTTP. 변경 요청은 같은 출처(Origin = BETTER_AUTH_URL)로 보낸다 */

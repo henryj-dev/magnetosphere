@@ -153,7 +153,7 @@ export async function runKeys(ctx) {
     check(t0 !== null, "TC-K5.T2.b 회원 총 사용액이 한도에 닿음");
     const reactMs = Math.max(...keys.map((k) => blockedAt.get(k) ?? Infinity)) - t0;
     timings.reactMs = reactMs;
-    check(blockedAt.size === 2 && reactMs <= REACT_MS, `TC-K5.T2.b 한도 도달 뒤 ${reactMs}ms 안에 두 키 모두 거부 (≤ ${REACT_MS}ms)`);
+    check(blockedAt.size === 2 && reactMs <= REACT_MS, `TC-K5.T2.b 한도 도달 뒤 ${reactMs}ms 안에 두 키 모두 거부 (≤ ${REACT_MS}ms, 거부된 키 ${blockedAt.size}/2, 성공 요청 ${ok}건)`);
     const total = await settledTotal();
     timings.overspendTotal = total;
     check(total <= OVERSPEND_MAX + 1e-12, `TC-K5.T2.b 그때 총 사용액 ${total.toFixed(6)} ≤ ${OVERSPEND_MAX.toFixed(6)} (성공 요청 ${ok}건)`);
