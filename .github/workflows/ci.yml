@@ -339,7 +339,12 @@ jobs:
           cache: pnpm
       - name: 시험용 OmniRoute (계약 환경, 가짜 상위 서버 mko·mka)
         run: |
-          docker compose -f tests/contract/docker-compose.yml up -d --wait
+          # Docker Hub 가 이미지 받기에 가끔 502 를 준다. 5초·15초 쉬고 세 번까지 (scripts/compose-up.mjs 와 같은 간격)
+          for wait in 5 15 0; do
+            docker compose -f tests/contract/docker-compose.yml up -d --wait && break
+            if [ "$wait" = 0 ]; then exit 1; fi
+            sleep "$wait"
+          done
           node tests/contract/setup.mjs
       - name: S1 봉인 커밋 꺼내기
         run: |
