@@ -21,6 +21,6 @@ export function queueJob(rt: Runtime): Job {
     const handlers = omnirouteHandlers((callSignal) =>
       createClient({ baseUrl, credential: { token }, signal: AbortSignal.any([callSignal ?? signal, AbortSignal.timeout(CALL_TIMEOUT_MS)]) }),
     );
-    await runDue(db, handlers, new Date(), { lease, signal });
+    await runDue(db, handlers, new Date(), { lease, signal, clock: Date.now });
   };
 }

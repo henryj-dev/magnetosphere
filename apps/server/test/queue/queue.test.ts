@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { OmniRouteError } from "@magnetosphere/omniroute";
 import { connectNode } from "@magnetosphere/runtime/node";
 import type { DbHandle } from "@magnetosphere/runtime/types";
-import { ACTIONS, enqueue, isLongFailed, runDue, type Handler, type Handlers } from "../../src/queue/index.ts";
+import { ACTIONS, DUE_GRACE_MS, enqueue, isLongFailed, runDue, type Handler, type Handlers } from "../../src/queue/index.ts";
 import { makeTestEnv, type TestEnv } from "../helpers.ts";
 
 const T0 = new Date("2026-10-01T00:00:00.000Z");
@@ -120,7 +120,8 @@ describe("TC-K1.T3.d 성공한 작업은 done_at 이 찍히고 다시 돌지 않
     expect(await runDue(h, handlers, T0)).toEqual({ done: 1, retried: 0, failed: 0 });
     const r = await jobRow(id);
     expect({ doneAt: r.doneAt?.getTime(), attempts: r.attempts, lastError: r.lastError }).toEqual({ doneAt: T0.getTime(), attempts: 1, lastError: null });
-    expect(await runDue(h, handlers, new Date(T0.getTime() + 59_999))).toEqual({ done: 0, retried: 0, failed: 0 });
+    // 차례 비교에는 30초 유예가 있다 (DUE_GRACE_MS). 유예 밖이면 아직 아니다
+    expect(await runDue(h, handlers, new Date(T0.getTime() + 60_000 - DUE_GRACE_MS - 1))).toEqual({ done: 0, retried: 0, failed: 0 });
     expect(calls).toEqual([id]);
     await runDue(h, handlers, new Date(T0.getTime() + 60_000));
     expect(calls).toEqual([id, later]);

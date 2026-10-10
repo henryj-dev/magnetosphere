@@ -4,6 +4,8 @@
 // 재시도 (계획서 v5.6 Q2·Q3·Q6)
 //   - 실패할 때마다 attempts + 1, 다음 시도는 실패 시각 + RETRY_DELAYS_MS[attempts − 1] (1분·2분·10분·30분).
 //     실행기 최소 주기가 1분이라 1분보다 짧은 간격은 지킬 수 없다.
+//   - 실행기는 1분 경계마다 깨지만 깨는 시각이 몇십 초씩 늦을 수 있다. 차례 비교에 tick 주기의 절반(DUE_GRACE_MS, 30초)
+//     유예를 둬, 다음 tick 의 지연이 이번보다 작아도 한 주기를 건너뛰지 않는다 (K1 리뷰 #2, TC-K1.T3.a).
 //   - 4번째 재시도(다섯 번째 시도)도 실패하면 failed_at = 지금, 대상 키 sync_state = failed, audit_log alert.job_failed 1행.
 //     next_run_at 은 그대로 둔다. failed_at 이 있는 작업은 runDue 가 다시 집지 않는다 (정합성 점검이 키를 다시 맞춘다, 5.7).
 //   - failed_at 에서 30분이 지나면 "오래 실패"다 (isLongFailed, 관리 화면은 7단계).
@@ -29,11 +31,13 @@ import type { DbHandle } from "@magnetosphere/runtime/types";
 export const RETRY_DELAYS_MS = [60_000, 120_000, 600_000, 1_800_000] as const;
 /** failed_at 에서 이만큼 지나면 오래 실패 (계획서 v5.6 Q3) */
 export const LONG_FAILED_MS = 30 * 60_000;
+/** 차례 비교의 유예: next_run_at ≤ now + 이 값이면 돈다. 실행기 주기(1분)의 절반 */
+export const DUE_GRACE_MS = 30_000;
 /** 차지한 작업을 다른 실행기가 다시 집기까지. 핸들러 하나가 이보다 오래 걸리지 않는다 (OmniRoute 호출 제한 15초) */
 export const CLAIM_MS = 5 * 60_000;
 /**
  * key.delete 는 키를 끈 시각 + 2분 뒤에 잡는다. OmniRoute 는 끈 뒤 60초가 지나야 지울 수 있고(V18, 계획서 v5.6 5.2),
- * 실행기가 1분마다 돌므로 2분이면 60초가 지난 뒤 첫 실행에서 집힌다.
+ * 실행기가 1분마다 돌고 차례 비교에 30초 유예가 있으므로, 2분이면 끈 뒤 90초가 지나기 전에는 집히지 않는다.
  */
 export const KEY_DELETE_DELAY_MS = 120_000;
 
@@ -108,6 +112,8 @@ export interface RunDueOptions {
   lease?: Lease;
   /** 끊기면 다음 작업을 집지 않는다. 핸들러에도 넘긴다 */
   signal?: AbortSignal;
+  /** 실패·완료 시각을 재는 시계 (기본: now 고정). 실행기는 실제 시계를 넘긴다. 재시도 간격은 실패 시각에서 잰다 */
+  clock?: () => number;
 }
 
 export interface RunDueResult {
@@ -116,12 +122,13 @@ export interface RunDueResult {
   failed: number;
 }
 
-/** 지금 돌 차례인 작업(done_at·failed_at NULL, next_run_at ≤ now)을 하나씩 차지해 돈다 */
+/** 지금 돌 차례인 작업(done_at·failed_at NULL, next_run_at ≤ now + DUE_GRACE_MS)을 하나씩 차지해 돈다 */
 export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: RunDueOptions = {}): Promise<RunDueResult> {
   const t = h.schema.omnirouteJobs;
   const guard = (cond: SQL | undefined) => (opts.lease ? and(cond, fenced(h, opts.lease)) : cond);
   const result: RunDueResult = { done: 0, retried: 0, failed: 0 };
-  const due = and(isNull(t.doneAt), isNull(t.failedAt), lte(t.nextRunAt, now));
+  const clock = opts.clock ?? (() => now.getTime());
+  const due = and(isNull(t.doneAt), isNull(t.failedAt), lte(t.nextRunAt, new Date(now.getTime() + DUE_GRACE_MS)));
   const missed = new Set<string>();
   for (;;) {
     if (opts.signal?.aborted) break;
@@ -148,20 +155,21 @@ export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: R
       const handler = handlers[job.action];
       if (!handler) throw new TypeError(`모르는 작업: ${job.action}`);
       await handler(job.payload, { job, db: h, signal: opts.signal });
-      await h.db.update(t).set({ doneAt: now, lastError: null }).where(mine);
+      await h.db.update(t).set({ doneAt: new Date(clock()), lastError: null }).where(mine);
       result.done++;
     } catch (e) {
       const lastError = describeError(e);
+      const failedTime = clock();
       if (job.attempts <= RETRY_DELAYS_MS.length) {
         await h.db
           .update(t)
-          .set({ lastError, nextRunAt: new Date(now.getTime() + RETRY_DELAYS_MS[job.attempts - 1]) })
+          .set({ lastError, nextRunAt: new Date(failedTime + RETRY_DELAYS_MS[job.attempts - 1]) })
           .where(mine);
         result.retried++;
       } else {
         // 4번째 재시도도 실패. next_run_at 은 이번 시도 전 값으로 되돌린다 (차지할 때 바꾼 값)
-        const n = await updatedRows(h, h.db.update(t).set({ lastError, failedAt: now, nextRunAt: row.nextRunAt }).where(mine), t.id);
-        if (n === 1) await markFailed(h, job, lastError, now, opts.lease);
+        const n = await updatedRows(h, h.db.update(t).set({ lastError, failedAt: new Date(failedTime), nextRunAt: row.nextRunAt }).where(mine), t.id);
+        if (n === 1) await markFailed(h, job, lastError, new Date(failedTime), opts.lease);
         result.failed++;
       }
     }
