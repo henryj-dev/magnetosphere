@@ -1,6 +1,6 @@
 # Magnetosphere 2단계 "키·한도" — 실행 목록
 
-계획은 [`../design/omniroute-member-layer.md`](../design/omniroute-member-layer.md) (v5.6) 다. 이 문서는 그 9장 2단계의 순서 · 통과 조건 · 잠금만 적는다. 논거는 계획서 절 번호로 가리킨다.
+계획은 [`../design/omniroute-member-layer.md`](../design/omniroute-member-layer.md) (v5.7) 다. 이 문서는 그 9장 2단계의 순서 · 통과 조건 · 잠금만 적는다. 논거는 계획서 절 번호로 가리킨다.
 
 ## 0. 체계
 
@@ -241,7 +241,7 @@ TC-K0.T5.a  V12 관찰이 V12.json answer 와 같다 (V12 의존)
 
 【통과】
 - [x] G-K0.16 통과
-- [ ] G-K0.13 · G-K0.14 · G-K0.15 통과 (V12 포함)
+- [x] G-K0.13 · G-K0.14 · G-K0.15 통과 (V12 포함)
 
 ### ☑ K0.T6 — V13 call-logs 를 키로 거르는 쿼리
 선행 K0.T4 · 산출 `docs/verify/V13.json`, `packages/omniroute/test/contract/verify/v13.contract.ts` · 되돌리기 커밋 1개
@@ -259,24 +259,24 @@ TC-K0.T6.a  V13 관찰이 V13.json answer 와 같다 (V13 의존)
 【통과】
 - [x] G-K0.17 통과
 
-### ◐ K0.T7 — V15 분석 API 성능 (5.3 이 1분마다 부른다)
+### ☑ K0.T7 — V15 분석 API 성능 (5.3 이 1분마다 부른다)
 선행 K0.T4 · 산출 `docs/verify/V15.json`, `tests/bench/analytics.mjs`, `tests/bench/docker-compose.yml` · 되돌리기 커밋 1개
 
 【작업】
 1. 측정용 OmniRoute 를 계약 환경과 따로 띄운다 (`127.0.0.1:20171`, 같은 digest, 데이터 볼륨 없음. 계약 환경의 분석 합계를 오염시키지 않으려고). 키 300개, 완료 기록 300,000건(계획서 "수십만 건, 키 수백 개"의 아래 끝을 고정값으로)을 넣는다. 넣는 방법(요청 / OmniRoute DB 직접 삽입)은 작업에서 정하고 `evidence`에 적되, 넣은 뒤 `analytics` 전체 `totalRequests == 300000`으로 확인한다. 측정 뒤 내린다 (Docker 메모리 4GB).
 2. 두 호출을 각각 10번 잰다: 전체 키 한 달(필터 없음, `byApiKey`로 회원 묶음) · 회원 하나(키 2개, 그중 삭제 1개). `answer = { dataset: { records, keys }, fullMonth: { p95Ms, runs }, member: { p95Ms, runs }, arch, decision }`. `decision`은 분배가 쓸 호출 방식(전체 한 번 / 회원마다)이다. 기준을 넘으면 `blocking: true` 로 두고 계획서 5.3 실행 시점을 개정한다. 커밋.
    기준의 근거: 1분 작업의 임대는 55초(`period − 5_000`)이고 지출 기록이 60초 주기다. 전체 호출 p95 5,000ms 는 주기의 1/12 로, 분배 한 번이 예산 쓰기 300번을 더해도 임대 안에 끝난다.
-   (실제: 회원 하나 p95 는 기준 안(0.2~0.6초)이지만 필터 없는 전체 한 달 호출은 CI x64 세 번 p95 6,396ms·통과·6,104ms, 로컬 arm64 3.7~13.8초로 기준 언저리·위다. `V15.json`은 `blocking: true`이고 선택지 셋을 `answer.options`에 적었다. 고를 때까지 G-K0.14·15·18·21 이 실패하고 K1 이 열리지 않는다.)
+   (실제: 필터 없는 전체 한 달 호출은 CI x64 세 번 p95 6,396ms·통과·6,104ms 로 기준 언저리·위였다. 사용자가 선택지 B 를 골랐다 (계획서 v5.7): 1분 분배는 오늘 창만 부르고 지난 날은 `usage_daily`에 저장, 하루 한 번 대조. 측정을 그 호출로 바꿨다 — 300,000건을 최근 30일에 하루 10,000건씩 넣고 오늘 창 p95 ≤ 2,000ms, 회원 하나 ≤ 1,000ms, 대조(지난 29일) ≤ 55,000ms. G-K0.21·23 은 `answer.todayWindow`, G-K0.39 는 `answer.reconcile`을 본다.)
 
 【테스트】
 ```
 TC-K0.T7.a  측정이 재현된다 (V15 의존)
-  단언:  node tests/bench/analytics.mjs --assert → 넣은 기록 300,000·키 300 확인, 전체 p95 ≤ 5,000ms, 회원 p95 ≤ 1,000ms, 10회씩. 종료코드 0
+  단언:  node tests/bench/analytics.mjs --assert → 넣은 기록 300,000(30일)·키 300·오늘 10,000 확인, 오늘 창 p95 ≤ 2,000ms, 회원 p95 ≤ 1,000ms, 대조(지난 29일) p95 ≤ 55,000ms, 10회씩. 종료코드 0 (v5.7, 처음 기준은 전체 한 달 p95 ≤ 5,000ms)
   검출:  분석 API 가 기록 수에 비례해 느려져 1분 분배가 다음 경계까지 안 끝나고, 두 인스턴스가 같은 회원 예산을 엇갈려 쓰는 것
 ```
 
 【통과】
-- [ ] G-K0.18 ~ G-K0.23 통과 (19·20·22·23 은 통과, 18·21 은 기준 초과로 실패 — V15 결정 대기)
+- [x] G-K0.18 ~ G-K0.23 · G-K0.39 통과
 
 ### ☑ K0.T8 — V18 삭제한 키의 기록이 분석에 남는가
 선행 K0.T4 · 산출 `docs/verify/V18.json`, `packages/omniroute/test/contract/verify/v18.contract.ts` · 되돌리기 커밋 1개
@@ -351,7 +351,7 @@ TC-K0.T11.a  두 빌드의 예산 차단은 참, 일반 요청 수 제한은 거
 【통과】
 - [x] G-K0.27 통과
 
-### ◐ K0.T12 — 계획서 개정 v5.6 (설계 공백 Q1~Q6 과 확인 결과)
+### ☑ K0.T12 — 계획서 개정 v5.6 (설계 공백 Q1~Q6 과 확인 결과)
 선행 K0.T5 ~ K0.T10 · 산출 `docs/design/omniroute-member-layer.md`, 이 문서 · 되돌리기 커밋 1개
 
 설계 공백 (코드를 열어 찾은 것. 계획서가 정하지 않으면 K1~K4 의 TC 단언을 쓸 수 없다)
@@ -368,6 +368,7 @@ TC-K0.T11.a  두 빌드의 예산 차단은 참, 일반 요청 수 제한은 거
 【작업】
 1. V12·V13·V15·V18·V19·V20 결과와 Q1~Q6 의 결정을 계획서에 반영한다. 상태 줄을 `v5.6`으로, 변경 이력 맨 위에 `- v5.6: …` 한 줄(Q1~Q6 을 모두 언급). `was_blocking`인 V 파일은 `resolved_in: "v5.6"`. 이 문서의 영향받는 TC 단언(`(V<n> 의존)`, Q1~Q6 을 쓰는 K1~K4 TC)을 결정에 맞춰 고치고 문서 머리의 계획서 버전을 v5.6 으로 바꾼다. 커밋.
    (Q1~Q6 은 사람이 고른다. 이 문서는 결정의 내용을 정하지 않는다. 고른 결과는 아래 TC 와 K1~K4 TC 단언으로만 기계에 닿는다.)
+   (실제: v5.6 에 Q1~Q6·V12·V13·V18·V19·V20 을, V15 결정(선택지 B)을 v5.7 에 넣었다. `was_blocking` 파일의 `resolved_in`은 현재 버전 v5.7 이다 — G-K0.15 가 현재 버전과 같기를 요구한다.)
 
 【테스트】
 ```
@@ -377,7 +378,7 @@ TC-K0.T12.a  계획서 개정이 공백 여섯을 모두 닫는다
 ```
 
 【통과】
-- [ ] G-K0.28 · G-K0.29 · G-K0.15 통과 (28·29 통과, 15 는 V15 결정 대기)
+- [x] G-K0.28 · G-K0.29 · G-K0.15 통과
 
 ### ☑ K0.T13 — 필수 검사·병합 방식 대조
 선행 K0.T2 · 산출 `scripts/check-required-checks.mjs`, `test/check-required-checks.test.mjs`, `test/fixtures/required-checks/**` · 되돌리기 커밋 1개
@@ -401,7 +402,7 @@ TC-K0.T13.c  실제 ruleset 이 맞다
 ```
 
 【통과】
-- [ ] G-K0.30 · G-K0.31 통과 (30 통과, 31 은 ruleset 에 K0 잡 이름이 들어가야 통과)
+- [x] G-K0.30 · G-K0.31 통과
 
 ### ☑ K0.T14 — 재현 빨강 확인 장치
 선행 K0.T1 · 산출 `scripts/check-red.mjs`, `test/check-red.test.mjs` · 되돌리기 커밋 1개
@@ -468,9 +469,10 @@ TC-K0.T15.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-K0.18 | TC-K0.T7.a V15 측정 재현 | [L] `node tests/bench/analytics.mjs --assert` | 종료코드 0 |
 | G-K0.19 | V15 기록 수 | json `docs/verify/V15.json` `answer.dataset.records` | ≥ 300,000 |
 | G-K0.20 | V15 키 수 | json `answer.dataset.keys` | ≥ 300 |
-| G-K0.21 | V15 전체 키 한 달 분석 | json `answer.fullMonth.p95Ms` | ≤ 5,000 |
+| G-K0.21 | V15 오늘 창 분석 (v5.7) | json `answer.todayWindow.p95Ms` | ≤ 2,000 |
 | G-K0.22 | V15 회원 하나 분석 | json `answer.member.p95Ms` | ≤ 1,000 |
-| G-K0.23 | V15 측정 횟수 | json `answer.fullMonth.runs` | ≥ 10 |
+| G-K0.23 | V15 측정 횟수 | json `answer.todayWindow.runs` | ≥ 10 |
+| G-K0.39 | V15 하루 한 번 대조 (지난 29일) | json `answer.reconcile.p95Ms` | ≤ 55,000 (1분 작업 임대) |
 | G-K0.24 | TC-K0.T8.a V18 | [L] `pnpm test:contract -t "TC-K0.T8.a"` | 통과 = 1 |
 | G-K0.25 | TC-K0.T9.a V19 | [L] `pnpm test:contract -t "TC-K0.T9.a"` | 통과 = 1 |
 | G-K0.26 | TC-K0.T10.a·b·c V20 | [L] `pnpm test:contract -t "TC-K0.T10"` | 통과 = 3 |
@@ -575,7 +577,7 @@ TC-K1.T3.e  last_error 에 비밀 값이 없다
 선행 K1.T3 · 산출 `apps/server/src/jobs.ts`, `apps/server/wrangler.toml`, `packages/runtime/src/types.ts` · 되돌리기 커밋 1개
 
 【작업】
-1. `JOBS`에 `omniroute_jobs` 실행기(1분, `* * * * *`, 계획서 v5.6 Q2)를 등록한다. 분배(`budget_rebalance`, `* * * * *`)는 K2.T3, 정합성 점검(`reconcile`, `*/5 * * * *`)은 K3.T3 이 본문과 함께 등록한다 — 본문 없는 작업을 main 에 등록하지 않는다. `wrangler.toml [triggers] crons`를 `JOBS` cron 집합과 같게 두고, 이 같음을 TC-K1.T4.b 가 뒤 단계에서도 계속 본다. 커밋.
+1. `JOBS`에 `omniroute_jobs` 실행기(1분, `* * * * *`, 계획서 v5.6 Q2)를 등록한다. 분배(`budget_rebalance`, `* * * * *`)는 K2.T6, 정합성 점검(`reconcile`, `*/5 * * * *`)은 K3.T3 이 본문과 함께 등록한다 — 본문 없는 작업을 main 에 등록하지 않는다. `wrangler.toml [triggers] crons`를 `JOBS` cron 집합과 같게 두고, 이 같음을 TC-K1.T4.b 가 뒤 단계에서도 계속 본다. 커밋.
 
 【테스트】
 ```
@@ -652,7 +654,7 @@ TC-K1.T5.b  ruleset 필수 검사가 이 잡을 포함한다
 # K2 — 회원 단위 한도 분배 🔒 (K1 필요)
 
 **브랜치** `p2/k2`.
-**outputs** `apps/server/src/limits/**`, `apps/server/test/limits/**`, `apps/server/test/contract/limits/**` (새 경로만). 어댑터(`packages/omniroute/src`)를 고쳐야 하면 고치되 `outputs`에는 넣지 않는다 (0절). V12 결과는 "분배 유지"다 (계획서 v5.6 5.3).
+**outputs** `apps/server/src/limits/**`, `apps/server/test/limits/**`, `apps/server/test/contract/limits/**` (새 경로만). 어댑터(`packages/omniroute/src`)를 고쳐야 하면 고치되 `outputs`에는 넣지 않는다 (0절). V12 결과는 "분배 유지"다 (계획서 v5.6 5.3). V15 결정(v5.7)으로 이 단계가 새 테이블 `usage_daily`를 만든다: 스키마(`packages/db/src/schema/**`, 기존 파일)와 마이그레이션 `packages/db/migrations/*/0002_*`(새 경로)는 이 단계 `outputs` 글롭 밖이다. 잠긴 단계라 `outputs`를 넓힐 수 없으므로 `--assert-order`는 이 경로를 지키지 않고, 순서는 K1 봉인(R1)이 지킨다.
 
 ### ☐ K2.T1 — 남은 한도 계산 (순수 함수)
 선행 없음 · 산출 `apps/server/src/limits/compute.ts`, `apps/server/test/limits/**` · 되돌리기 커밋 1개
@@ -704,60 +706,95 @@ TC-K2.T2.c  달 바뀜은 저장한 마지막 실행 달로 판단한다 (Q5 의
 【통과】
 - [ ] G-K2.6 · G-K2.7 · G-K2.24 통과
 
-### ☐ K2.T3 — 1분 분배 작업
-선행 K2.T2 · 산출 `apps/server/src/limits/rebalance.ts`, `packages/omniroute/src/**`(V15 결정에 필요한 호출), `apps/server/test/contract/limits/**` · 되돌리기 커밋 1개
+### ☐ K2.T3 — 1분 분배 작업 (폐기)
+v5.7 에서 폐기 (V15). 매분 이번 달 전체를 분석으로 부르는 방식은 기록 300,000건에서 CI x64 p95 5.6~6.4초라 느리다. 오늘 창 + 지난 날 저장(K2.T7)으로 바꾼 K2.T6 이 대신한다. TC-K2.T3.a~j 는 TC-K2.T6.a~j 로 옮겼다 (GATE 행 번호는 그대로).
+
+### ☐ K2.T7 — 지난 날 저장 `usage_daily`·날 확정·하루 대조 (v5.7)
+선행 K2.T2 · 산출 `packages/db/src/schema/**`, `packages/db/migrations/{sqlite,mysql,pg}/0002_*`, `apps/server/src/limits/daily.ts`, `apps/server/test/limits/**`, `apps/server/test/contract/limits/**` · 되돌리기 커밋 1개
 
 【작업】
-1. `budget_rebalance` 본문: 활성 키가 있는 회원과 `limit` 으로 꺼진 키가 있는 회원만, V15 `decision`대로 분석 호출 (전체 한 번이면 `byApiKey`를 `api_keys` 매핑으로 회원별로 묶는다 — 삭제 키 포함. v5.6 에서 V15 가 기준을 넘어 방식이 아직 열려 있다, K0.T7). 회원마다 `computeBudgets` → `exhausted`면 켜진 키를 `setKeyActive(false)`, `state disabled`·`disabled_reason limit` (Q1). 아니면 목표가 켜짐인 키 중 `budget_usd`와 다른 것만 `setBudget` → 펜싱 아래 `budget_usd` 기록, `limit` 으로 꺼진 키는 예산을 먼저 건 뒤 `setKeyActive(true)`, `state active`·`disabled_reason` NULL (회원·관리자·회원 상태로 꺼진 키는 건드리지 않는다). 이 끄기·켜기는 K3.T2 `applyKey`가 생기면 그것으로 바꾼다. 분석이 `OmniRouteFormatError`·`OmniRouteError`면 이번 실행은 예산을 하나도 바꾸지 않는다. 어댑터 변경이 필요하면(예: 필터 없는 분석) `packages/omniroute`에 두고 `G-S5.9`(어댑터 밖 관리 호출 0)를 지킨다. `JOBS`에 `{ name: "budget_rebalance", cron: "* * * * *" }`를 등록하고 `wrangler.toml` crons 에 `"* * * * *"`를 더한다 (TC-K1.T4.b 가 같음을 본다). 커밋.
+1. 공통 정의에 `usage_daily(key_id, day, cost_usd DECIMAL(12,6), updated_at, PK(key_id, day))`를 더하고 세 벌 생성·마이그레이션 `0002_*`를 만든다 (계획서 v5.7 5.9). `0002_*`는 K2 `outputs`(잠긴 단계라 못 고침) 밖이라 `--assert-order`가 지키지 않는다. 순서는 K1 봉인(R1)이 지킨다.
+2. `apps/server/src/limits/daily.ts`: `storedSpent(keyIds, month)` = 이번 달 1일~어제 합. `confirmDays(now)`: `app_settings.usage_daily_confirmed`가 어제보다 이르면 (1) 어제 창(어제 00:00 ~ 오늘 00:00 UTC)을 한 번 불러 매핑된 키의 어제 값을 저장하고 (2) 이번 달 1일 ~ 오늘 00:00 을 다시 불러 저장값을 덮는다(대조). 키·날마다 |새 값 − 저장값| > 0.000001 이 하나라도 있으면 `audit_log` `alert.usage_drift`(차이 난 키·날 수, 합계 차이) 1행. 대조 호출이 어댑터 제한 시간에 걸리면 대조를 멈추고 다음 실행부터 날 단위로 나눠 하루씩 부른다 (진행한 날을 `app_settings`에 남김). 펜싱 아래에서 쓴다. 커밋.
 
 【테스트】
 ```
-TC-K2.T3.a  활성 키가 없는 회원은 OmniRoute 호출이 없다
-  단언:  회원 둘(활성 키 있음 1, 꺼진 키만 1), 가짜 OmniRoute → setBudget 대상은 첫 회원 키뿐
-  검출:  모든 회원을 매분 돌아 회원 수에 비례해 분배 시간이 늘고 임대(55초)를 넘기는 것
-TC-K2.T3.b  예산이 바뀐 키만 setBudget 을 부른다
-  단언:  같은 상태로 두 번 실행 → 두 번째 실행 setBudget 0건
-  검출:  매분 키마다 POST /api/usage/budget 를 보내 키 300개면 분당 300건이 OmniRoute 에 쌓이는 것
-TC-K2.T3.c  분석 형식 오류면 예산을 하나도 바꾸지 않는다
-  단언:  분석 응답에 음수 cost(analyticsSchema money 위반) → OmniRouteFormatError, setBudget 0건, budget_usd 변화 0
-  검출:  형식이 바뀐 분석을 0 으로 읽어 모든 회원 남은 한도를 한도 전액으로 되돌리는 것
-TC-K2.T3.d  두 키로 나눠 써 회원 한도에 닿으면 분배 뒤 두 키 모두 막힌다 (계약)
-  단언:  한도 0.02, 키 A·B 각 요청 3건(0.014633씩, 합 0.029266 > 0.02) → 분배 1회 → A·B 다음 요청 둘 다 거부 (남은 한도 0 이라 v5.6 Q1 끄기: 403). 대조: 한도 0.03 이면 분배 뒤 A·B 예산 == 각 사용액 + 0.000734, 다음 요청 200
-  검출:  키별 예산을 키 사용액 기준으로만 걸어 회원 합계가 한도를 넘어도 각 키가 자기 몫 안이라 통과하는 것
-TC-K2.T3.e  삭제한 키의 사용액이 새 키의 남은 몫을 줄인다 (계약, V18 의존)
-  단언:  한도 0.02, 키 A 요청 3건(0.014633) → A 삭제 → 키 B 발급·분배 → B 예산 == 0.02 − 0.014633 (오차 1e-6)
-  검출:  분석 apiKeyIds 에 삭제 키를 빼 B 가 한도 전액을 새로 받는 것
-TC-K2.T3.f  사용액 0 키도 회원 한도 도달 뒤 꺼진다 (계약, Q1 의존)
-  단언:  한도 0.01, 키 A 요청 3건 → 키 C(사용액 0) 분배 1회 → A·C 다음 요청 403 permission_denied, api_keys 두 행 disabled_reason "limit"
-  검출:  Q1 공백 그대로 예산 0(무제한)이 걸리거나 예산을 아예 안 걸어 C 로 한도 밖 사용이 계속되는 것
-TC-K2.T3.j  남은 한도가 다시 생기면 limit 으로 꺼진 키만 켠다 (계약, Q1 의존)
-  단언:  f 뒤 회원이 직접 끈 키 D(disabled_reason member) 추가 → 한도 0.05 로 올림 → 분배 1회 → A·C 다음 요청 200, D 403. 어댑터 호출 순서는 키마다 [setBudget, setKeyActive(true)]
-  검출:  새 달·한도 상향 뒤에도 limit 키가 꺼진 채 남거나, 회원이 끈 키까지 켜거나, 예산 없이 먼저 켜 1분 동안 한도 밖 사용이 열리는 것
-TC-K2.T3.g  초과 폭은 한도 × 동시에 쓰는 키 수 안이다 (계약)
-  단언:  한도 0.02, 키 2개를 동시에 막힐 때까지(isBudgetBlocked 또는 403) 쓰기 → 회원 총 사용액 ≤ 0.02 × 2 + 요청 1건 비용(0.004878)
-  검출:  예산이 "남은 한도"가 아니라 "한도"로 걸려 초과 폭이 키 수와 무관하게 커지는 것 (5.3 한계의 상한이 깨짐)
-TC-K2.T3.i  분배는 1분마다 등록된다
-  단언:  JOBS 의 budget_rebalance cron == "* * * * *", wrangler crons 에 "* * * * *" 포함 (TC-K1.T4.b 재실행)
-  검출:  분배를 5분 정합성 cron 에 같이 걸어 한도 반영이 최대 5분 늦는 것, Workers crons 에서 빠져 Workers 조합에서 분배가 안 도는 것
-TC-K2.T3.h  분배 한 번이 측정 환경에서 임대 안에 끝난다 (V15 의존)
-  단언:  tests/bench 의 키 300·기록 300,000 환경, 회원 150·각 키 2 매핑 → 분배 1회 소요 ≤ 30,000ms
-  검출:  회원마다 분석을 부르는 방식이 V15 결정과 달라져 300 회 호출로 55초 임대를 넘기는 것
+TC-K2.T7.a  날이 바뀐 첫 분배가 어제를 확정 저장한다 (V15 의존)
+  단언:  가짜 어댑터·시계, usage_daily_confirmed "2026-04-09", now 2026-04-10T00:01Z → 어제 창 호출 1건(startDate 04-09T00:00Z, endDate 04-10T00:00Z), usage_daily 에 매핑 키의 04-09 행, usage_daily_confirmed "2026-04-09"→"2026-04-10" 기준으로 갱신. 같은 날 두 번째 실행 → 어제 창·대조 호출 0건
+  검출:  날 확정을 매분 다시 해 1분 분배가 하루 창 두 개를 부르거나, 확정을 빠뜨려 어제 몫이 회원 사용액에서 통째로 빠지는 것
+TC-K2.T7.b  하루 한 번 대조가 저장값을 덮고 차이를 알린다 (V15 의존)
+  단언:  저장값 04-03 키 A 0.010000, 가짜 대조 응답 0.012000 (가격표 변경) → 대조 호출 1건(startDate 04-01T00:00Z, endDate 04-10T00:00Z), 저장값 0.012000, audit_log "alert.usage_drift" 1행(키·날 1, 합계 0.002). 차이 없으면 alert 0행
+  검출:  가격표가 바뀌어도 지난 날 저장값이 그 달 끝까지 옛 값으로 남거나, 차이를 조용히 덮어 운영자가 한도 계산이 바뀐 것을 모르는 것
+TC-K2.T7.c  대조가 제한 시간에 걸리면 날 단위로 나눈다
+  단언:  대조 첫 호출이 AbortSignal 시간 초과 → 그 실행 저장값 변화 0, 다음 실행부터 하루 창 호출로 나눠 진행, 9일 치를 다 맞추면 한 번 호출로 돌아감
+  검출:  한 달 창 대조가 임대(55초)를 넘겨 두 인스턴스가 같은 날을 번갈아 쓰거나, 실패한 대조를 매분 다시 불러 OmniRoute 를 두드리는 것
+TC-K2.T7.d  지난 날 합 + 오늘 == 분석 API 한 달 값이다 (계약, V15 의존)
+  단언:  계약 환경, 키 A·B 요청 몇 건 → 가짜 시계로 '오늘'을 내일로 두고 confirmDays → 실제 오늘이 '어제'로 저장 → storedSpent([A,B]) + 그 가짜 오늘 창 값 == getAnalytics(apiKeyIds [A,B], 이번 달 1일 ~ 지금).totalCost (오차 1e-9). 실제 시계로도 storedSpent + 오늘 창 == 한 달 값 (오차 1e-9)
+  검출:  창 경계를 [시작, 끝] 둘 다 포함으로 잡아 자정 정각 기록을 두 번 세거나, byApiKey 비용과 summary 비용 계산이 달라 저장 합이 분석 API 한 달 값과 어긋나는 것
+TC-K2.T7.e  다섯 DB 에 usage_daily 가 있다
+  단언:  test:migrate --db sqlite,mysql,mariadb,pg,d1 → usage_daily (key_id, day) 기본 키, cost_usd DECIMAL(12,6)·SQLite REAL, 같은 (key_id, day) 두 번 저장은 갱신 1행
+  검출:  한 DB 의 0002 마이그레이션이 빠져 그 조합에서 1분 분배가 "no such table usage_daily" 로 멈추는 것
 ```
 
 【통과】
-- [ ] G-K2.8 ~ G-K2.15 · G-K2.22 · G-K2.23 · G-K2.25 통과
+- [ ] G-K2.27 ~ G-K2.31 통과
+
+### ☐ K2.T6 — 1분 분배 작업 (v5.7: 오늘 창 + 지난 날 저장)
+선행 K2.T2 · K2.T7 · 산출 `apps/server/src/limits/rebalance.ts`, `packages/omniroute/src/**`(필터 없는 분석 호출), `apps/server/test/contract/limits/**` · 되돌리기 커밋 1개
+
+【작업】
+1. `budget_rebalance` 본문: 활성 키가 있는 회원과 `limit` 으로 꺼진 키가 있는 회원만, 계획서 v5.7 5.3 대로 분석은 오늘 창 하나만 부른다 (`startDate` 오늘 00:00 UTC, `endDate` 지금, `apiKeyIds` 없음, V15 decision). `byApiKey`를 `api_keys` 매핑으로 회원별로 묶고(삭제 키 포함), 회원 사용액 = K2.T7 `storedSpent`(이번 달 1일~어제 `usage_daily` 합) + 오늘 창 값. 날이 바뀐 첫 실행은 분석 전에 K2.T7 `confirmDays`를 부른다. 회원마다 `computeBudgets` → `exhausted`면 켜진 키를 `setKeyActive(false)`, `state disabled`·`disabled_reason limit` (Q1). 아니면 목표가 켜짐인 키 중 `budget_usd`와 다른 것만 `setBudget` → 펜싱 아래 `budget_usd` 기록, `limit` 으로 꺼진 키는 예산을 먼저 건 뒤 `setKeyActive(true)`, `state active`·`disabled_reason` NULL (회원·관리자·회원 상태로 꺼진 키는 건드리지 않는다). 이 끄기·켜기는 K3.T2 `applyKey`가 생기면 그것으로 바꾼다. 분석이 `OmniRouteFormatError`·`OmniRouteError`면 이번 실행은 예산을 하나도 바꾸지 않는다. 어댑터 변경이 필요하면(예: 필터 없는 분석) `packages/omniroute`에 두고 `G-S5.9`(어댑터 밖 관리 호출 0)를 지킨다. `JOBS`에 `{ name: "budget_rebalance", cron: "* * * * *" }`를 등록하고 `wrangler.toml` crons 에 `"* * * * *"`를 더한다 (TC-K1.T4.b 가 같음을 본다). 커밋.
+
+【테스트】
+```
+TC-K2.T6.a  활성 키가 없는 회원은 OmniRoute 호출이 없다
+  단언:  회원 둘(활성 키 있음 1, 꺼진 키만 1), 가짜 OmniRoute → setBudget 대상은 첫 회원 키뿐
+  검출:  모든 회원을 매분 돌아 회원 수에 비례해 분배 시간이 늘고 임대(55초)를 넘기는 것
+TC-K2.T6.b  예산이 바뀐 키만 setBudget 을 부른다
+  단언:  같은 상태로 두 번 실행 → 두 번째 실행 setBudget 0건
+  검출:  매분 키마다 POST /api/usage/budget 를 보내 키 300개면 분당 300건이 OmniRoute 에 쌓이는 것
+TC-K2.T6.c  분석 형식 오류면 예산을 하나도 바꾸지 않는다
+  단언:  분석 응답에 음수 cost(analyticsSchema money 위반) → OmniRouteFormatError, setBudget 0건, budget_usd 변화 0
+  검출:  형식이 바뀐 분석을 0 으로 읽어 모든 회원 남은 한도를 한도 전액으로 되돌리는 것
+TC-K2.T6.d  두 키로 나눠 써 회원 한도에 닿으면 분배 뒤 두 키 모두 막힌다 (계약)
+  단언:  한도 0.02, 키 A·B 각 요청 3건(0.014633씩, 합 0.029266 > 0.02) → 분배 1회 → A·B 다음 요청 둘 다 거부 (남은 한도 0 이라 v5.6 Q1 끄기: 403). 대조: 한도 0.03 이면 분배 뒤 A·B 예산 == 각 사용액 + 0.000734, 다음 요청 200
+  검출:  키별 예산을 키 사용액 기준으로만 걸어 회원 합계가 한도를 넘어도 각 키가 자기 몫 안이라 통과하는 것
+TC-K2.T6.e  삭제한 키의 사용액이 새 키의 남은 몫을 줄인다 (계약, V18 의존)
+  단언:  한도 0.02, 키 A 요청 3건(0.014633) → A 삭제 → 키 B 발급·분배 → B 예산 == 0.02 − 0.014633 (오차 1e-6)
+  검출:  분석 apiKeyIds 에 삭제 키를 빼 B 가 한도 전액을 새로 받는 것
+TC-K2.T6.f  사용액 0 키도 회원 한도 도달 뒤 꺼진다 (계약, Q1 의존)
+  단언:  한도 0.01, 키 A 요청 3건 → 키 C(사용액 0) 분배 1회 → A·C 다음 요청 403 permission_denied, api_keys 두 행 disabled_reason "limit"
+  검출:  Q1 공백 그대로 예산 0(무제한)이 걸리거나 예산을 아예 안 걸어 C 로 한도 밖 사용이 계속되는 것
+TC-K2.T6.j  남은 한도가 다시 생기면 limit 으로 꺼진 키만 켠다 (계약, Q1 의존)
+  단언:  f 뒤 회원이 직접 끈 키 D(disabled_reason member) 추가 → 한도 0.05 로 올림 → 분배 1회 → A·C 다음 요청 200, D 403. 어댑터 호출 순서는 키마다 [setBudget, setKeyActive(true)]
+  검출:  새 달·한도 상향 뒤에도 limit 키가 꺼진 채 남거나, 회원이 끈 키까지 켜거나, 예산 없이 먼저 켜 1분 동안 한도 밖 사용이 열리는 것
+TC-K2.T6.g  초과 폭은 한도 × 동시에 쓰는 키 수 안이다 (계약)
+  단언:  한도 0.02, 키 2개를 동시에 막힐 때까지(isBudgetBlocked 또는 403) 쓰기 → 회원 총 사용액 ≤ 0.02 × 2 + 요청 1건 비용(0.004878)
+  검출:  예산이 "남은 한도"가 아니라 "한도"로 걸려 초과 폭이 키 수와 무관하게 커지는 것 (5.3 한계의 상한이 깨짐)
+TC-K2.T6.i  분배는 1분마다 등록된다
+  단언:  JOBS 의 budget_rebalance cron == "* * * * *", wrangler crons 에 "* * * * *" 포함 (TC-K1.T4.b 재실행)
+  검출:  분배를 5분 정합성 cron 에 같이 걸어 한도 반영이 최대 5분 늦는 것, Workers crons 에서 빠져 Workers 조합에서 분배가 안 도는 것
+TC-K2.T6.h  분배 한 번이 측정 환경에서 임대 안에 끝난다 (V15 의존)
+  단언:  tests/bench 의 키 300·기록 300,000(30일) 환경, 회원 150·각 키 2 매핑 → 날 확정·대조가 없는 분배 1회 ≤ 30,000ms, 날이 바뀐 첫 분배(확정·대조 포함) ≤ 55,000ms
+  검출:  회원마다 분석을 부르거나 매분 한 달 창을 불러(V15 fullMonth p95 6초) 55초 임대를 넘기는 것
+TC-K2.T6.k  1분 분배는 오늘 창 하나만 부른다 (V15 의존)
+  단언:  가짜 어댑터, 같은 날 두 번째 실행 → getAnalytics 1건, startDate == 오늘 00:00:00.000Z, endDate == now, apiKeyIds 없음. 회원 사용액 == usage_daily 이번 달 합 + 오늘 창 byApiKey 합
+  검출:  매분 이번 달 1일부터 불러 기록이 쌓일수록 분배가 느려지거나, 저장값을 빼고 오늘 값만으로 남은 한도를 계산해 한도가 매일 새로 생기는 것
+```
+
+【통과】
+- [ ] G-K2.8 ~ G-K2.15 · G-K2.22 · G-K2.23 · G-K2.25 · G-K2.26 통과
 - [ ] G-K2.18 통과 (어댑터 밖 OmniRoute 관리 호출 0)
 
 ### ☐ K2.T4 — 즉시 분배 진입점
-선행 K2.T3 · 산출 `apps/server/src/limits/member.ts` · 되돌리기 커밋 1개
+선행 K2.T6 · 산출 `apps/server/src/limits/member.ts` · 되돌리기 커밋 1개
 
 【작업】
-1. `rebalanceMember(userId)`: 그 회원 키 전부(삭제 포함) id 로 분석 한 번 → 계산 → 예산. 발급·재발급 직후와 관리자 한도 변경 직후(K4)가 부른다. 1분 작업과 같은 임대를 잡지 않고 회원 단위 펜싱(`budget_usd` 갱신 조건)으로 겹침을 막는다. 커밋.
+1. `rebalanceMember(userId)`: 그 회원 키 전부(삭제 포함)의 `storedSpent` + 그 키 id 로 오늘 창 분석 한 번(v5.7 5.3) → 계산 → 예산. 발급·재발급 직후와 관리자 한도 변경 직후(K4)가 부른다. 1분 작업과 같은 임대를 잡지 않고 회원 단위 펜싱(`budget_usd` 갱신 조건)으로 겹침을 막는다. 커밋.
 
 【테스트】
 ```
 TC-K2.T4.a  즉시 분배는 그 회원 키 전부(삭제 포함)로 분석한다
-  단언:  회원 키 3(그중 삭제 1) → getAnalytics apiKeyIds 집합 == 세 id, 다른 회원 키 0
+  단언:  회원 키 3(그중 삭제 1) → getAnalytics apiKeyIds 집합 == 세 id, 다른 회원 키 0, startDate == 오늘 00:00 UTC, 사용액 == storedSpent(세 id) + 오늘 값
   검출:  삭제 키를 빼고 불러 재발급 직후 예산이 한도 전액으로 걸리는 것 (1분 분배가 고칠 때까지 최대 1분 열림)
 TC-K2.T4.b  즉시 분배와 1분 분배가 겹쳐도 옛 계산이 새 계산을 덮지 않는다
   단언:  즉시 분배(분석 시각 t2) 기록 뒤 늦게 끝난 1분 분배(분석 시각 t1 < t2)의 budget_usd 갱신 → 0행
@@ -768,7 +805,7 @@ TC-K2.T4.b  즉시 분배와 1분 분배가 겹쳐도 옛 계산이 새 계산�
 - [ ] G-K2.16 · G-K2.17 통과
 
 ### ☐ K2.T5 — K2 CI 잡과 봉인
-선행 K2.T1 ~ K2.T4 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
+선행 K2.T1 · K2.T2 · K2.T4 · K2.T6 · K2.T7 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
 
 【작업】
 1. 잡 `p2-k2`(이름 `한도 분배 (K2 게이트, OmniRoute 3.8.51)`) 스텝 `run: node scripts/gate.mjs K2 --explain`. K2 `checks` 채움. 커밋.
@@ -795,18 +832,22 @@ TC-K2.T5.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-K2.1 ~ 5 | TC-K2.T1.a ~ e | `pnpm -C apps/server test -t "TC-K2.T1.<x>"` | 각 통과 = 1 |
 | G-K2.6 · 7 | TC-K2.T2.a · b | `pnpm -C apps/server test -t "TC-K2.T2.<x>"` | 각 통과 = 1, 창 시작 = 매달 1일 00:00 UTC (V20) |
 | G-K2.24 | TC-K2.T2.c 달 바뀜 판단 | `pnpm -C apps/server test -t "TC-K2.T2.c"` | 통과 = 1 |
-| G-K2.8 ~ 10 | TC-K2.T3.a ~ c | `pnpm -C apps/server test -t "TC-K2.T3.<x>"` | 각 통과 = 1 |
-| G-K2.11 | TC-K2.T3.d 두 키 회원 한도 | [L] `pnpm test:contract -t "TC-K2.T3.d"` | 통과 = 1 |
-| G-K2.12 | TC-K2.T3.e 삭제 키 사용액 | [L] `pnpm test:contract -t "TC-K2.T3.e"` | 통과 = 1 |
-| G-K2.13 | TC-K2.T3.f 사용액 0 키 | [L] `pnpm test:contract -t "TC-K2.T3.f"` | 통과 = 1 |
-| G-K2.25 | TC-K2.T3.j limit 키 다시 켜기 | [L] `pnpm test:contract -t "TC-K2.T3.j"` | 통과 = 1 |
-| G-K2.14 | TC-K2.T3.g 초과 폭 | [L] `pnpm test:contract -t "TC-K2.T3.g"` | 통과 = 1, 회원 총 사용액 ≤ 한도 × 2 + 0.004878 |
-| G-K2.15 | TC-K2.T3.h 분배 소요 | [L] `node tests/bench/analytics.mjs --rebalance --assert` | 종료코드 0, ≤ 30,000ms |
+| G-K2.8 ~ 10 | TC-K2.T6.a ~ c | `pnpm -C apps/server test -t "TC-K2.T6.<x>"` | 각 통과 = 1 |
+| G-K2.11 | TC-K2.T6.d 두 키 회원 한도 | [L] `pnpm test:contract -t "TC-K2.T6.d"` | 통과 = 1 |
+| G-K2.12 | TC-K2.T6.e 삭제 키 사용액 | [L] `pnpm test:contract -t "TC-K2.T6.e"` | 통과 = 1 |
+| G-K2.13 | TC-K2.T6.f 사용액 0 키 | [L] `pnpm test:contract -t "TC-K2.T6.f"` | 통과 = 1 |
+| G-K2.25 | TC-K2.T6.j limit 키 다시 켜기 | [L] `pnpm test:contract -t "TC-K2.T6.j"` | 통과 = 1 |
+| G-K2.14 | TC-K2.T6.g 초과 폭 | [L] `pnpm test:contract -t "TC-K2.T6.g"` | 통과 = 1, 회원 총 사용액 ≤ 한도 × 2 + 0.004878 |
+| G-K2.15 | TC-K2.T6.h 분배 소요 | [L] `node tests/bench/analytics.mjs --rebalance --assert` | 종료코드 0, 보통 ≤ 30,000ms · 날이 바뀐 첫 분배 ≤ 55,000ms |
+| G-K2.26 | TC-K2.T6.k 오늘 창만 | `pnpm -C apps/server test -t "TC-K2.T6.k"` | 통과 = 1 |
+| G-K2.27 ~ 29 | TC-K2.T7.a ~ c | `pnpm -C apps/server test -t "TC-K2.T7.<x>"` | 각 통과 = 1 |
+| G-K2.30 | TC-K2.T7.d 저장 합 + 오늘 == 한 달 | [L] `pnpm test:contract -t "TC-K2.T7.d"` | 통과 = 1, 오차 1e-9 |
+| G-K2.31 | TC-K2.T7.e usage_daily 다섯 DB | [L] `pnpm -C packages/db test:migrate -t "TC-K2.T7.e" --db sqlite,mysql,mariadb,pg,d1` | 통과 = 5 |
 | G-K2.16 · 17 | TC-K2.T4.a · b | `pnpm -C apps/server test -t "TC-K2.T4.<x>"` | 각 통과 = 1 |
 | G-K2.18 | 어댑터 밖 관리 호출 0 | grep `/api/(keys\|usage)` in `apps packages`, `packages/omniroute/**` 제외 | == 0 |
 | G-K2.19 | 타입 검사 | `pnpm -r typecheck` | 종료코드 0 |
 | G-K2.20 | TC-K2.T5.a CI 단계 잡 | grep `^\s+run: node scripts/gate\.mjs K2\b` in ci.yml | == 1 |
-| G-K2.22 | TC-K2.T3.i 분배 1분 등록 | `pnpm -C apps/server test -t "TC-K2.T3.i" && pnpm -C apps/server test -t "TC-K1.T4.b"` | 통과 = 2 |
+| G-K2.22 | TC-K2.T6.i 분배 1분 등록 | `pnpm -C apps/server test -t "TC-K2.T6.i" && pnpm -C apps/server test -t "TC-K1.T4.b"` | 통과 = 2 |
 | G-K2.23 | 1분 주기 상수 | grep `name: "budget_rebalance", cron: "\* \* \* \* \*"` in `apps/server/src/jobs.ts` | == 1 |
 | G-K2.21 | ruleset · TC-K2.T5.b | `node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere` | 종료코드 0 |
 
@@ -844,7 +885,7 @@ TC-K3.T1.b  정지를 풀면 user_status 때문에, 한도가 생기면 limit �
 선행 K3.T1 · 산출 `apps/server/src/keys/apply.ts` · 되돌리기 커밋 1개
 
 【작업】
-1. `applyKey(keyId)`: 목표 계산 → OmniRoute 상태가 다르면 즉시 `setKeyActive`. 목표가 삭제됨이면 즉시 `setKeyActive(false)` 하고 `key.delete` 작업을 끈 시각 + 2분 뒤로 잡는다 (계획서 v5.6 5.2, V18: 끈 뒤 60초가 지나야 DELETE 해도 옛 원문 키가 다시 열리지 않는다). 켜기 직전 `rebalanceMember`(K2.T4)로 예산을 먼저 건다. 2xx 면 `sync_state = synced`, 실패하면 `pending` + `key.apply_state` 작업(첫 재시도 1분, Q2). K2.T3 분배의 limit 끄기·켜기를 이 함수로 바꾼다. 끄기·정지는 반영이 끝나야 "완료" — API 응답은 `sync_state`를 그대로 준다 (화면 "반영 중" 표시는 4단계·7단계). 커밋.
+1. `applyKey(keyId)`: 목표 계산 → OmniRoute 상태가 다르면 즉시 `setKeyActive`. 목표가 삭제됨이면 즉시 `setKeyActive(false)` 하고 `key.delete` 작업을 끈 시각 + 2분 뒤로 잡는다 (계획서 v5.6 5.2, V18: 끈 뒤 60초가 지나야 DELETE 해도 옛 원문 키가 다시 열리지 않는다). 켜기 직전 `rebalanceMember`(K2.T4)로 예산을 먼저 건다. 2xx 면 `sync_state = synced`, 실패하면 `pending` + `key.apply_state` 작업(첫 재시도 1분, Q2). K2.T6 분배의 limit 끄기·켜기를 이 함수로 바꾼다. 끄기·정지는 반영이 끝나야 "완료" — API 응답은 `sync_state`를 그대로 준다 (화면 "반영 중" 표시는 4단계·7단계). 커밋.
 
 【테스트】
 ```
@@ -1351,7 +1392,7 @@ TC-K6.T3.c  1·2단계 봉인이 모두 유효하고 처음 커밋부터 순서 
 | 분배 주기 · 정합성 점검 주기 | 1분 · 5분 | G-K2.22, G-K2.23, G-K3.16, G-K3.17, G-K1.13 |
 | 재시도 간격 | 1분 · 2분 · 10분 · 30분 (첫 반영 실패 뒤 1분, v5.6 Q2) | G-K1.7, G-K1.17, G-K3.4 |
 | 삭제 뒤 DELETE | 끈 시각 + 2분 (OmniRoute 키 검증 캐시 60초, V18) | G-K3.18, G-K4.10 ~ 14 |
-| 분석 API (기록 300,000 · 키 300) | 전체 p95 ≤ 5,000ms · 회원 p95 ≤ 1,000ms | G-K0.19 ~ G-K0.23 |
+| 분석 API (기록 300,000 · 키 300) | 오늘 창 p95 ≤ 2,000ms · 회원 p95 ≤ 1,000ms · 대조 ≤ 55,000ms (v5.7) | G-K0.19 ~ G-K0.23, G-K0.39 |
 | 확인 항목 | 6 / 6, 설계 막음 0 | G-K0.13, G-K0.14 |
 | 설계 공백 | 0 / 6 남음 | G-K0.28 |
 
@@ -1376,14 +1417,14 @@ TC-K6.T3.c  1·2단계 봉인이 모두 유효하고 처음 커밋부터 순서 
 |---|---|---|
 | TC-K0.T5.a | V12 공동 예산 유무 | 계획서 5.3 개정, K2 작업 교체 |
 | TC-K0.T6.a | V13 거르기 파라미터 | 4단계 "최근 요청"이 어댑터에서 거름 (2단계 영향 없음) |
-| TC-K0.T7.a, TC-K2.T3.h | V15 측정·호출 방식 | 계획서 5.3 실행 시점 개정 |
-| TC-K2.T3.e | V18 삭제 키 기록 유지 | 계획서가 대안(삭제 전 사용액 보존) 결정, K1 스키마 |
+| TC-K0.T7.a, TC-K2.T6.h, TC-K2.T6.k, TC-K2.T7.a ~ d | V15 측정·호출 방식 (v5.7: 오늘 창 + usage_daily) | 계획서 5.3 실행 시점 개정 |
+| TC-K2.T6.e | V18 삭제 키 기록 유지 | 계획서가 대안(삭제 전 사용액 보존) 결정, K1 스키마 |
 | TC-K0.T9.a, TC-K4.T7.c, TC-K5.T2.d | V19 regenerate id·지출 유지·옛 원문 키 | 계획서 5.2 개정 (v5.6: 재발급 = 새 키 + 옛 키 삭제), K4 재발급 |
 | TC-K0.T8.a, TC-K3.T2.e, TC-K3.T3.e, TC-K4.T7.b, TC-K4.T5.a | V18 삭제 뒤 옛 원문 키·키 검증 캐시 60초 | 계획서 5.2 개정 (v5.6: 끄고 60초 뒤 DELETE), K3 반영·K4 삭제 |
 | TC-K0.T10.a·b·c, TC-K2.T2.a | V20 시간대·경계값 | 계획서 5.3 개정 (Q1 과 함께) |
 | TC-K1.T3.a, TC-K1.T4.a, TC-K3.T2.b | Q2 재시도 간격 1분·2분·10분·30분, 실행기 1분 | 계획서 v5.6 5.7 |
 | TC-K1.T3.b, TC-K3.T3.g | Q3 재시도 소진 → failed, 점검이 다시 맞춤, 30분 오래 실패 | 계획서 v5.6 5.7 |
-| TC-K2.T1.b, TC-K2.T1.d, TC-K2.T3.f, TC-K2.T3.j, TC-K3.T1.a, TC-K3.T1.b | Q1 남은 한도 0 이면 키 끄기(limit), 회복하면 켜기 | 계획서 v5.6 5.3·5.7 |
+| TC-K2.T1.b, TC-K2.T1.d, TC-K2.T6.f, TC-K2.T6.j, TC-K3.T1.a, TC-K3.T1.b | Q1 남은 한도 0 이면 키 끄기(limit), 회복하면 켜기 | 계획서 v5.6 5.3·5.7 |
 | TC-K2.T2.c | Q5 1분 분배가 달 바뀜 판단 | 계획서 v5.6 5.3 |
 | TC-K1.T3.b, TC-K3.T3.b, TC-K3.T3.c | Q6 알림 = audit_log alert.<종류> | 계획서 v5.6 5.7 |
 | TC-K4.T4.b | Q4 발급 요청 수 회원 10회·IP 30회 / 1시간 | 계획서 v5.6 5.2·7장 |

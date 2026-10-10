@@ -4,9 +4,10 @@
 
 실행판(1단계)은 [`../plan/phase1-todo.md`](../plan/phase1-todo.md) 다.
 2단계 실행판은 [`../plan/phase2-todo.md`](../plan/phase2-todo.md) 다.
-상태: 초안 v5.6 (설계 검토 1회 + S1 확인 + S2 리뷰 + S4 보안 리뷰 + K0 확인 반영)
+상태: 초안 v5.7 (설계 검토 1회 + S1 확인 + S2 리뷰 + S4 보안 리뷰 + K0 확인 반영)
 
 변경 이력
+- v5.7: 확인 15번 결정(선택지 B). 1분 분배는 오늘(UTC) 창만 분석으로 부르고, 지난 날 몫은 `usage_daily`에 키·날짜별로 저장한다. 날이 바뀐 첫 분배가 어제를 확정 저장하고, 하루 한 번 이번 달 1일~어제를 다시 불러 대조한다(차이는 `alert.usage_drift`). 측정 기준은 오늘 창 p95 ≤ 2초·회원 하나 ≤ 1초·대조 ≤ 임대 55초 (5.3·5.4·5.9·8장).
 - v5.6: K0 확인(`../verify/` V12·V13·V15·V18·V19·V20)과 설계 공백 결정 반영. Q1 남은 한도가 0 이면 키를 끈다(`disabled_reason` `limit`, 한도가 다시 생기면 자동으로 켬, 목표 상태 입력에 남은 한도). Q2 재시도 간격 1분·2분·10분·30분 (실행기 최소 주기 1분). Q3 4번째 재시도 실패 → 작업 `failed`·키 `sync_state` `failed`, 정합성 점검이 계속 다시 맞추고 `failed` 30분이 지나면 "오래 실패". Q4 키 발급 요청 수 제한 회원당 1시간 10회·IP 당 1시간 30회 (429). Q5 1분 분배가 달 바뀜을 스스로 판단 (월간 cron 없음). Q6 "관리자에게 알린다" = `audit_log` action `alert.<종류>`. 확인 결과로 재발급은 `regenerate` 대신 새 키 발급 + 옛 키 삭제, 삭제는 끄고 60초가 지난 뒤 `DELETE` (V18·V19), 쿼터 풀 공동 예산은 쓰지 않고 분배 유지 (V12), 월 기준은 UTC (V20). 확인 15번(분석 API 성능)은 기준을 넘어 5.3 의 1분 분배 분석 호출 방식이 아직 열려 있다.
 - v5.5: S4 보안 리뷰 반영. Workers 조합의 요청 수 제한 저장소도 DB(`rate_limit`)로 바꾼다 (KV 아님).
 - v5.4: S2 리뷰 반영. Docker 조합의 요청 수 제한 저장소를 Better Auth `rateLimit` storage `"database"`(`rate_limit` 테이블)로 확정하고, 스키마를 바꾸는 Better Auth 옵션을 스키마 생성기와 공유한다. MySQL 계열 시각은 `DATETIME(3)`, 토큰·식별자 칼럼은 `utf8mb4_bin`.
@@ -322,7 +323,8 @@ OmniRoute 예산은 키 단위다. 회원이 키를 여러 개 가져도 회원 
 
 계산 (회원마다)
 ```
-회원 이번 달 사용액 = analytics(apiKeyIds = 회원의 모든 키, 삭제한 키 포함, 이번 달).totalCost
+회원 이번 달 사용액 = Σ usage_daily(회원의 모든 키, 삭제한 키 포함, 이번 달 1일 ~ 어제).cost_usd
+                    + 오늘 창 analytics(오늘 00:00 UTC ~ 지금).byApiKey 중 회원의 키 cost
 남은 한도         = max(월 한도 − 회원 이번 달 사용액, 0)
 남은 한도 > 0 이면  키별 월 예산 = 그 키의 이번 달 사용액 + 남은 한도
 남은 한도 = 0 이면  회원의 키를 끈다 (disabled_reason = limit, 5.7)
@@ -338,11 +340,19 @@ OmniRoute 예산은 키 단위다. 회원이 키를 여러 개 가져도 회원 
 - 키 발급·재발급 직후, 관리자가 한도를 바꾼 직후
 - 1분마다 전체 회원 (활성 키가 있는 회원과 `limit` 때문에 꺼진 키가 있는 회원)
 - 새 달: 1분 분배가 `app_settings`에 남긴 마지막 실행 달(UTC)과 지금 달을 비교해, 바뀌었으면 그 실행에서 새 달 기준으로 다시 계산한다 (`limit`으로 꺼진 키 다시 켜기 포함). 월간 cron 은 따로 두지 않는다 (Q5. `cronIntervalMinutes`가 "0 0 1 * *"를 받지 않는다)
-- 1분 분배의 분석 호출 방식은 아직 정하지 않았다. 기록 300,000·키 300 에서 필터 없는 한 달 호출이 CI x64 에서 5.6~6.4초(p95)로 기준 5초를 넘는다 (확인 15번, `../verify/V15.json`의 선택지). 정하기 전에는 2단계 K1 을 열지 않는다
+
+분석 호출 (확인 15번: 기록 300,000·키 300 에서 필터 없는 한 달 호출은 CI x64 p95 5.6~6.4초라 1분마다 부르기에 느리다)
+- 1분 분배는 오늘 창 하나만 부른다: `analytics(startDate = 오늘 00:00 UTC, endDate = 지금)`, `apiKeyIds` 없이 전체 키 한 번, `byApiKey`를 매핑으로 회원별로 묶는다. 하루 분량이라 기록 수가 늘어도 빠르다 (측정 기준 p95 ≤ 2,000ms).
+- 지난 날 몫은 우리 DB `usage_daily`(키·날짜별 비용, 5.9)에 둔다. 키는 OmniRoute 키 id 이고 매핑에 있는 키만 둔다 (삭제한 키 포함).
+- 날 확정: 날이 바뀐 뒤 처음 도는 분배가 어제 창(어제 00:00 ~ 오늘 00:00 UTC)을 한 번 불러 어제 값을 저장한다. 마지막으로 확정한 날은 `app_settings.usage_daily_confirmed`에 둔다.
+- 하루 한 번 대조: 같은 첫 분배가 이번 달 1일 ~ 어제를 다시 불러 저장값을 덮는다. 분석 비용은 조회 시점 가격표로 계산돼 가격표가 바뀌면 지난 날 값도 바뀌기 때문이다. 저장값과 다르면(키·날마다 차이 > 0.000001) `audit_log`에 `alert.usage_drift`(차이 난 키·날 수와 합계)를 남긴다. 이 호출은 느려도 되지만 임대(55초) 안에 끝나야 한다 (측정: 가장 나쁜 경우인 지난 29일 p95 ≤ 55,000ms). 한 번 호출이 어댑터 제한 시간에 걸리면 그 실행은 대조를 멈추고, 다음 실행부터 날 단위로 나눠 하루씩 부른다 (진행한 날을 `app_settings`에 남김).
+- 즉시 분배(발급·재발급·한도 변경 직후)는 그 회원 키의 저장값 합 + 오늘 창(`apiKeyIds` = 그 회원 키)으로 계산한다.
 
 한계 (문서에 적는다)
 - OmniRoute 지출은 60초마다 기록되고 예산 조정도 1분 주기라, 짧은 시간에 몰아 쓰면 한도를 넘을 수 있다. 최악의 경우 대략 "남은 한도 × 동시에 쓰는 키 수"까지 넘는다. 최대 키 개수가 이 폭을 제한한다.
 - 비용은 OmniRoute 가격표 추정치 기준이다.
+- 날 경계 (UTC 자정 직후 몇 분): 자정 직전에 시작해 자정 뒤에 기록되는 요청이 있다 (OmniRoute 지출 기록 60초 지연). 그 기록의 시각이 어제면, 어제를 확정한 뒤 들어온 몫은 저장값에도 오늘 창에도 없다. 다음 날 대조 전까지(최대 하루) 회원 사용액에서 빠진다. 크기는 대략 회원의 "자정 전후 1분 사용량"이고, 그만큼 한도를 더 쓸 수 있다.
+- 가격표 반영: 가격표가 바뀌어도 지난 날 저장값은 다음 날 첫 대조 전까지(최대 하루) 옛 가격 그대로다. 오늘 창은 바로 새 가격이다.
 
 OmniRoute 쿼터 풀 일정 예산은 배정된 키 여럿의 소비를 합쳐 막는다(8장 확인 12번). 하지만 풀은 제공자 연결 하나에 묶여 다른 제공자로 가는 요청을 합치지 못하고, 창이 달력 월이 아닌 슬라이딩이며, 3.8.51 은 차단을 본문 없는 500 으로 낸다. 회원 한도로 쓰지 않고 분배를 유지한다. 키 그룹(`/api/keys/groups`)은 모델 허용·차단 전용이다.
 
@@ -352,6 +362,7 @@ OmniRoute 쿼터 풀 일정 예산은 배정된 키 여럿의 소비를 합쳐 �
 |---|---|
 | 내 사용량 | `GET /api/usage/analytics?apiKeyIds=<회원의 키 id들, 삭제한 키 포함>&startDate&endDate` → `summary`, `dailyTrend`, `byModel` |
 | 키별 사용량 | 같은 응답의 `byApiKey` |
+| (1분 분배) | `GET /api/usage/analytics?startDate=<오늘 00:00 UTC>&endDate=<지금>` → `byApiKey`. 지난 날 몫은 `usage_daily` (5.3) |
 | 최근 요청 | `GET /api/usage/call-logs?apiKey=<키 id>` → 완료 기록만. `apiKey`는 이름·id 부분 일치라 어댑터가 `apiKeyId`로 다시 정확히 거른다 (확인 13번) |
 | 전체 현황 | `GET /api/usage/analytics` → `byApiKey`를 매핑으로 회원 단위로 묶음 |
 
@@ -431,7 +442,8 @@ Better Auth 테이블(`user`, `session`, `account`, `verification`, `ssoProvider
 CREATE TABLE app_settings (
   key        TEXT PRIMARY KEY,           -- signup_mode, allowed_domains, default_limit_usd, default_max_keys,
                                          -- signup_requires_approval, daily_signup_cap, public_base_url,
-                                         -- budget_rebalance_month (1분 분배의 마지막 실행 달, UTC "YYYY-MM", 5.3), ...
+                                         -- budget_rebalance_month (1분 분배의 마지막 실행 달, UTC "YYYY-MM", 5.3),
+                                         -- usage_daily_confirmed (확정·대조한 마지막 날, UTC "YYYY-MM-DD", 5.3), ...
   value      TEXT NOT NULL,              -- JSON
   updated_at TEXT NOT NULL,
   updated_by TEXT
@@ -474,6 +486,14 @@ CREATE TABLE api_keys (
   deleted_at       TEXT
 );
 CREATE INDEX idx_api_keys_user ON api_keys(user_id);
+
+CREATE TABLE usage_daily (               -- 지난 날 키별 비용 (5.3). 1분 분배는 오늘 창만 부르고 이것을 더한다
+  key_id     TEXT NOT NULL,              -- OmniRoute 키 id (api_keys.omniroute_key_id, 삭제한 키 포함)
+  day        TEXT NOT NULL,              -- UTC 날짜 YYYY-MM-DD
+  cost_usd   REAL NOT NULL,              -- DECIMAL(12,6)
+  updated_at TEXT NOT NULL,              -- 날 확정·대조 때 갱신
+  PRIMARY KEY (key_id, day)
+);
 
 CREATE TABLE omniroute_jobs (
   id          TEXT PRIMARY KEY,
@@ -583,7 +603,7 @@ OmniRoute 노출
 **확인 끝 (2단계 K0, `../verify/`)**
 - 12. 공동 예산: 쿼터 풀 일정 예산이 키 여럿의 소비를 합쳐 막는다. 연결 하나·슬라이딩 창·차단 응답 500 이라 회원 한도로 쓰지 않는다 (5.3)
 - 13. call-logs 키 거르기: `apiKey` 하나, 이름·id 부분 일치. 어댑터가 다시 정확히 거른다 (5.4)
-- 15. 분석 API 성능: 회원 하나 p95 0.2~0.6초로 기준 안, 필터 없는 한 달 호출은 CI x64 p95 5.6~6.4초로 기준 5초를 넘는다 (세 번 중 한 번 통과) → 5.3 실행 시점 결정이 남아 있다 (설계를 막음)
+- 15. 분석 API 성능: 필터 없는 한 달 호출은 CI x64 p95 5.6~6.4초로 1분마다 부르기에 느리다 → 1분 분배는 오늘 창만 부르고 지난 날은 `usage_daily`에 저장 (5.3, v5.7). 오늘 창·회원 하나·대조 측정값은 `../verify/V15.json`
 - 18. 삭제한 키 기록은 분석에 남는다. 다만 `DELETE` 직후 60초 동안 옛 원문 키가 기록 없이 통과한다 → 삭제는 끄고 60초 뒤 (5.2)
 - 19. `regenerate`는 같은 id·지출·예산을 유지하지만 옛 원문 키가 60초 동안 기록 없이 통과한다 → 재발급은 새 키 + 옛 키 삭제 (5.2)
 - 20. 월 예산은 UTC, 매달 1일 00:00 초기화. 올리고 내리면 다음 요청부터. 사용액 > 예산일 때만 막고 0 은 무제한 → 남은 한도 0 이면 키를 끈다 (5.3, 5.7)
