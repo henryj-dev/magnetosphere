@@ -5,7 +5,8 @@
 //   b  키 둘로 번갈아 요청해 회원 총 사용액이 한도에 닿으면(T0) 곧바로 두 키로 몰아 쓴다 (키마다 연달아, 거부될 때까지).
 //      몰아 쓴 뒤 총 사용액 ≤ 0.02 × 2 + 0.004878 (계획서 5.3 "남은 한도 × 동시에 쓰는 키 수").
 //      T0 부터 125,000ms 안에 분배가 두 키를 limit 으로 끈다 (탐침 403 permission_denied, v5.6 Q1)
-//   c  두 키 삭제 → 새 발급 409 limit_exhausted. 한도 $0.04 → 발급 → 그 키 예산 == 0.04 − 총 사용액 (1e-6)
+//   c  두 키 삭제 → 새 발급 409 limit_exhausted. 한도 $0.06 → 발급 → 그 키 예산 == 0.06 − 총 사용액 (1e-6)
+//      (몰아 쓴 뒤 총 사용액은 0.04 를 넘을 수 있다 — 상한 0.044878. 그래서 올린 한도는 그보다 큰 $0.06)
 //   d  한도 도달 뒤 남은 키 재발급 → 409 limit_exhausted, 옛 원문 403. 한도를 올린 뒤 재발급 → 그 키 예산 == 한도 − 총 사용액
 //      (옛 id 사용액 포함, 1e-6), 새 원문 200, 옛 원문 바로 403
 //
@@ -29,6 +30,9 @@ export const MAX_KEYS = 2;
 export const REACT_MS = 125_000;
 /** 초과 폭 상한: 한도 × 최대 키 2 + 요청 1건 (계획서 5.3) */
 export const OVERSPEND_MAX = LIMIT * MAX_KEYS + 0.004878;
+/** c 에서 올리는 한도, d 에서 다시 올리는 한도. 몰아 쓴 뒤 총 사용액(≤ OVERSPEND_MAX)보다 커야 한다 */
+export const RAISED_C = 0.06;
+export const RAISED_D = 0.08;
 /** 몰아 쓰기 상한 (키마다). 키 예산이 맞으면 몇 건 안에 거부된다 */
 const BURST_MAX = 40;
 
@@ -201,13 +205,13 @@ export async function runKeys(ctx) {
     }
     const again = await issue();
     check(again.status === 409 && again.json?.error === "limit_exhausted", `TC-K5.T2.c 삭제 뒤 새 발급 409 limit_exhausted (${again.status} ${JSON.stringify(again.json)})`);
-    await setLimit(0.04);
+    await setLimit(RAISED_C);
     const c = await issue();
-    check(c.status === 201, `TC-K5.T2.c 한도 $0.04 뒤 발급 201 (${c.status} ${JSON.stringify(c.json?.error ?? null)})`);
+    check(c.status === 201, `TC-K5.T2.c 한도 $${RAISED_C} 뒤 발급 201 (${c.status} ${JSON.stringify(c.json?.error ?? null)})`);
     const C = { id: c.json.key.id, secret: c.json.secret };
     const totalC = await settledTotal();
     const budgetC = await budgetOf(C.id);
-    check(budgetC !== null && Math.abs(budgetC - (0.04 - totalC)) < 1e-6, `TC-K5.T2.c 새 키 예산 ${budgetC} == 0.04 − 총 사용액 ${totalC.toFixed(6)} (1e-6)`);
+    check(budgetC !== null && Math.abs(budgetC - (RAISED_C - totalC)) < 1e-6, `TC-K5.T2.c 새 키 예산 ${budgetC} == ${RAISED_C} − 총 사용액 ${totalC.toFixed(6)} (1e-6)`);
 
     // ---------- d. 재발급으로 한도가 초기화되지 않는다 (V19) ----------
     check((await spend(C.secret)).status === 200, "TC-K5.T2.d 키 C 요청 200");
@@ -218,7 +222,7 @@ export async function runKeys(ctx) {
     check(regen1.status === 409 && regen1.json?.error === "limit_exhausted", `TC-K5.T2.d 한도 도달 뒤 재발급 409 limit_exhausted (${regen1.status} ${JSON.stringify(regen1.json)})`);
     const oldAfter = await infer(v1, C.secret);
     check(permissionDenied(oldAfter), `TC-K5.T2.d 옛 원문의 다음 요청 403 (${oldAfter.status} ${JSON.stringify(oldAfter.json)})`);
-    await setLimit(0.06);
+    await setLimit(RAISED_D);
     // 한도를 올린 즉시 분배가 limit 으로 꺼진 C 를 다시 켰다 (탐침 400). 그래야 아래 "옛 원문 403" 이 재발급 덕분이다 (K5 리뷰 M2)
     const reopened = await infer(v1, C.secret, false);
     check(reopened.status === 400, `TC-K5.T2.d 재발급 전 C 는 켜져 있다 (탐침 ${reopened.status} ${JSON.stringify(reopened.json?.error ?? null)})`);
@@ -226,7 +230,7 @@ export async function runKeys(ctx) {
     check(regen2.status === 201 && typeof regen2.json?.secret === "string", `TC-K5.T2.d 한도를 올린 뒤 재발급 201 (${regen2.status} ${JSON.stringify(regen2.json?.error ?? null)})`);
     const D = { id: regen2.json.key.id, secret: regen2.json.secret };
     const budgetD = await budgetOf(D.id);
-    check(budgetD !== null && Math.abs(budgetD - (0.06 - totalD)) < 1e-6, `TC-K5.T2.d 재발급 키 예산 ${budgetD} == 0.06 − 총 사용액 ${totalD.toFixed(6)} (옛 id 사용액 포함, 1e-6)`);
+    check(budgetD !== null && Math.abs(budgetD - (RAISED_D - totalD)) < 1e-6, `TC-K5.T2.d 재발급 키 예산 ${budgetD} == ${RAISED_D} − 총 사용액 ${totalD.toFixed(6)} (옛 id 사용액 포함, 1e-6)`);
     const newReq = await spend(D.secret);
     check(newReq.status === 200, `TC-K5.T2.d 새 원문 200 (${newReq.status})`);
     const oldReq = await infer(v1, C.secret);
