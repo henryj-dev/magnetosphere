@@ -161,3 +161,87 @@ describe("TC-K2.T7.c 대조가 제한 시간에 걸리면 날 단위로 나눈�
     expect({ timedOut: r2.timedOut, reconciled: r2.reconciled }).toEqual({ timedOut: false, reconciled: { from: "2026-04-01", until: "2026-04-11" } });
   });
 });
+
+// ---- K2 리뷰 M1·L3·열린 질문: 확정되지 않은 날은 분석 창으로 센다, 응답에 없는 키는 자료 없음 ----
+
+/** 회원 한도 100, 키 A·B. A 예산 = 100 − (B 이번 달 사용액) 이라 B 사용액을 A 예산으로 읽는다 */
+async function memberAB() {
+  const { addMember } = await import("./fake.ts");
+  await addMember(h, 100, [{ ork: "ork-A" }, { ork: "ork-B" }]);
+}
+
+async function budgetA() {
+  const { keyRow } = await import("./fake.ts");
+  return (await keyRow(h, "ork-A")).budgetUsd;
+}
+
+describe("TC-K2.T7.f 이틀 넘는 공백 뒤 대조가 시간 초과여도 이번 달 사용액 == 분석 한 달 합", () => {
+  it('confirmed "04-05", now 04-10T00:01, 대조 시간 초과 → 04-05~04-08 을 분석 창으로 센다. 분할이 하루 진행된 뒤에도 같다', async () => {
+    const { fakeOmni, recordsAnalytics, multiDay } = await import("./fake.ts");
+    const { rebalanceAll } = await import("../../src/limits/rebalance.ts");
+    await memberAB();
+    await put("ork-B", "2026-04-02", 1);
+    await writeSetting(h, CONFIRMED_KEY, "2026-04-05", new Date("2026-04-05T00:01:00Z"));
+    const records = [
+      { key: "ork-B", at: "2026-04-02T10:00:00.000Z", cost: 1 },
+      { key: "ork-B", at: "2026-04-06T10:00:00.000Z", cost: 3 },
+      { key: "ork-B", at: "2026-04-09T10:00:00.000Z", cost: 1 },
+      { key: "ork-B", at: "2026-04-10T00:00:30.000Z", cost: 0.5 },
+    ];
+    const o = fakeOmni(recordsAnalytics(records, { timeout: (q) => q.timeoutMs !== undefined && multiDay(q) }));
+    const r = await rebalanceAll({ db: h, now: new Date("2026-04-10T00:01:00Z"), client: o.client });
+    expect(r.confirm.timedOut).toBe(true);
+    // 한 달 합: B 5.5 → A 예산 94.5
+    expect(await budgetA()).toBe(94.5);
+    await rebalanceAll({ db: h, now: new Date("2026-04-10T00:02:00Z"), client: o.client });
+    expect(await budgetA()).toBe(94.5);
+  });
+});
+
+describe("TC-K2.T7.g 처음 설치한 날 대조가 시간 초과여도 이번 달 사용액 == 분석 한 달 합", () => {
+  it("usage_daily_confirmed 없음, now 04-10T00:01, 대조 시간 초과 → 이번 달 1일부터 분석 창으로 센다", async () => {
+    const { fakeOmni, recordsAnalytics, multiDay } = await import("./fake.ts");
+    const { rebalanceAll } = await import("../../src/limits/rebalance.ts");
+    await memberAB();
+    const records = [
+      { key: "ork-B", at: "2026-04-03T10:00:00.000Z", cost: 2 },
+      { key: "ork-B", at: "2026-04-09T10:00:00.000Z", cost: 1 },
+      { key: "ork-B", at: "2026-04-10T00:00:30.000Z", cost: 0.5 },
+    ];
+    const o = fakeOmni(recordsAnalytics(records, { timeout: (q) => q.timeoutMs !== undefined && multiDay(q) }));
+    const r = await rebalanceAll({ db: h, now: new Date("2026-04-10T00:01:00Z"), client: o.client });
+    expect(r.confirm.timedOut).toBe(true);
+    expect(await budgetA()).toBe(96.5);
+  });
+});
+
+describe("TC-K2.T7.h 분할 대조의 하루 창이 시간 초과면 그날만 다음 실행으로 미룬다", () => {
+  it("split { next 04-03, until 04-10 }, 04-03 창 시간 초과 → 분배는 계속(그날부터 분석 창), split 그대로", async () => {
+    const { fakeOmni, recordsAnalytics } = await import("./fake.ts");
+    const { rebalanceAll } = await import("../../src/limits/rebalance.ts");
+    await memberAB();
+    await writeSetting(h, CONFIRMED_KEY, "2026-04-10", new Date("2026-04-10T00:01:00Z"));
+    await writeSetting(h, SPLIT_KEY, { next: "2026-04-03", until: "2026-04-10" }, new Date("2026-04-10T00:01:00Z"));
+    const records = [
+      { key: "ork-B", at: "2026-04-03T10:00:00.000Z", cost: 2 },
+      { key: "ork-B", at: "2026-04-10T00:00:30.000Z", cost: 0.5 },
+    ];
+    const o = fakeOmni(recordsAnalytics(records, { timeout: (q) => q.timeoutMs !== undefined }));
+    await rebalanceAll({ db: h, now: new Date("2026-04-10T00:05:00Z"), client: o.client });
+    expect(await readSetting(h, SPLIT_KEY)).toEqual({ next: "2026-04-03", until: "2026-04-10" });
+    expect(await budgetA()).toBe(97.5);
+  });
+});
+
+describe("TC-K2.T7.i 대조 응답에 없는 키의 저장값은 지우지 않는다 (자료 없음)", () => {
+  it("저장값 A 04-03 0.01·B 04-04 0.02, 대조 응답에 A 만 → B 저장값 0.02 그대로, 차이 0", async () => {
+    await member([{ ork: "ork-A" }, { ork: "ork-B" }]);
+    await put("ork-A", "2026-04-03", 0.01);
+    await put("ork-B", "2026-04-04", 0.02);
+    await writeSetting(h, CONFIRMED_KEY, "2026-04-09", new Date("2026-04-09T00:01:00Z"));
+    const { client } = fakeClient((c) => (c.start === "2026-04-01T00:00:00.000Z" ? { "ork-A": 0.01 } : {}));
+    await confirmDays(h, new Date("2026-04-10T00:01:00Z"), client);
+    expect(await rows()).toEqual(["ork-A 2026-04-03 0.010000", "ork-B 2026-04-04 0.020000"]);
+    expect(await drifts()).toEqual([]);
+  });
+});

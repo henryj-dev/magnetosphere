@@ -51,14 +51,14 @@ export interface OmniCall {
 }
 
 /** 가짜 어댑터. analytics(창) 가 byApiKey 비용(키 id → 비용) 또는 던질 오류를 돌려준다 */
-export function fakeOmni(analytics: (q: { apiKeyIds?: string[]; start: string; end: string }) => { [id: string]: number | undefined } | Error) {
+export function fakeOmni(analytics: (q: { apiKeyIds?: string[]; start: string; end: string; timeoutMs?: number }) => { [id: string]: number | undefined } | Error) {
   const calls: OmniCall[] = [];
-  const client = (): LimitsClient => ({
+  const client = (opts?: { timeoutMs?: number }): LimitsClient => ({
     async getAnalytics(q) {
       const start = new Date(q.startDate).toISOString();
       const end = new Date(q.endDate).toISOString();
       calls.push({ fn: "getAnalytics", apiKeyIds: q.apiKeyIds, start, end });
-      const r = analytics({ apiKeyIds: q.apiKeyIds, start, end });
+      const r = analytics({ apiKeyIds: q.apiKeyIds, start, end, timeoutMs: opts?.timeoutMs });
       if (r instanceof Error) throw r;
       const byApiKey = Object.entries(r)
         .filter(([id]) => !q.apiKeyIds || q.apiKeyIds.includes(id))
@@ -75,3 +75,16 @@ export function fakeOmni(analytics: (q: { apiKeyIds?: string[]; start: string; e
   });
   return { client, calls, of: (fn: OmniCall["fn"]) => calls.filter((c) => c.fn === fn) };
 }
+
+/** 기록 목록으로 만든 가짜 분석: 창 [start, end] (양 끝 포함) 안의 키별 비용 합. 제한 시간을 준 여러 날 창은 timeout 이면 시간 초과 */
+export function recordsAnalytics(records: { key: string; at: string; cost: number }[], opts: { timeout?: (q: { start: string; end: string; timeoutMs?: number }) => boolean } = {}) {
+  return (q: { start: string; end: string; timeoutMs?: number }) => {
+    if (opts.timeout?.(q)) return new DOMException("The operation was aborted due to timeout", "TimeoutError");
+    const out: Record<string, number> = {};
+    for (const r of records) if (r.at >= q.start && r.at <= q.end) out[r.key] = (out[r.key] ?? 0) + r.cost;
+    return out;
+  };
+}
+
+/** 여러 날에 걸친 창인가 (한 번 호출 대조) */
+export const multiDay = (q: { start: string; end: string }) => Date.parse(q.end) - Date.parse(q.start) >= 86_400_000;
