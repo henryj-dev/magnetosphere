@@ -1,0 +1,26 @@
+{
+  "item": "V13",
+  "question": "GET /api/usage/call-logs 를 API 키로 거르는 쿼리 파라미터가 있는가",
+  "answer": {
+    "param": "apiKey",
+    "filtersExactly": false,
+    "completedOnly": true,
+    "matching": "api_key_name LIKE %값% OR api_key_id LIKE %값% (부분 일치). 키 id 앞 8자리만 줘도 그 키 기록이 나온다",
+    "ignoredParams": [
+      "apiKeyId",
+      "apiKeyIds",
+      "keyId",
+      "key"
+    ],
+    "unfiltered": "필터가 없으면 DB 기록에 메모리의 진행 중·완료 상세 줄(apiKeyId null, status 0 또는 detailState in-memory)이 limit 와 상관없이 더해진다",
+    "impact": "2단계 범위 영향 없음. 4단계 '최근 요청'은 apiKey=<전체 id> 로 부르고 어댑터가 apiKeyId 를 정확히 다시 거른다"
+  },
+  "evidence": [
+    "소스(app/api/usage/call-logs/route.js): 읽는 파라미터 status, model, provider, account, apiKey, combo, search, correlationId, limit, offset, excludeTests",
+    "계약 환경 실측 (2026-10-10): 키 A 2건·B 1건 뒤 apiKey=<A id> → 2줄 모두 A, apiKey=<A id 앞 8자리> → 같은 2줄, apiKeyId=·apiKeyIds=·keyId= → 무시되어 전체 34줄(메모리 줄 포함)",
+    "packages/omniroute/test/contract/verify/v13.contract.ts (TC-K0.T6.a)"
+  ],
+  "blocking": false,
+  "was_blocking": false,
+  "resolved_in": null
+}
