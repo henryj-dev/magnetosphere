@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // 실행판 게이트 장치. 계약은 docs/plan/phase1-todo.md 0절 「GATE와 봉인」.
 //
-//   gate <단계>                          검사 실행, 실패 시 종료코드 1
+//   gate <단계>                          검사 실행, 실패 시 종료코드 1 (test 검사는 expectPassed 가 있으면 통과 수 ==)
 //   gate <단계> --seal                   검사를 다시 돌려 모두 통과하면 봉인
 //   gate <단계> --explain                실패한 검사의 측정값과 기준
 //   gate <단계> --seal --waived "<사유>"  면제 봉인 (waivable 단계만)
@@ -240,8 +240,9 @@ function passedCount(raw) {
     const names = [...output.matchAll(/^\s*ok \d+ - (.+)$/gm)].map((m) => m[1].trim());
     return names.filter((n) => !/\.[cm]?[jt]sx?$/.test(n) && !/#\s*(skip|todo)\b/i.test(n)).length;
   }
-  const vitest = output.match(/Tests\s+(\d+) passed/);
-  return vitest ? Number(vitest[1]) : null;
+  // vitest 요약 "Tests  N passed" 는 묶음마다 한 줄이다. pnpm test:contract(묶음 둘)·&& 로 이은 명령은 여러 줄을 내므로 모두 더한다
+  const vitest = [...output.matchAll(/Tests\s+(\d+) passed/g)];
+  return vitest.length ? vitest.reduce((n, m) => n + Number(m[1]), 0) : null;
 }
 
 const CHECKS = {
@@ -273,12 +274,17 @@ const CHECKS = {
     return { ok: code === expect, measured: code, limit: `종료코드 ${expect}`, output };
   },
 
-  test(root, c) {
-    const limit = "종료코드 0, 통과 ≥ 1";
+  // expectPassed 가 있으면 통과 수가 그 수와 같아야 한다 (2단계 K0.T1). 없으면 통과 ≥ 1.
+  // 단계에 strictTests 가 있으면 expectPassed 없는 test 검사는 돌리지 않고 실패다 (def 는 runChecks 가 넘긴다)
+  test(root, c, def = {}) {
+    const exact = Number.isInteger(c.expectPassed);
+    const limit = exact ? `종료코드 0, 통과 == ${c.expectPassed}` : "종료코드 0, 통과 ≥ 1";
+    if (def.strictTests && !exact) return { ok: false, measured: "expectPassed 없음", limit: "strictTests 단계는 expectPassed 필수" };
     const { code, output } = run(root, c.cmd);
     if (code !== 0) return { ok: false, measured: `종료코드 ${code}`, limit, output };
     const passed = passedCount(output);
     if (passed === null) return { ok: false, measured: "통과 수를 읽지 못함", limit, output };
+    if (exact) return { ok: passed === c.expectPassed, measured: `통과 ${passed} / 기대 ${c.expectPassed}`, limit, output };
     return { ok: passed >= 1, measured: `통과 ${passed}`, limit, output };
   },
 
@@ -322,7 +328,7 @@ function runChecks(root, phase, def, skipTag = null, skipIds = new Set()) {
     if (!impl) fail(`${c.id}: 알 수 없는 검사 종류 "${c.how}"`);
     let r;
     try {
-      r = impl(root, c);
+      r = impl(root, c, def);
     } catch (e) {
       r = { ok: false, measured: `오류: ${e.message}`, limit: "-" };
     }
