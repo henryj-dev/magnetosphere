@@ -1,0 +1,23 @@
+# TC-K5.T3.a 음성 대조: 매트릭스가 키 시나리오(--scenario keys)를 빠뜨리고, K5 잡은 --skip-ids 로 여섯 시나리오를 뺀다
+# 그러면 완료 기준 E2E(G-K5.3~8)가 CI 에서 하나도 돌지 않는다
+# expect: combo-set
+name: ci
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        combo: [docker-sqlite, docker-mysql, docker-pg, workers-d1, workers-mysql, workers-pg]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: pnpm e2e --combo ${{ matrix.combo }}
+  p2-k5:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: node scripts/gate.mjs K5 --explain --skip-ids G-K5.3,G-K5.4,G-K5.5,G-K5.6,G-K5.7,G-K5.8
