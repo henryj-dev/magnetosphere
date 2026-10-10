@@ -1,7 +1,7 @@
 {
   "version": "5",
   "dialect": "mysql",
-  "id": "a105443d-9495-4d9f-a066-c3368daae848",
+  "id": "dc88fa2b-cae4-4ee7-b916-1aa43d3d4321",
   "prevId": "47c81143-92a2-48d1-b1bb-8166fab0a2f9",
   "tables": {
     "account": {
@@ -563,6 +563,22 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "generation": {
+          "name": "generation",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "interrupts": {
+          "name": "interrupts",
+          "type": "int",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
         },
         "key_id": {
           "name": "key_id",

@@ -242,6 +242,8 @@ export const TABLES: Record<string, Table> = {
       nextRunAt: { name: "next_run_at", kind: "timestamp", notNull: true },
       doneAt: { name: "done_at", kind: "timestamp" },
       failedAt: { name: "failed_at", kind: "timestamp", doc: "4번째 재시도 실패 시각 (계획서 v5.6 Q3). 지금 − failed_at > 30분이면 오래 실패" },
+      generation: { name: "generation", kind: "integer", notNull: true, default: 0, doc: "합칠 때마다 1 씩 는다. 결과 쓰기는 차지할 때 읽은 값이 그대로일 때만 (K1 재검토)" },
+      interrupts: { name: "interrupts", kind: "integer", notNull: true, default: 0, doc: "임대를 잃어 끊긴 횟수. attempts 와 따로 센다 (K1 재검토)" },
       keyId: { name: "key_id", kind: "id", doc: "대상 api_keys.id (없으면 NULL). 같은 키의 미완료 key.apply_state 합치기·key.delete 우선·실패 표시에 쓴다 (K1 리뷰 #1)" },
     },
     // 실행할 작업 찾기: done_at IS NULL AND failed_at IS NULL AND next_run_at <= now. 키별 미완료 작업 찾기: key_id, done_at

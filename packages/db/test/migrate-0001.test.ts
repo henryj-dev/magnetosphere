@@ -1,4 +1,4 @@
-// K1.T1: 0001 마이그레이션(job_leases.fence·last_slot, omniroute_jobs.failed_at·key_id)을 다섯 DB 에 적용한다.
+// K1.T1: 0001 마이그레이션(job_leases.fence·last_slot, omniroute_jobs.failed_at·key_id·generation·interrupts)을 다섯 DB 에 적용한다.
 // 빈 DB 에 0000 만 적용 → 기존 행을 넣음 → 0001 까지 적용 순서로, 이미 돌던 DB 를 올리는 경로를 본다.
 // scripts/test-migrate.mjs 가 MG_TEST_DBS(--db)로 고른 DB 만 돈다.
 import { spawnSync } from "node:child_process";
@@ -233,7 +233,7 @@ test("고른 DB 가 하나 이상이다 (0001)", () => {
 });
 
 describe.each(cases)("%s", (kind) => {
-  test(`TC-K1.T1.a ${LABEL[kind]}: 0000 → 기존 행 → 0001 적용 뒤 job_leases.fence 정수 NOT NULL 기본 0·last_slot, omniroute_jobs.failed_at·key_id NULL 허용, 기존 행 값`, async () => {
+  test(`TC-K1.T1.a ${LABEL[kind]}: 0000 → 기존 행 → 0001 적용 뒤 job_leases.fence 정수 NOT NULL 기본 0·last_slot, omniroute_jobs.failed_at·key_id NULL 허용·generation·interrupts 정수 기본 0, 기존 행 값`, async () => {
     const u = await open[kind]();
     try {
       await u.applyFirst();
@@ -249,10 +249,17 @@ describe.each(cases)("%s", (kind) => {
       expect(await u.column("omniroute_jobs", "failed_at")).toEqual(FAILED_AT[kind]);
       expect(await u.column("job_leases", "last_slot")).toEqual(LAST_SLOT[kind]);
       expect(await u.column("omniroute_jobs", "key_id")).toEqual(KEY_ID[kind]);
+      for (const c of ["generation", "interrupts"]) expect(await u.column("omniroute_jobs", c), c).toEqual(FENCE[kind]);
       const [lease] = await u.rows(`SELECT holder, fence, last_slot FROM ${q}job_leases${q} WHERE name = 'reconcile'`);
       expect({ holder: lease?.holder, fence: Number(lease?.fence), lastSlot: lease?.last_slot }).toEqual({ holder: "node-a", fence: 0, lastSlot: null });
-      const [job] = await u.rows(`SELECT attempts, failed_at, key_id FROM ${q}omniroute_jobs${q} WHERE id = 'job-1'`);
-      expect({ attempts: Number(job?.attempts), failedAt: job?.failed_at, keyId: job?.key_id }).toEqual({ attempts: 2, failedAt: null, keyId: null });
+      const [job] = await u.rows(`SELECT attempts, failed_at, key_id, generation, interrupts FROM ${q}omniroute_jobs${q} WHERE id = 'job-1'`);
+      expect({ attempts: Number(job?.attempts), failedAt: job?.failed_at, keyId: job?.key_id, generation: Number(job?.generation), interrupts: Number(job?.interrupts) }).toEqual({
+        attempts: 2,
+        failedAt: null,
+        keyId: null,
+        generation: 0,
+        interrupts: 0,
+      });
       // 새로 넣는 임대 행은 fence 를 주지 않아도 0 이다
       await u.exec(`INSERT INTO ${q}job_leases${q} (name, holder, locked_until) VALUES ('budget_rebalance', 'node-b', ${AT[kind]})`);
       const [fresh] = await u.rows(`SELECT fence FROM ${q}job_leases${q} WHERE name = 'budget_rebalance'`);

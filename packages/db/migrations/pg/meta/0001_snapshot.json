@@ -1,5 +1,5 @@
 {
-  "id": "11117b5e-036f-440c-a08f-98cbe0e391bc",
+  "id": "a3e29ad5-3957-4f31-a308-85ed83fbf37e",
   "prevId": "3c57a806-7634-4a7b-ab9a-21f612767e5c",
   "version": "7",
   "dialect": "postgresql",
@@ -511,6 +511,20 @@
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
+        },
+        "generation": {
+          "name": "generation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "interrupts": {
+          "name": "interrupts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         },
         "key_id": {
           "name": "key_id",

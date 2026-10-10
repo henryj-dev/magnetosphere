@@ -149,6 +149,8 @@ export const omnirouteJobs = mysqlTable("omniroute_jobs", {
   nextRunAt: datetime("next_run_at", { fsp: 3 }).notNull(),
   doneAt: datetime("done_at", { fsp: 3 }),
   failedAt: datetime("failed_at", { fsp: 3 }),
+  generation: int("generation").default(0).notNull(),
+  interrupts: int("interrupts").default(0).notNull(),
   keyId: varchar("key_id", { length: 36 }),
 }, (table) => [
   index("idx_omniroute_jobs_due").on(table.doneAt, table.nextRunAt),

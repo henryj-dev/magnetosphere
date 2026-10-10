@@ -143,6 +143,8 @@ export const omnirouteJobs = pgTable("omniroute_jobs", {
   nextRunAt: timestamp("next_run_at").notNull(),
   doneAt: timestamp("done_at"),
   failedAt: timestamp("failed_at"),
+  generation: integer("generation").default(0).notNull(),
+  interrupts: integer("interrupts").default(0).notNull(),
   keyId: varchar("key_id", { length: 36 }),
 }, (table) => [
   index("idx_omniroute_jobs_due").on(table.doneAt, table.nextRunAt),

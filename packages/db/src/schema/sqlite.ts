@@ -143,6 +143,8 @@ export const omnirouteJobs = sqliteTable("omniroute_jobs", {
   nextRunAt: integer("next_run_at", { mode: "timestamp_ms" }).notNull(),
   doneAt: integer("done_at", { mode: "timestamp_ms" }),
   failedAt: integer("failed_at", { mode: "timestamp_ms" }),
+  generation: integer("generation").default(0).notNull(),
+  interrupts: integer("interrupts").default(0).notNull(),
   keyId: text("key_id"),
 }, (table) => [
   index("idx_omniroute_jobs_due").on(table.doneAt, table.nextRunAt),

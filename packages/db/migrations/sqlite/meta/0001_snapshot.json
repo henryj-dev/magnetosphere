@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "1eb624d9-9e06-4128-9cc5-22ee8b83d30e",
+  "id": "8e304f14-2a69-4ded-9517-dd901307ee91",
   "prevId": "f5e85cdd-9c4d-494c-894c-4ddb417b0fea",
   "tables": {
     "account": {
@@ -522,6 +522,22 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "generation": {
+          "name": "generation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "interrupts": {
+          "name": "interrupts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
         },
         "key_id": {
           "name": "key_id",
