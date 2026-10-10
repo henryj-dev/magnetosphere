@@ -100,4 +100,61 @@ describe.each(enabledDbs())("%s", (kind: DbKind) => {
     await dead;
     expect(om.state.active.get(b.ork)).toBe(false);
   });
+
+  it(`TC-K1.T3.j ${LABEL[kind]}: 실행 중인 반영 작업에 끄기가 합쳐져도 키가 꺼진다 (핸들러가 켜기를 건 뒤·완료 쓰기 전에 회원이 끔)`, async () => {
+    const om = fakeOmniRoute();
+    const real = omnirouteHandlers(() => om.client);
+    const T0 = new Date("2026-10-02T00:00:00.000Z");
+    const a = await activeKey();
+    om.state.active.set(a.ork, true);
+    const first = await enqueue(h, "key.apply_state", { keyId: a.keyId }, { now: T0 });
+    let hooked = false;
+    // 핸들러가 목표 on 을 읽고 켜기를 건 뒤(다시 읽어도 on) 돌아온 직후, 완료 쓰기 전에 요청 쪽이 끈다. 즉시 반영은 503 → enqueue
+    const handlers: Handlers = {
+      ...real,
+      async "key.apply_state"(p, ctx) {
+        await real["key.apply_state"](p, ctx);
+        if (hooked) return;
+        hooked = true;
+        await disableByMember(a.keyId);
+        om.state.failNext = 1;
+        await om.client.setKeyActive(a.ork, false).catch(() => undefined);
+        expect(await enqueue(h, "key.apply_state", { keyId: a.keyId }, { now: new Date(T0.getTime() + 1_000) }), "실행 중인 작업에 합친다").toBe(first);
+      },
+    };
+    const r1 = await runDue(h, handlers, T0);
+    // 다음 tick 까지 돌려도 결과는 같아야 한다
+    await runDue(h, handlers, new Date(T0.getTime() + 60_000));
+    expect(om.state.active.get(a.ork), `호출 ${om.state.calls.join(", ")}`).toBe(false);
+    expect(await pendingFor(a.keyId)).toHaveLength(0);
+    expect((r1 as { stale?: number }).stale, "세대가 바뀐 완료 쓰기는 0행으로 따로 센다").toBe(1);
+  });
+
+  it(`TC-K1.T3.k ${LABEL[kind]}: 재시도 대기 중인 반영 작업에 끄기가 합쳐지면 바로 돌고 시도 횟수를 새로 센다`, async () => {
+    const om = fakeOmniRoute();
+    const handlers = omnirouteHandlers(() => om.client);
+    const T0 = new Date("2026-10-03T00:00:00.000Z");
+    const a = await activeKey();
+    om.state.active.set(a.ork, true);
+    const id = await enqueue(h, "key.apply_state", { keyId: a.keyId }, { now: T0 });
+    // 켜기 시도가 세 번 실패해 다음 시도는 10분 뒤다
+    let at = T0;
+    for (let i = 0; i < 3; i++) {
+      om.state.failNext = 1;
+      await runDue(h, handlers, at);
+      at = (await h.db.select().from(h.schema.omnirouteJobs).where(eq(h.schema.omnirouteJobs.id, id)))[0].nextRunAt;
+    }
+    const merged = new Date(T0.getTime() + 4 * 60_000);
+    expect(at.getTime() - merged.getTime()).toBeGreaterThan(5 * 60_000);
+    // 회원이 끈다. 즉시 반영 503 → enqueue 는 기다리는 작업에 합쳐진다
+    await disableByMember(a.keyId);
+    om.state.failNext = 1;
+    await om.client.setKeyActive(a.ork, false).catch(() => undefined);
+    expect(await enqueue(h, "key.apply_state", { keyId: a.keyId }, { now: merged })).toBe(id);
+    const [row] = await h.db.select().from(h.schema.omnirouteJobs).where(eq(h.schema.omnirouteJobs.id, id));
+    expect({ attempts: row.attempts, due: row.nextRunAt.getTime() <= merged.getTime() }).toEqual({ attempts: 0, due: true });
+    await runDue(h, handlers, merged);
+    expect(om.state.active.get(a.ork), `호출 ${om.state.calls.join(", ")}`).toBe(false);
+    expect(await pendingFor(a.keyId)).toHaveLength(0);
+  });
 });
