@@ -18,9 +18,9 @@ binding = "ASSETS"
 not_found_handling = "single-page-application"
 run_worker_first = true
 
-# 주기 작업. src/jobs.ts 의 JOBS cron 집합과 같다 (TC-K1.T4.b). 작업 큐 실행기 omniroute_jobs 가 1분마다 돈다
+# 주기 작업. src/jobs.ts 의 JOBS cron 집합과 같다 (TC-K1.T4.b). 작업 큐 실행기·1분 분배가 1분마다, 정합성 점검이 5분마다 돈다
 [triggers]
-crons = ["* * * * *"]
+crons = ["* * * * *", "*/5 * * * *"]
 
 # ---------- Workers + D1 ----------
 [env.d1]
