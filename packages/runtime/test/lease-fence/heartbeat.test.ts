@@ -41,3 +41,31 @@ describe("TC-K1.T2.c 하트비트 실패면 작업 신호가 끊기고 OmniRoute
     expect(renews).toBe(after);
   });
 });
+
+describe("TC-K1.T2.e DB 응답이 멈춰도 ttl 안에 작업 신호가 끊긴다", () => {
+  it("renew 가 영원히 기다리는 가짜 연결, ttl 300ms → 시작부터 300ms 안에 signal.aborted, 이유는 임대 잃음", async () => {
+    let renews = 0;
+    // 가짜 연결: 늘리기 질의가 돌아오지 않는다 (DB 멈춤·네트워크 단절)
+    const renew = () => {
+      renews++;
+      return new Promise<boolean>(() => {});
+    };
+    const lost = new LeaseLostError({ name: "budget_rebalance", holder: "A", fence: 1 });
+    const started = performance.now();
+    let abortedAfter = Infinity;
+    const job = holdLease(renew, 300, async (signal) => {
+      // 작업은 끊길 때까지(최대 2초) 돈다
+      await new Promise<void>((resolve) => {
+        const t = setTimeout(resolve, 2_000);
+        signal.addEventListener("abort", () => {
+          abortedAfter = performance.now() - started;
+          clearTimeout(t);
+          resolve();
+        });
+      });
+    }, () => lost);
+    await expect(job).rejects.toBe(lost);
+    expect(renews, "하트비트가 늘리기를 시도했다 (대조)").toBeGreaterThan(0);
+    expect(abortedAfter, `끊긴 시각 ${Math.round(abortedAfter)}ms`).toBeLessThan(300);
+  });
+});
