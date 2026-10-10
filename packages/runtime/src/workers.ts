@@ -4,9 +4,10 @@
 // - Hyperdrive MySQL 은 mysql2 + disableEval: true (Workers 에는 eval 이 없다, V27), nodejs_compat 이 필요하다.
 // - 세션 시간대는 Node 와 같이 UTC 로 맞춘다 (TC-S4.T1.d). D1 은 시각이 정수라 해당 없음.
 // - clientIp(): CF-Connecting-IP 만 믿는다. X-Forwarded-For 는 클라이언트가 지어낼 수 있어 보지 않는다 (TC-S4.T1.c).
-// - schedule(): 등록만 하고, Workers 진입점의 scheduled() 가 runScheduled(cron) 으로 부른다. Cron Trigger 는 같은 cron 에
-//   한 번만 불리므로 임대가 필요 없다.
+// - schedule(): 등록만 하고, Workers 진입점의 scheduled() 가 runScheduled(cron) 으로 부른다. Cron 호출은 겹칠 수 있다
+//   (1분 작업이 1분을 넘기면 다음 호출이 앞 호출과 같이 돈다). 그래서 Node 와 같은 job_leases 임대·하트비트 아래에서 돈다 (K1.T2).
 import { isValidIP } from "@better-auth/core/utils/ip";
+import { runLeased } from "./lease.ts";
 import { cronIntervalMinutes, type DbHandle, type Job, type Runtime } from "./types.ts";
 
 /** Hyperdrive 바인딩에서 쓰는 필드 */
@@ -68,22 +69,35 @@ export function workersClientIp(req: Request): string | null {
   return ip && isValidIP(ip) ? ip : null;
 }
 
-export function createWorkersRuntime(env: WorkersEnv): WorkersRuntime {
-  const jobs = new Map<string, { name: string; fn: Job }[]>();
+export interface WorkersRuntimeOptions {
+  /** DB 연결 (기본 connectWorkers). workerd 없이 도는 시험이 Node 의 SQLite 연결을 넘긴다 */
+  connect?: (env: WorkersEnv) => Promise<DbHandle>;
+}
+
+export function createWorkersRuntime(env: WorkersEnv, opts: WorkersRuntimeOptions = {}): WorkersRuntime {
+  const connect = opts.connect ?? connectWorkers;
+  const jobs = new Map<string, { name: string; fn: Job; ttl: number }[]>();
+  // Cron 호출(런타임) 하나가 holder 하나다
+  const holder = `workers-${crypto.randomUUID()}`;
   let handle: Promise<DbHandle> | undefined;
+  const db = () => (handle ??= connect(env));
   return {
-    db() {
-      handle ??= connectWorkers(env);
-      return handle;
-    },
+    db,
     schedule(name, cron, fn) {
-      cronIntervalMinutes(cron); // Node 와 같은 모양만 받는다
-      jobs.set(cron, [...(jobs.get(cron) ?? []), { name, fn }]);
+      // Node 와 같은 모양만 받는다. 임대는 Node 와 같이 다음 경계 직전까지
+      const ttl = cronIntervalMinutes(cron) * 60_000 - 5_000;
+      jobs.set(cron, [...(jobs.get(cron) ?? []), { name, fn, ttl }]);
     },
     async runScheduled(cron) {
-      // 한 작업이 실패해도 나머지는 돈다. 실패는 모아서 Cron 호출 실패로 드러낸다
+      // 한 작업이 실패해도 나머지는 돈다. 실패는 모아서 Cron 호출 실패로 드러낸다.
+      // 앞 Cron 호출이 같은 작업을 아직 돌고 있으면(임대를 못 잡으면) 건너뛴다
       const errors: unknown[] = [];
-      for (const job of jobs.get(cron) ?? []) await job.fn().catch((e) => errors.push(new Error(`주기 작업 ${job.name} 실패`, { cause: e })));
+      for (const job of jobs.get(cron) ?? []) {
+        await (async () => {
+          const h = await db();
+          await runLeased(h, job.name, holder, job.ttl, (signal, lease) => job.fn({ db: h, lease, signal }));
+        })().catch((e) => errors.push(new Error(`주기 작업 ${job.name} 실패`, { cause: e })));
+      }
       if (errors.length) throw new AggregateError(errors, `cron "${cron}" 작업 ${errors.length}개 실패`);
     },
     rateLimitStore: () => ({ storage: "database" }),

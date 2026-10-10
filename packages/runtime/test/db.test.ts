@@ -44,7 +44,7 @@ describe.each(enabledDbs())("%s", (kind: DbKind) => {
       // 잡은 쪽이 아닌 인스턴스는 만료 전까지 다시 못 잡는다
       const [row] = await a.db.select().from(a.schema.jobLeases).where(eq(a.schema.jobLeases.name, "fresh-0"));
       const other = row.holder === "A" ? { h: b, id: "B" } : { h: a, id: "A" };
-      expect(await acquireLease(other.h, "fresh-0", other.id, MINUTE)).toBe(false);
+      expect(await acquireLease(other.h, "fresh-0", other.id, MINUTE)).toBeNull();
     });
   });
 
@@ -52,13 +52,13 @@ describe.each(enabledDbs())("%s", (kind: DbKind) => {
     it(`${LABEL[kind]}: locked_until 이 지난 임대 → 다른 holder 성공, 지나지 않은 임대 → 실패`, async () => {
       const h = await instance();
       const now = new Date();
-      expect(await acquireLease(h, "reconcile", "dead", MINUTE, new Date(now.getTime() - 2 * MINUTE))).toBe(true);
+      expect(await acquireLease(h, "reconcile", "dead", MINUTE, new Date(now.getTime() - 2 * MINUTE))).toMatchObject({ holder: "dead" });
       // dead 의 임대는 now - 1분에 끝났다
-      expect(await acquireLease(h, "reconcile", "alive", MINUTE, now)).toBe(true);
+      expect(await acquireLease(h, "reconcile", "alive", MINUTE, now)).toMatchObject({ holder: "alive" });
       const [row] = await h.db.select().from(h.schema.jobLeases).where(eq(h.schema.jobLeases.name, "reconcile"));
       expect(row.holder).toBe("alive");
       // alive 의 임대는 아직 살아 있다
-      expect(await acquireLease(h, "reconcile", "third", MINUTE, now)).toBe(false);
+      expect(await acquireLease(h, "reconcile", "third", MINUTE, now)).toBeNull();
     });
   });
 

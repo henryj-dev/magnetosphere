@@ -2,6 +2,7 @@
 // 구현은 둘이다: node.ts (Docker — SQLite·MySQL·Postgres), workers.ts (Workers — D1·Hyperdrive MySQL·Postgres).
 // 이 파일은 두 런타임 모두에서 import 된다. Node 전용 모듈을 여기서 부르지 않는다.
 import type { ClientIp } from "@magnetosphere/auth";
+import type { Lease } from "./lease.ts";
 
 export type { ClientIp } from "@magnetosphere/auth";
 
@@ -21,7 +22,16 @@ export interface DbHandle {
   close(): Promise<void>;
 }
 
-export type Job = () => Promise<void>;
+/** 주기 작업이 받는 것. 작업은 임대를 잡은 동안만 돈다 (K1.T2) */
+export interface JobContext {
+  db: DbHandle;
+  /** 이 실행의 임대. DB 쓰기에 fenced(db, lease) 를 붙이면 임대를 잃은 뒤의 쓰기가 0행이 된다 */
+  lease: Lease;
+  /** 임대를 잃으면(하트비트 실패) 끊긴다. OmniRoute 호출에 넘겨 함께 멈춘다 */
+  signal: AbortSignal;
+}
+
+export type Job = (ctx: JobContext) => Promise<void>;
 
 /**
  * 요청 수 제한 저장소. Better Auth rateLimit 저장소는 스키마를 바꾸는 옵션이라 packages/db 의 AUTH_SCHEMA_OPTIONS 에
@@ -34,7 +44,7 @@ export interface RateLimitStore {
 export interface Runtime {
   /** DB 연결. Node 는 프로세스 하나에 풀 하나, Workers 는 요청마다 새 연결 (V27) */
   db(): Promise<DbHandle>;
-  /** 주기 작업. Node 는 프로세스 안 타이머 + job_leases 임대, Workers 는 Cron Trigger 가 부른다 */
+  /** 주기 작업. Node 는 프로세스 안 타이머, Workers 는 Cron Trigger 가 부른다. 둘 다 job_leases 임대 아래에서 돈다 */
   schedule(name: string, cron: string, fn: Job): void;
   rateLimitStore(): RateLimitStore;
   /** 비밀 값 (Node 는 환경 변수, Workers 는 env 바인딩). 없으면 undefined */
