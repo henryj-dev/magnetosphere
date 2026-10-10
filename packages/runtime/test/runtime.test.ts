@@ -97,9 +97,9 @@ describe("런타임 어댑터 공통", () => {
     rt.schedule("broken", "*/5 * * * *", async () => {
       throw new Error("x");
     });
-    await rt.runScheduled("* * * * *");
+    await rt.runScheduled("* * * * *", Date.UTC(2026, 9, 1, 0, 5));
     expect(ran).toEqual(["rebalance"]);
-    await expect(rt.runScheduled("*/5 * * * *")).rejects.toThrow(/1개 실패/);
+    await expect(rt.runScheduled("*/5 * * * *", Date.UTC(2026, 9, 1, 0, 5))).rejects.toThrow(/1개 실패/);
     expect(ran).toEqual(["rebalance", "reconcile"]);
   });
 

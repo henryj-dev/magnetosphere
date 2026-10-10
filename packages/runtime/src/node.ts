@@ -125,31 +125,33 @@ export function createNodeRuntime(opts: NodeRuntimeOptions = {}): NodeRuntime {
       // 끝나면 runLeased 가 만료를 처음 값으로 되돌려 다음 경계에서 어느 인스턴스든 잡는다
       const ttl = period - 5_000;
       let running = false;
-      const tick = async () => {
+      // boundary: 이 tick 이 예약된 경계 시각. 경계 번호는 이것으로 정한다 (지금 시각을 반올림하지 않는다, K1 재검토)
+      const tick = async (boundary: number) => {
         // 앞 경계의 작업이 아직 돈다 (내 임대라 다시 잡힌다). 이 인스턴스에서 겹쳐 돌리지 않는다
         if (running) return;
         running = true;
         try {
           const h = await db();
-          // 경계 번호. 타이머는 경계에 깨므로 가장 가까운 경계로 반올림한다 (몇 ms 일찍 깨도 앞 경계로 보지 않게)
-          const slot = Math.round(clock.now() / period);
-          await runLeased(h, name, holder, ttl, (signal, lease) => fn({ db: h, lease, signal }), clock.now, slot);
+          await runLeased(h, name, holder, ttl, (signal, lease) => fn({ db: h, lease, signal }), clock.now, boundary / period);
         } catch (e) {
           onJobError(name, e);
         } finally {
           running = false;
         }
       };
-      // 인스턴스마다 같은 경계(분 단위)에 깨어나 임대를 다툰다. 경계마다 다음 경계를 다시 잰다 (타이머가 밀려도 경계에 맞춘다)
-      const arm = () => {
+      // 인스턴스마다 같은 경계(분 단위)에 깨어나 임대를 다툰다. 다음 경계는 예약했던 경계 + 주기다 (타이머가 조금 일찍 울려도
+      // 같은 경계를 다시 예약하지 않는다). 그 시각이 이미 지났으면(절전 등) 지금 다음 경계로 건너뛴다
+      const nextBoundary = (now: number) => now - (now % period) + period;
+      const arm = (boundary: number) => {
         const t = clock.setTimeout(() => {
           timers.delete(t);
-          arm();
-          void tick();
-        }, period - (clock.now() % period));
+          const now = clock.now();
+          arm(boundary + period > now ? boundary + period : nextBoundary(now));
+          void tick(boundary);
+        }, Math.max(0, boundary - clock.now()));
         timers.add(t);
       };
-      arm();
+      arm(nextBoundary(clock.now()));
     },
     rateLimitStore: () => ({ storage: "database" }),
     secret: (name) => env[name],

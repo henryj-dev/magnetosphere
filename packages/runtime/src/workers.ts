@@ -28,8 +28,8 @@ export interface WorkersEnv {
 }
 
 export interface WorkersRuntime extends Runtime {
-  /** Cron Trigger 가 부른 cron 에 등록된 작업을 돈다 */
-  runScheduled(cron: string): Promise<void>;
+  /** Cron Trigger 가 부른 cron 에 등록된 작업을 돈다. scheduledTime 은 Cron 이 예약한 시각(ms, controller.scheduledTime) */
+  runScheduled(cron: string, scheduledTime: number): Promise<void>;
 }
 
 export async function connectWorkers(env: WorkersEnv): Promise<DbHandle> {
@@ -88,15 +88,16 @@ export function createWorkersRuntime(env: WorkersEnv, opts: WorkersRuntimeOption
       const ttl = cronIntervalMinutes(cron) * 60_000 - 5_000;
       jobs.set(cron, [...(jobs.get(cron) ?? []), { name, fn, ttl, period: ttl + 5_000 }]);
     },
-    async runScheduled(cron) {
+    async runScheduled(cron, scheduledTime) {
+      if (!Number.isFinite(scheduledTime)) throw new TypeError("scheduledTime(ms) 이 필요하다");
       // 한 작업이 실패해도 나머지는 돈다. 실패는 모아서 Cron 호출 실패로 드러낸다.
       // 앞 Cron 호출이 같은 작업을 아직 돌고 있으면(임대를 못 잡으면) 건너뛴다
       const errors: unknown[] = [];
       for (const job of jobs.get(cron) ?? []) {
         await (async () => {
           const h = await db();
-          // 경계 번호. Cron 은 경계 근처에 부르므로 가장 가까운 경계로 반올림한다. 같은 경계의 두 번째 호출은 건너뛴다
-          const slot = Math.round(Date.now() / job.period);
+          // 경계 번호는 Cron 이 예약한 시각(경계)에서 정한다 (실행 시각을 반올림하지 않는다). 같은 경계의 두 번째 호출은 건너뛴다
+          const slot = Math.floor(scheduledTime / job.period);
           await runLeased(h, job.name, holder, job.ttl, (signal, lease) => job.fn({ db: h, lease, signal }), Date.now, slot);
         })().catch((e) => errors.push(new Error(`주기 작업 ${job.name} 실패`, { cause: e })));
       }
