@@ -56,6 +56,8 @@ export function omnirouteHandlers(clientFor: (signal?: AbortSignal) => OmniRoute
         const active = cur.target === "on" && !(await deletePending(db, p.keyId as string));
         return { id: cur.omnirouteKeyId, active };
       };
+      // 걸고 다시 읽기는 두 번까지만 한다. 그 뒤에도 목표가 바뀌는(요청이 계속 바꾸는) 드문 경우는 그 요청이 넣은 반영 작업이
+      // 합쳐져 세대가 바뀌므로 이 작업이 다시 돈다. 그래도 남는 어긋남은 5분 정합성 점검(K3.T3)이 목표 상태로 맞춘다
       let want = await read();
       for (let i = 0; want && i < 2; i++) {
         await applyActive(clientFor(signal), want.id, want.active);

@@ -504,7 +504,7 @@ TC-K0.T15.b  ruleset 필수 검사가 이 잡을 포함한다
 
 【작업】
 1. 공통 정의 `jobLeases`에 `fence`(정수, NOT NULL, 기본 0)를 더하고 세 벌 생성·마이그레이션을 만든다. 같은 커밋에 계획서 v5.6 의 스키마 변경을 넣는다: `omniroute_jobs.failed_at`(시각, NULL 허용, Q3), `api_keys.disabled_reason` 설명에 `limit`(Q1, 칼럼 길이 16 그대로). V19 결과로 `api_keys` 칼럼 변경은 없다 (재발급이 새 키 발급 + 옛 키 삭제라 매핑을 바꾸지 않는다). 커밋.
-2. (K1 리뷰 #1·#6) 같은 0001 에 `omniroute_jobs.key_id`(대상 `api_keys.id`, NULL 허용, 색인 `(key_id, done_at)`)와 `job_leases.last_slot`(마지막으로 돈 경계 번호, bigint, NULL 허용)을 더한다. 병합 전이라 0001 을 다시 만든다. 커밋.
+2. (K1 리뷰 #1·#6, 재검토) 같은 0001 에 `omniroute_jobs.generation`(합칠 때마다 + 1, 정수 NOT NULL 기본 0)·`interrupts`(임대를 잃어 끊긴 횟수, 같은 모양)·`omniroute_jobs.key_id`(대상 `api_keys.id`, NULL 허용, 색인 `(key_id, done_at)`)와 `job_leases.last_slot`(마지막으로 돈 경계 번호, bigint, NULL 허용)을 더한다. 병합 전이라 0001 을 다시 만든다. 커밋.
 3. (K1 리뷰 #10) 구조 비교(TC-S2.T3.d)의 SQL 정규화는 따옴표 밖에서만 공백을 맞춘다. 재현 커밋 `Red: TC-K1.T1.c` → 고침.
 
 【테스트】
@@ -570,6 +570,11 @@ TC-K1.T2.d  fence 는 같은 이름에서 엄격히 증가한다
 4. (K1 리뷰 #4) `failed_at`·키 `sync_state`·`alert.job_failed`를 한 트랜잭션(D1 은 batch)으로, 펜싱 조건과 함께 쓴다. 알림을 못 쓰면 셋 다 되돌리고 차지 시각 뒤 다시 실패 처리한다 (알림 없는 failed 를 남기지 않는다). 작업 하나의 결과 쓰기 예외는 그 작업에서 잡아 `errors`로 센다. `Red: TC-K1.T3.g` → 고침.
 5. (K1 리뷰 #5) payload 가 JSON 객체가 아니거나 모르는 작업이면 재시도 없이 곧바로 failed. `Red: TC-K1.T3.h` → 고침.
 6. (K1 리뷰 #8) 임대를 잃어 신호가 끊긴 시도는 세지 않는다: 차지를 풀어 `attempts`·`next_run_at`을 되돌린다. `Red: TC-K1.T3.i` → 고침.
+7. (K1 재검토 높음) 합치기는 `generation + 1`, `attempts = 0`, `next_run_at = min(기존, 지금)`. 완료·재시도·실패·차지 풀기 쓰기는 차지할 때 읽은 `generation`이 그대로일 때만 하고, 0행이면 시도로 세지 않고 `stale`로 센다 (합치기가 next_run_at 을 당겨 두어 곧바로 다시 돈다). `Red: TC-K1.T3.j, TC-K1.T3.k` → 고침.
+8. (K1 재검토 중간) `attempts`가 재시도 표 길이 + 2 를 넘은 작업은 핸들러 없이 실패 처리만 시도하고, 그것도 실패하면 경보(`onAlarm`, console.error). `Red: TC-K1.T3.l` → 고침.
+9. (K1 재검토 중간) 끊김은 `interrupts`로 따로 센다. `MAX_INTERRUPTS`(5) 번 끊긴 작업은 다음 차지가 핸들러 없이 failed·alert. `Red: TC-K1.T3.m` → 고침.
+10. (K1 재검토 중간) `key.*` 작업은 모두 `keyId` 필수 (없으면 TypeError). `Red: TC-K1.T3.n` → 고침.
+11. (K1 재검토 낮음) 핸들러는 `Object.hasOwn(handlers, action)`인 함수만. `Red: TC-K1.T3.o` → 고침. 경계 번호는 예약한 경계 시각(Workers `controller.scheduledTime`, Node 예약 경계)에서 정한다.
 
 【테스트】
 ```
@@ -597,6 +602,24 @@ TC-K1.T3.h  망가진 payload 는 곧바로 failed 로 두고 큐를 끊지 않�
 TC-K1.T3.i  임대를 잃어 끊긴 실행은 재시도 횟수를 쓰지 않는다 (K1 리뷰 #8)
   단언:  핸들러 도중 다른 실행기가 임대를 가져가 신호가 끊김 → 그 작업 attempts 0·next_run_at 원래 값·last_error NULL, 다음 작업은 집지 않음
   검출:  차지할 때 늘린 attempts 가 펜싱에 막혀 그대로 남아, 임대 다툼이 잦으면 OmniRoute 는 멀쩡한데 작업이 failed 로 가는 것
+TC-K1.T3.j  실행 중인 반영 작업에 끄기가 합쳐져도 키가 꺼진다 (K1 재검토 높음)
+  단언:  핸들러가 켜기를 건 뒤·완료 쓰기 전에 회원이 끄고 즉시 반영 503 → enqueue 는 그 작업에 합쳐짐 → OmniRoute 키 꺼짐, 미완료 0, 완료 쓰기 0행은 stale 1 (네 DB)
+  검출:  미완료 조건이 실행 중인 작업에도 맞아 id 만 돌려받고, 그 작업이 done 으로 끝나 회원이 끈 키가 켜진 채 남는 것
+TC-K1.T3.k  재시도 대기 중인 반영 작업에 끄기가 합쳐지면 바로 돌고 시도 횟수를 새로 센다 (K1 재검토 높음)
+  단언:  켜기 세 번 실패(다음 시도 10분 뒤) → 끄기 enqueue 가 합쳐짐 → attempts 0·next_run_at ≤ 지금 → 그 시각 runDue 로 OmniRoute 키 꺼짐 (네 DB)
+  검출:  끄기가 기존 작업의 대기(최대 30분)와 남은 시도를 같이 써, 그 작업이 최종 실패하면 끄기가 큐에서 처리되지 않는 것
+TC-K1.T3.l  실패 처리가 계속 실패해도 OmniRoute 호출을 끝없이 되풀이하지 않는다 (K1 재검토 중간)
+  단언:  attempts = 재시도 표 길이 + 2 인 작업, audit_log 삽입 실패 → 핸들러 호출 0·onAlarm 1·failed_at NULL, 알림 저장이 돌아온 뒤 CLAIM_MS 지나 → 핸들러 호출 0·failed_at 설정
+  검출:  실패 처리 트랜잭션이 매번 되돌려져 약 5분마다 다시 차지되고 OmniRoute 호출부터 다시 도는 것
+TC-K1.T3.m  매번 임대를 잃는 작업은 5번 끊긴 뒤 failed 다 (K1 재검토 중간)
+  단언:  끊길 때마다 attempts 0·next_run_at 원래 값·interrupts + 1, 5번 끊긴 뒤 다음 차지 → 핸들러 호출 없이 failed·last_error "임대를 5번 잃음"·alert 1행 (네 DB, 차지 풀기의 next_run_at 비교 포함)
+  검출:  끊긴 시도를 세지 않아(리뷰 #8) 매번 임대를 잃는 작업이 영원히 도는 것, MySQL·PG 시각 비교가 어긋나 차지 풀기가 0행이 되는 것
+TC-K1.T3.n  key.* 작업은 keyId 없이 넣을 수 없다 (K1 재검토 중간)
+  단언:  key.delete·key.rollback·key.apply_state 를 keyId 없이(빈 문자열 포함) → TypeError·행 0, keyId 가 있으면 key_id 칼럼에 남고 미완료 key.delete 가 켜기를 막는다
+  검출:  key_id NULL 인 key.delete 가 delete 우선 검사에 잡히지 않아 반영이 지울 키를 켜는 것
+TC-K1.T3.o  핸들러 표 밖의 action 은 프로토타입 함수로 돌지 않는다 (K1 재검토 낮음)
+  단언:  action "toString"·"constructor"·"hasOwnProperty" → done 이 아니라 failed "모르는 작업"
+  검출:  handlers[action] 참·거짓으로 고르면 Object.prototype.toString 이 핸들러로 불려 작업이 done 이 되는 것
 TC-K1.T3.e  last_error 에 비밀 값이 없다
   단언:  오류 본문에 "oma_live_x…"·"sk-x…" 를 담은 OmniRouteError → last_error 에 "oma_live_"·"sk-" 0건
   검출:  OmniRouteError.message 가 응답 본문 300자를 담아(어댑터 call()) 관리 토큰이 DB 에 평문으로 남는 것
@@ -605,6 +628,7 @@ TC-K1.T3.e  last_error 에 비밀 값이 없다
 【통과】
 - [x] G-K1.7 ~ G-K1.11 · G-K1.17 · G-K1.25 ~ G-K1.28 통과
 - [x] G-K1.29 · G-K1.32 ~ G-K1.35 통과 (Red 커밋에서 TC-K1.T3.a·f·g·h·i 실패)
+- [x] G-K1.37 ~ G-K1.42 · G-K1.43 ~ G-K1.48 통과 (TC-K1.T3.j~o 와 그 Red 커밋)
 
 ### ☑ K1.T4 — 주기 작업 등록 (1분 분배·5분 정합성·큐 실행기)
 선행 K1.T3 · 산출 `apps/server/src/jobs.ts`, `apps/server/wrangler.toml`, `packages/runtime/src/types.ts` · 되돌리기 커밋 1개
@@ -692,6 +716,13 @@ TC-K1.T5.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-K1.34 | 재현 빨강 TC-K1.T3.h | `… --check G-K1.27 --since seal:K0` | 종료코드 0 |
 | G-K1.35 | 재현 빨강 TC-K1.T3.i | `… --check G-K1.28 --since seal:K0` | 종료코드 0 |
 | G-K1.36 | 재현 빨강 TC-K1.T1.c | `… --check G-K1.22 --since seal:K0` | 종료코드 0 |
+| G-K1.37 | TC-K1.T3.j 실행 중 합치기 | [L] `pnpm -C apps/server test:db -t "TC-K1.T3.j" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
+| G-K1.38 | TC-K1.T3.k 재시도 대기 중 합치기 | [L] `pnpm -C apps/server test:db -t "TC-K1.T3.k" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
+| G-K1.39 | TC-K1.T3.l 실패 처리만 남은 작업 | `pnpm -C apps/server test -t "TC-K1.T3.l"` | 통과 = 1 |
+| G-K1.40 | TC-K1.T3.m 끊김 상한 | [L] `pnpm -C apps/server test:db -t "TC-K1.T3.m" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
+| G-K1.41 | TC-K1.T3.n key.* 의 keyId 필수 | `pnpm -C apps/server test -t "TC-K1.T3.n"` | 통과 = 1 |
+| G-K1.42 | TC-K1.T3.o 프로토타입 action | `pnpm -C apps/server test -t "TC-K1.T3.o"` | 통과 = 1 |
+| G-K1.43 ~ 48 | 재현 빨강 TC-K1.T3.j·k·l·m·n·o | `… --check G-K1.37 ~ 42 --since seal:K0` | 각 종료코드 0 |
 
 `node scripts/gate.mjs K1 --seal`
 
@@ -958,6 +989,8 @@ TC-K3.T2.e  삭제는 끄기 먼저, DELETE 는 끈 뒤 2분이 지나서다 (V1
 - [ ] G-K3.3 ~ G-K3.6 · G-K3.18 통과
 
 ### ☐ K3.T3 — 정합성 점검 (5분)
+
+> K1 메모 (K1 재검토): 작업 큐는 두 경우를 스스로 끝까지 맞추지 않고 이 점검에 맡긴다. (1) `key.apply_state` 핸들러의 "걸고 다시 읽기"는 두 번까지라, 그 사이 목표가 계속 바뀌면 어긋남이 남을 수 있다. (2) 한 tick 안에서 앞 작업이 오래 걸려 뒤 작업의 실패가 늦게 적히면, 다음 시도 전까지 OmniRoute 상태가 목표와 어긋난 채 남는다. 이 점검이 5분마다 모든 키를 목표 상태로 맞추므로 두 어긋남은 최대 5분이다. 이 단계의 TC 는 이 두 경우를 덮어야 한다.
 선행 K3.T2 · 산출 `apps/server/src/keys/reconcile.ts`, `apps/server/test/contract/keys/**` · 되돌리기 커밋 1개
 
 【작업】

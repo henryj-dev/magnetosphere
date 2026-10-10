@@ -243,6 +243,8 @@ export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: R
         count(await updatedRows(h, h.db.update(t).set({ doneAt: new Date(clock()), lastError: null }).where(mine), t.id), "done");
         continue;
       }
+      // 한 tick 안에서 앞 작업들이 오래 걸려 이 작업의 실패가 늦게 적혀도(실패 시각 = clock()) 간격은 그 시각에서 잰다.
+      // 그 사이 OmniRoute 상태가 목표와 어긋난 채로 남는 시간은 다음 시도 또는 5분 정합성 점검(K3.T3)이 맞춘다
       const lastError = describeError(outcome);
       const failedTime = clock();
       if (job.attempts <= RETRY_DELAYS_MS.length) {
