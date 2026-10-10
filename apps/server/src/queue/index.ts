@@ -11,6 +11,8 @@
 //   - failed_at 에서 30분이 지나면 "오래 실패"다 (isLongFailed, 관리 화면은 7단계).
 //   - failed_at·키 sync_state·알림은 한 트랜잭션(D1 은 batch)으로 함께 남거나 함께 되돌려진다 (K1 리뷰 #4, TC-K1.T3.g).
 //     알림 없는 failed 는 아무도 모르는 실패라서다. 되돌려진 작업은 차지 시각(CLAIM_MS) 뒤 다시 집혀 실패 처리를 다시 한다.
+//   - 실패 처리 자체가 계속 실패하면(알림 저장 장애 등) 차지 시각마다 다시 집힌다. attempts 가 RETRY_DELAYS_MS 길이 + 2 를
+//     넘은 작업은 핸들러(OmniRoute 호출)를 다시 부르지 않고 실패 처리만 시도하며, 실패하면 onAlarm(경보)으로 올린다 (K1 재검토).
 //   - 한 작업의 처리(쓰기) 예외는 그 작업에서 잡아 errors 로 세고 다음 작업으로 간다. tick 하나가 끊기지 않는다.
 // 키별 순서 (K1 리뷰 #1, TC-K1.T3.f)
 //   - key.apply_state 는 값을 싣지 않는다 (payload { keyId }). 실행할 때 api_keys·회원 상태로 목표를 다시 계산해 건다 (target.ts).
@@ -133,8 +135,10 @@ export interface RunDueOptions {
   lease?: Lease;
   /** 끊기면 다음 작업을 집지 않는다. 핸들러에도 넘긴다 */
   signal?: AbortSignal;
-  /** 작업 결과 쓰기 실패 (기본 console.error). 작업 id 와 오류 */
+  /** 작업 결과 쓰기 실패 (기본 console.warn). 작업 id 와 오류. 차지 시각 뒤 다시 집힌다 */
   onError?: (jobId: string, e: unknown) => void;
+  /** 재시도를 다 쓰고도 실패 처리를 거듭 못 쓰는 작업 (기본 console.error 경보). 운영자가 DB·알림 저장을 봐야 한다 */
+  onAlarm?: (jobId: string, e: unknown) => void;
   /** 실패·완료 시각을 재는 시계 (기본: now 고정). 실행기는 실제 시계를 넘긴다. 재시도 간격은 실패 시각에서 잰다 */
   clock?: () => number;
 }
@@ -154,7 +158,9 @@ export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: R
   const t = h.schema.omnirouteJobs;
   const guard = (cond: SQL | undefined) => (opts.lease ? and(cond, fenced(h, opts.lease)) : cond);
   const result: RunDueResult = { done: 0, retried: 0, failed: 0, errors: 0, stale: 0 };
-  const onError = opts.onError ?? ((id: string, e: unknown) => console.error(`[queue] 작업 ${id} 결과를 쓰지 못했다`, e));
+  const onError = opts.onError ?? ((id: string, e: unknown) => console.warn(`[queue] 작업 ${id} 결과를 쓰지 못했다. 차지 시각 뒤 다시 집는다`, e));
+  const onAlarm =
+    opts.onAlarm ?? ((id: string, e: unknown) => console.error(`[queue][경보] 작업 ${id}: 재시도를 다 쓴 뒤 실패 처리(failed_at·sync_state·alert)를 거듭 쓰지 못한다`, e));
   const clock = opts.clock ?? (() => now.getTime());
   const due = and(isNull(t.doneAt), isNull(t.failedAt), lte(t.nextRunAt, new Date(now.getTime() + DUE_GRACE_MS)));
   const missed = new Set<string>();
@@ -188,11 +194,13 @@ export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: R
       permanent = "payload JSON 아님";
     }
     if (!permanent && !handlers[row.action as JobAction]) permanent = "모르는 작업";
+    // 실패 처리만 남은 작업: 재시도 다 씀(attempts = 길이 + 1) 뒤 실패 처리를 한 번 더 못 쓴 것까지 넘었다
+    const failOnly = !permanent && row.attempts + 1 > RETRY_DELAYS_MS.length + 2;
     const job: QueuedJob = { id: row.id, action: row.action, payload: payload ?? { keyId: row.keyId ?? undefined }, attempts: row.attempts + 1, generation: row.generation };
     const mine = guard(and(eq(t.id, job.id), eq(t.attempts, job.attempts), eq(t.generation, job.generation), isNull(t.doneAt), isNull(t.failedAt)));
     const count = (n: number, key: "done" | "retried" | "failed") => (n === 1 ? result[key]++ : result.stale++);
     let outcome: unknown = null;
-    if (!permanent) {
+    if (!permanent && !failOnly) {
       try {
         await handlers[job.action](job.payload, { job, db: h, signal: opts.signal });
       } catch (e) {
@@ -213,6 +221,15 @@ export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: R
     try {
       if (permanent) {
         count(await markFailed(h, row, job, permanent, new Date(clock()), opts.lease), "failed");
+        continue;
+      }
+      if (failOnly) {
+        try {
+          count(await markFailed(h, row, job, row.lastError ?? "재시도 다 씀", new Date(clock()), opts.lease), "failed");
+        } catch (e) {
+          result.errors++;
+          onAlarm(job.id, e);
+        }
         continue;
       }
       if (outcome === null) {

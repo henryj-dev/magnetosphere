@@ -211,7 +211,7 @@ describe("TC-K1.T3.l 실패 처리가 계속 실패해도 OmniRoute 호출을 �
     const alarms: string[] = [];
     await h.db.run(sql.raw("ALTER TABLE audit_log RENAME TO audit_log_off"));
     try {
-      const r = await runDue(h, handlers, T0, { onAlarm: (jobId: string) => void alarms.push(jobId), onError: () => {} } as never);
+      const r = await runDue(h, handlers, T0, { onAlarm: (jobId) => void alarms.push(jobId), onError: () => {} });
       expect(r).toMatchObject({ failed: 0, errors: 1 });
     } finally {
       await h.db.run(sql.raw("ALTER TABLE audit_log_off RENAME TO audit_log"));
