@@ -40,6 +40,9 @@ jobs:
       - name: 봉인 검증 (바뀐 봉인은 봉인 커밋에서 검사를 다시 돌린다)
         # 시험용 OmniRoute·Keycloak·docker DB 가 필요한 검사(requires: local-services)는 여기서 건너뛰고,
         # S7 의 CI 매트릭스가 서비스를 띄워 다시 돈다.
+        # G-K0.31(check-required-checks)이 gh api 로 main 규칙을 읽는다. gh 는 토큰이 없으면 실행을 거부한다
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ -n "$GATE_BASE" ]; then
             node scripts/gate.mjs --verify-seals --rerun --since "$GATE_BASE" --skip-requires local-services
