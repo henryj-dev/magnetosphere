@@ -22,7 +22,7 @@ describe.each(enabledDbs())("%s", (kind: DbKind) => {
     await t?.drop();
   });
 
-  it(`TC-K1.T3.m ${LABEL[kind]}: 매번 임대를 잃는 작업 → 끊길 때마다 attempts·next_run_at 그대로·interrupts + 1, ${MAX}번 넘으면 핸들러 없이 failed·alert`, async () => {
+  it(`TC-K1.T3.m ${LABEL[kind]}: 매번 임대를 잃는 작업 → 끊길 때마다 attempts·next_run_at 그대로·interrupts + 1, ${MAX}번 끊긴 뒤 다음 차지는 핸들러 없이 failed·alert`, async () => {
     const T0 = new Date("2026-10-05T00:00:00.000Z");
     const id = await enqueue(h, "budget.set", { omnirouteKeyId: "k", monthlyUsd: 1 }, { now: T0 });
     const j = h.schema.omnirouteJobs;
@@ -52,7 +52,7 @@ describe.each(enabledDbs())("%s", (kind: DbKind) => {
       } else {
         expect(calls, "상한을 넘은 작업은 핸들러를 부르지 않는다").toBe(MAX);
         expect(r.failedAt).toBeInstanceOf(Date);
-        expect(r.lastError).toBe("임대를 5번 넘게 잃음");
+        expect(r.lastError).toBe("임대를 5번 잃음");
         const alerts = await h.db.select().from(h.schema.auditLog).where(eq(h.schema.auditLog.target, id));
         expect(alerts.map((a: { action: string }) => a.action)).toEqual(["alert.job_failed"]);
       }

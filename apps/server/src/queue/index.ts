@@ -27,7 +27,9 @@
 //     차지한다 (attempts + 1, next_run_at = 지금 + CLAIM_MS). 0행이면 다른 실행기가 먼저 차지한 것이다.
 //   - 차지한 채 프로세스가 죽으면 CLAIM_MS 뒤에 다시 집힌다. 그 시도도 attempts 에 센다.
 //   - 임대(lease)를 주면 모든 쓰기에 fenced() 를 붙인다. 임대를 잃은 실행기의 쓰기는 0행이다 (K1.T2).
-//   - 임대를 잃어 신호가 끊긴 시도는 세지 않는다. 차지를 풀어 attempts·next_run_at 을 되돌린다 (K1 리뷰 #8).
+//   - 임대를 잃어 신호가 끊긴 시도는 attempts 로 세지 않는다. 차지를 풀어 attempts·next_run_at 을 되돌린다 (K1 리뷰 #8).
+//     대신 interrupts 를 1 올린다. 매번 끊기는 작업이 영원히 돌지 않게, MAX_INTERRUPTS 번 끊긴 작업은 다음에 차지한
+//     실행기가 핸들러 없이 failed 로 둔다 (끊긴 쪽은 임대를 잃어 펜싱 쓰기를 못 한다, K1 재검토).
 // last_error 에는 OmniRoute 오류 코드·상태만 남긴다. OmniRouteError.message 는 응답 본문 300자를 담아 관리 토큰·원문 키가
 // 섞일 수 있다 (TC-K1.T3.e).
 import { and, asc, eq, exists, isNotNull, isNull, lte, sql, type SQL } from "drizzle-orm";
@@ -39,6 +41,8 @@ import type { DbHandle } from "@magnetosphere/runtime/types";
 export const RETRY_DELAYS_MS = [60_000, 120_000, 600_000, 1_800_000] as const;
 /** failed_at 에서 이만큼 지나면 오래 실패 (계획서 v5.6 Q3) */
 export const LONG_FAILED_MS = 30 * 60_000;
+/** 임대를 잃어 끊긴 횟수의 상한. 넘으면 failed (K1 재검토) */
+export const MAX_INTERRUPTS = 5;
 /** 차례 비교의 유예: next_run_at ≤ now + 이 값이면 돈다. 실행기 주기(1분)의 절반 */
 export const DUE_GRACE_MS = 30_000;
 /** 차지한 작업을 다른 실행기가 다시 집기까지. 핸들러 하나가 이보다 오래 걸리지 않는다 (OmniRoute 호출 제한 15초) */
@@ -194,6 +198,7 @@ export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: R
       permanent = "payload JSON 아님";
     }
     if (!permanent && !handlers[row.action as JobAction]) permanent = "모르는 작업";
+    if (!permanent && row.interrupts >= MAX_INTERRUPTS) permanent = `임대를 ${MAX_INTERRUPTS}번 잃음`;
     // 실패 처리만 남은 작업: 재시도 다 씀(attempts = 길이 + 1) 뒤 실패 처리를 한 번 더 못 쓴 것까지 넘었다
     const failOnly = !permanent && row.attempts + 1 > RETRY_DELAYS_MS.length + 2;
     const job: QueuedJob = { id: row.id, action: row.action, payload: payload ?? { keyId: row.keyId ?? undefined }, attempts: row.attempts + 1, generation: row.generation };
@@ -213,7 +218,7 @@ export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: R
       // 다시 차지했거나 결과를 썼으면 0행이다. 끊긴 뒤에는 다음 작업을 집지 않는다
       await h.db
         .update(t)
-        .set({ attempts: row.attempts, nextRunAt: row.nextRunAt })
+        .set({ attempts: row.attempts, nextRunAt: row.nextRunAt, interrupts: row.interrupts + 1 })
         .where(and(eq(t.id, job.id), eq(t.attempts, job.attempts), eq(t.generation, job.generation), eq(t.nextRunAt, claimUntil), isNull(t.doneAt), isNull(t.failedAt)))
         .catch((e: unknown) => onError(job.id, e));
       break;
