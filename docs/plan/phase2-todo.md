@@ -1595,20 +1595,24 @@ TC-K6.T3.c  1·2단계 봉인이 모두 유효하고 처음 커밋부터 순서 
 
 【작업】
 1. 재현 시험 `apps/server/test/queue/prune.db.test.ts`(네 DB)·`prune.test.ts`. 꼬리줄 `Red: TC-K6.T4.a, TC-K6.T4.b`. 커밋.
-2. `pruneDone(h, now, { lease })`: `done_at IS NOT NULL AND failed_at IS NULL AND done_at < now − DONE_RETENTION_MS(30일)` 을 지운다. 임대를 주면 `fenced()`. `queueJob`이 OmniRoute 연결 확인보다 먼저 부른다 (정리가 실패하면 경고만 남기고 재시도는 그대로 돈다). 커밋.
+2. `pruneDone(h, now, { lease })`: `done_at IS NOT NULL AND failed_at IS NULL AND done_at < now − DONE_RETENTION_MS(30일)` 을 지운다. (K6 리뷰 L1) 오래된 것부터 `PRUNE_BATCH`(500)행까지 고른 id 만 지운다. tick 하나에 한 묶음, 남은 것은 다음 tick 이 잇는다. MySQL·MariaDB 는 고른 id 를 파생 테이블로 감싼다 (Red: TC-K6.T4.c 는 단언 600 ≠ 500 으로 실패). 임대를 주면 `fenced()`. `queueJob`이 OmniRoute 연결 확인보다 먼저 부른다 (정리가 실패하면 경고만 남기고 재시도는 그대로 돈다). 커밋.
 
 【테스트】
 ```
 TC-K6.T4.a  done_at 이 30일 넘은 작업만 지운다 (네 DB)
   단언:  done_at = now − 30일 − 1초 · now − 30일 + 1초 · failed_at 만 90일 전 · 둘 다 60일 전 · 미완료 → pruneDone == 1, 남은 행 = 뒤 넷. 다른 실행기가 임대를 가져간 뒤 옛 임대로 pruneDone → 0, 60일 전 끝난 행 남음
   검출:  실패 작업까지 지워 오래 실패 화면(7단계)과 alert.job_failed 의 대상이 사라지는 것, 임대를 잃은 실행기가 펜싱 없이 지우는 것, timestamp 비교가 DB 방언마다 달라 30일 안 작업을 지우는 것
+TC-K6.T4.c  한 번에 최대 500행만 지운다 (네 DB, K6 리뷰 L1)
+  단언:  30일 넘은 끝난 작업 600행 → pruneDone == 500, 남은 100 → 다음 pruneDone == 100 → 0
+  검출:  오래 쌓인(또는 처음 정리를 켠) 표에서 tick 하나가 수만 행 DELETE 로 omniroute_jobs 를 오래 잠가 같은 tick 의 재시도 차지가 밀리는 것. MySQL·MariaDB 에서 "DELETE 대상 표를 부분 질의에서 읽음"·"IN 부분 질의의 LIMIT" 오류로 정리가 매번 실패하는 것 (파생 테이블로 감쌈)
 TC-K6.T4.b  1분 작업 큐 실행기가 정리를 부른다
   단언:  OMNIROUTE_URL 없는 Runtime 으로 queueJob 한 번 → done_at 31일 전 행 0, 1일 전 행·실패 행 남음
   검출:  pruneDone 은 있는데 어디서도 부르지 않아 omniroute_jobs 가 계속 커지는 것
 ```
 
 【통과】
-- [x] G-K6.10 ~ G-K6.13 통과
+- [x] G-K6.10 ~ G-K6.13, G-K6.19 · G-K6.20 통과
+- K6 리뷰 L1 음성 대조 (커밋 안 함): `PRUNE_BATCH` 600 → TC-K6.T4.c 네 DB 실패. MySQL 의 파생 테이블 감싸기 제거(다른 DB 와 같은 IN 부분 질의) → MySQL·MariaDB 의 TC-K6.T4.a·c 실패
 - 음성 대조 (커밋 안 함): `failed_at IS NULL` 조건 제거 · 펜싱 제거 · 보존 29일 → TC-K6.T4.a 네 DB 모두 실패. `queueJob` 에서 호출 제거 → TC-K6.T4.b 실패
 
 ### ☑ K6.T5 — 키 시나리오 누락의 문제 코드 (K5 리뷰 L4)
@@ -1655,6 +1659,8 @@ TC-K6.T5.b  S6 조합 불일치 음성 대조는 [combo-set] 로 잡힌다 (K6 �
 | G-K6.16 | 재현 빨강 TC-K6.T5.a | `node scripts/check-red.mjs --check G-K6.15 --since seal:K5` | 종료코드 0 |
 | G-K6.17 | TC-K6.T2.a 운영 문서 동시 요청 초과 | grep `동시 요청 수 × 요청 비용` in `deploy/README.md` | == 1 |
 | G-K6.18 | TC-K6.T2.a 운영 문서 fail-closed 지연 | grep `fail-closed` in `deploy/README.md` | == 1 |
+| G-K6.19 | TC-K6.T4.c 한 번에 500행 (네 DB) | [L] `pnpm -C apps/server test:db -t "TC-K6.T4.c" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
+| G-K6.20 | 재현 빨강 TC-K6.T4.c | `node scripts/check-red.mjs --check G-K6.19 --since seal:K5` | 종료코드 0 |
 
 `node scripts/gate.mjs K6 --seal`
 
