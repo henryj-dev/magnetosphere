@@ -8,6 +8,7 @@
 //       실행 동안 Claude Code 프로세스 묶음의 TCP 연결(lsof 20ms 간격)에 :20128 이 없다.
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,11 +20,39 @@ const MODEL = "mka/claude-mock";
 /** 사람이 쓰는 OmniRoute. Claude Code 가 여기에 붙으면 실패다 */
 const FORBIDDEN_PORT = 20128;
 
-/** 고정 버전 설치 (이 폴더의 pnpm-workspace.yaml·잠금 파일) */
+/** 고정 버전 설치 (이 폴더의 pnpm-workspace.yaml·잠금 파일). 설치된 버전이 고정 버전과 같을 때만 건너뛴다 (K5 리뷰 L3) */
 function installClaude() {
-  if (fs.existsSync(CLAUDE)) return;
+  const want = JSON.parse(fs.readFileSync(path.join(HERE, "package.json"), "utf8")).dependencies["@anthropic-ai/claude-code"];
+  const installed = path.join(HERE, "node_modules/@anthropic-ai/claude-code/package.json");
+  const have = fs.existsSync(installed) ? JSON.parse(fs.readFileSync(installed, "utf8")).version : null;
+  if (have === want && fs.existsSync(CLAUDE)) return;
+  if (have !== null) log(`설치된 Claude Code ${have} ≠ 고정 ${want}. 다시 설치한다`);
   const r = spawnSync("pnpm", ["install", "--frozen-lockfile"], { cwd: HERE, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   if (r.status !== 0) throw new Error(`Claude Code 설치 실패\n${r.stderr}${r.stdout}`.slice(0, 3000));
+  const now = JSON.parse(fs.readFileSync(installed, "utf8")).version;
+  if (now !== want) throw new Error(`설치한 Claude Code ${now} ≠ 고정 ${want}`);
+}
+
+/**
+ * CI(CI=true)에서만 127.0.0.1:20128 에 감시 리스너를 띄운다. 연결이 한 번이라도 오면 실패다 (K5 리뷰 L1).
+ * 이 컴퓨터(로컬)의 20128 은 사람이 쓰는 OmniRoute 라 절대 띄우지 않는다 — 로컬은 lsof 관측만 한다.
+ */
+async function ciTrap() {
+  if (process.env.CI !== "true") return null;
+  const accepted = [];
+  const server = net.createServer((sock) => {
+    accepted.push(`${sock.remoteAddress}:${sock.remotePort}`);
+    sock.destroy();
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", (e) => reject(new Error(`CI 감시 리스너를 127.0.0.1:${FORBIDDEN_PORT} 에 띄우지 못했다 (${e.code})`)));
+    server.listen(FORBIDDEN_PORT, "127.0.0.1", resolve);
+  });
+  log(`CI 감시 리스너 127.0.0.1:${FORBIDDEN_PORT}`);
+  return {
+    accepted,
+    close: () => new Promise((r) => server.close(() => r())),
+  };
 }
 
 /** Caddy 접근 기록을 켠다 (deploy/Caddyfile 은 접근 기록이 없다). 컨테이너 안 관리 API 로 그 서버에만 logs 를 단다 */
@@ -110,6 +139,7 @@ export async function runClaudeCode({ combo, stack, baseUrl }) {
     DISABLE_ERROR_REPORTING: "1",
   };
   check(!Object.values(env).some((v) => String(v).includes(String(FORBIDDEN_PORT))), `Claude Code 환경 변수에 ${FORBIDDEN_PORT} 이 없음`);
+  const trap = await ciTrap();
   try {
     const started = Date.now();
     const child = spawn(CLAUDE, ["-p", "say hi", "--max-turns", "1", "--model", MODEL, "--setting-sources", "project"], { cwd, env, detached: true, stdio: ["ignore", "pipe", "pipe"] });
@@ -135,7 +165,8 @@ export async function runClaudeCode({ combo, stack, baseUrl }) {
     check(stdout.includes("hello from mock"), `stdout 에 "hello from mock"`);
     const port = new URL(baseUrl).port;
     check([...conns].some((c) => new RegExp(`:${port}\\b`).test(c)), `연결 관측이 동작한다: Caddy(:${port}) 연결이 보인다`);
-    check(![...conns].some((c) => new RegExp(`:${FORBIDDEN_PORT}\\b`).test(c)), `localhost:${FORBIDDEN_PORT} 접속 0`);
+    check(![...conns].some((c) => new RegExp(`:${FORBIDDEN_PORT}\\b`).test(c)), `localhost:${FORBIDDEN_PORT} 접속 0 (lsof 관측)`);
+    if (trap) check(trap.accepted.length === 0, `CI 감시 리스너 127.0.0.1:${FORBIDDEN_PORT} 에 들어온 연결 0 (${trap.accepted.join(", ")})`);
     // 접근 기록은 응답 뒤에 남는다. 잠깐 기다린다
     let access = [];
     for (let i = 0; i < 20; i++) {
@@ -146,6 +177,7 @@ export async function runClaudeCode({ combo, stack, baseUrl }) {
     log(`Caddy 접근 기록: ${access.map((a) => `${a.method} ${a.path} ${a.status}`).join(", ")}`);
     check(access.some((a) => a.method === "POST" && a.path === "/v1/messages" && a.status === 200), "Caddy 접근 기록에 POST /v1/messages 200");
   } finally {
+    await trap?.close();
     fs.rmSync(work, { recursive: true, force: true });
   }
 }
