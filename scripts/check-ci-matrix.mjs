@@ -11,6 +11,9 @@
 // 워크플로를 YAML 로 읽어(yaml 패키지, 버전 고정) 다음을 본다. [] 안은 문제 코드다.
 //   matrix   E2E 매트릭스 잡이 하나이고 matrix.combo 가 --expect 개, 게이트 설정 S6 의 `pnpm e2e --combo <조합>` 검사와 같은 집합이다
 //            [combo-count·combo-set·matrix-shape]. include·exclude 로 조합을 바꾸지 않는다 [matrix-shape].
+//            게이트 설정 K5 에 `pnpm e2e --combo <조합> --scenario keys` 검사(2단계 완료 기준 E2E, G-K5.3~8)가 있으면 그 조합 집합도
+//            matrix.combo 와 같아야 하고, 매트릭스 잡에 `pnpm e2e --combo ${{ matrix.combo }} --scenario keys` 명령 줄이 있어야 한다 [combo-set].
+//            K5 잡은 그 여섯을 --skip-ids 로 빼므로, 매트릭스 스텝이 빠지면 키 시나리오가 CI 에서 하나도 돌지 않는다 (K5.T3).
 //   stage    봉인 파일이 있는(면제 아닌) 단계 중 S1 을 뺀 모든 단계를 어떤 스텝이 `node scripts/gate.mjs <단계>` 로 돈다 [stage-missing]. --skip-requires 는 쓰지 않고
 //            [skip-requires], --skip-ids 로 뺄 수 있는 것은 매트릭스가 대신 도는 E2E 검사뿐이다 [skip-ids].
 //            아직 봉인하지 않은 단계는 요구하지 않는다 — 그 단계 게이트는 아직 빨강이다. 봉인 파일을 커밋하는 순간부터
@@ -62,11 +65,14 @@ function sealed(sealDir, phase) {
 /** 게이트 설정: 단계 잡을 요구할 단계 목록(봉인된 단계)과 S6 의 E2E 검사 { id, combo } */
 async function gateInfo(sealDir) {
   const { GATES } = await import(pathToFileURL(path.join(ROOT, "gates/gates.config.mjs")).href);
-  const checks = (GATES.S6?.checks ?? [])
-    .map((c) => ({ id: c.id, m: /^pnpm e2e --combo (\S+)$/.exec(c.cmd ?? "") }))
-    .filter((c) => c.m)
-    .map((c) => ({ id: c.id, combo: c.m[1] }));
-  return { phases: Object.keys(GATES).filter((p) => sealed(sealDir, p)), checks };
+  const e2e = (phase, re) =>
+    (GATES[phase]?.checks ?? [])
+      .map((c) => ({ id: c.id, m: re.exec(c.cmd ?? "") }))
+      .filter((c) => c.m)
+      .map((c) => ({ id: c.id, combo: c.m[1] }));
+  const checks = e2e("S6", /^pnpm e2e --combo (\S+)$/);
+  const keys = e2e("K5", /^pnpm e2e --combo (\S+) --scenario keys$/);
+  return { phases: Object.keys(GATES).filter((p) => sealed(sealDir, p)), checks, keys };
 }
 
 const GATE_RE = /scripts\/gate\.mjs/;
@@ -171,10 +177,21 @@ function check(doc, name, expect, gates) {
     if (!commands.some((c) => c.job === job && /^pnpm e2e --combo "?\$\{\{\s*matrix\.combo\s*\}\}"?$/.test(c.line))) {
       add("matrix-shape", `${job}: \`pnpm e2e --combo \${{ matrix.combo }}\` 명령 줄이 없다`);
     }
+    // 2단계 완료 기준 E2E (K5): 키 시나리오도 같은 조합 전부를 매트릭스가 돈다
+    if (gates.keys.length) {
+      const wantKeys = gates.keys.map((c) => c.combo);
+      const missingKeys = combos.filter((c) => !wantKeys.includes(c));
+      const extraKeys = wantKeys.filter((c) => !combos.includes(c));
+      if (missingKeys.length) add("combo-set", `${job}: 게이트 K5 키 시나리오에 없는 조합: ${missingKeys.join(", ")}`);
+      if (extraKeys.length) add("combo-set", `${job}: 게이트 K5 키 시나리오 조합이 매트릭스에 없다: ${extraKeys.join(", ")}`);
+      if (!commands.some((c) => c.job === job && /^pnpm e2e --combo "?\$\{\{\s*matrix\.combo\s*\}\}"? --scenario keys$/.test(c.line))) {
+        add("combo-set", `${job}: \`pnpm e2e --combo \${{ matrix.combo }} --scenario keys\` 명령 줄이 없다 — 게이트 K5 키 시나리오(${gates.keys.map((c) => c.id).join(", ")})가 CI 에서 돌지 않는다`);
+      }
+    }
   }
 
   // stage
-  const e2eIds = new Set(gates.checks.map((c) => c.id));
+  const e2eIds = new Set([...gates.checks, ...gates.keys].map((c) => c.id));
   for (const phase of gates.phases.filter((p) => p !== "S1")) {
     const re = new RegExp(`^node scripts/gate\\.mjs ${phase}(?![0-9])(.*)$`);
     const hits = commands.map((c) => ({ ...c, m: re.exec(c.line) })).filter((c) => c.m);

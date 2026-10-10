@@ -2,7 +2,7 @@
 # 검사 정의는 gates/gates.config.mjs 하나뿐이라 CI 와 로컬 게이트가 어긋나지 않는다.
 # - 테스트 DB·mailpit·계약 환경 OmniRoute·배포 묶음은 각 검사의 실행기가 docker compose 로 직접 띄운다 (잡에는 docker 만 있으면 된다).
 # - 잡마다 러너가 따로라 포트가 겹치지 않는다. 무거운 묶음(배포·E2E)은 잡을 나눠 동시에 돈다.
-# - 게이트에서 빼는 검사는 E2E 여섯(G-S6.9~14)뿐이다. 그 여섯은 e2e 매트릭스 잡이 조합마다 같은 명령으로 돈다.
+# - 게이트에서 빼는 검사는 E2E 여섯(G-S6.9~14)과 키 시나리오 여섯(G-K5.3~8)뿐이다. 그 열둘은 e2e 매트릭스 잡이 조합마다 같은 명령으로 돈다.
 # - S1 은 확인용 코드(spikes/)를 S7.T2 에서 지웠으므로 봉인 커밋을 꺼내 그 커밋의 코드로 돈다 (s1-seal 잡).
 # scripts/check-ci-matrix.mjs (G-S7.1) 가 이 파일의 매트릭스·단계 잡·액션 SHA 고정을 검사한다.
 # 액션은 커밋 SHA 로 고정한다 (주석은 그 SHA 의 태그).
@@ -155,7 +155,7 @@ jobs:
   e2e:
     name: E2E ${{ matrix.combo }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -170,6 +170,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: 설치 → 관리자 → 부트스트랩 → 로그인
         run: pnpm e2e --combo ${{ matrix.combo }}
+      # 2단계 완료 기준 E2E (K5.T3, G-K5.3~8). 끄기·여러 키 회원 한도·삭제·재발급. p2-k5 잡은 이 여섯을 --skip-ids 로 뺀다
+      - name: 키 시나리오 (회원 한도·끄기·삭제·재발급)
+        run: pnpm e2e --combo ${{ matrix.combo }} --scenario keys
 
   guard:
     name: 재발 방지 (S7 게이트)
