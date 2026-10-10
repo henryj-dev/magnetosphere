@@ -1,0 +1,34 @@
+[
+  {
+    "type": "deletion"
+  },
+  {
+    "type": "pull_request",
+    "parameters": {
+      "required_approving_review_count": 0,
+      "allowed_merge_methods": [
+        "merge"
+      ]
+    }
+  },
+  {
+    "type": "required_status_checks",
+    "parameters": {
+      "strict_required_status_checks_policy": true,
+      "required_status_checks": [
+        {
+          "context": "단위 (S0 게이트·패키지 테스트·타입)"
+        },
+        {
+          "context": "E2E docker-sqlite"
+        },
+        {
+          "context": "E2E workers-d1"
+        },
+        {
+          "context": "gate"
+        }
+      ]
+    }
+  }
+]
