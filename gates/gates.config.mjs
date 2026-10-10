@@ -659,22 +659,26 @@ export const GATES = {
     needs: ["K6"],
     waivable: false,
     strictTests: true,
-    outputs: ["docs/verify/V29.json", "docs/verify/V30.json", "docs/verify/V31.json", "docs/verify/V32.json", "packages/auth/test/verify-p3/**"],
+    outputs: ["docs/verify/V29.json", "docs/verify/V30.json", "docs/verify/V31.json", "docs/verify/V32.json", "packages/auth/test/verify-p3/**", "apps/server/test/verify-p3/**"],
     checks: [
       // M0.T1 확인 결과 검사기 phase3 묶음
       { id: "G-M0.1", how: "test", desc: "TC-M0.T1.a~c check-verify --set phase3 음성 대조", cmd: nodeTest("scripts/check-verify.test.mjs", "TC-M0.T1"), expectPassed: 3 },
       { id: "G-M0.2", how: "cmd", desc: "확인 파일 넷 존재·모양", cmd: "node scripts/check-verify.mjs present --set phase3" },
       { id: "G-M0.3", how: "cmd", desc: "설계를 막는 결과 없음", cmd: "node scripts/check-verify.mjs unblocked --set phase3" },
       { id: "G-M0.4", how: "cmd", desc: "막았던 결과는 현재 계획서 버전을 가리킴", cmd: "node scripts/check-verify.mjs resolved --set phase3" },
-      // M0.T2~T5 확인 항목 (better-auth 1.7.7, 네 DB). 통과 수는 TC 수 × DB 4 (실행기 확인 전 값, 실행판 「코드 미확인」)
-      { id: "G-M0.5", how: "test", requires: ["local-services"], desc: "TC-M0.T2.a·b V29 가입 거부 훅", cmd: 'pnpm -C packages/auth test -t "TC-M0.T2"', expectPassed: 8 },
-      { id: "G-M0.6", how: "test", requires: ["local-services"], desc: "TC-M0.T3.a·b V30 세션 삭제 즉시성", cmd: 'pnpm -C packages/auth test -t "TC-M0.T3"', expectPassed: 8 },
-      { id: "G-M0.7", how: "test", requires: ["local-services"], desc: "TC-M0.T4.a·b V31 로그인 거부 훅", cmd: 'pnpm -C packages/auth test -t "TC-M0.T4"', expectPassed: 8 },
+      // M0.T2~T5 확인 항목 (better-auth 1.7.7). Node DB 넷은 packages/auth, D1 은 apps/server test:workers (wrangler dev 시험 Worker).
+      // 통과 수는 TC 수 × DB 수 (실행기 확인 전 값, 실행판 「코드 미확인」)
+      { id: "G-M0.5", how: "test", requires: ["local-services"], desc: "TC-M0.T2.a~d V29 가입 거부 자리·훅 데이터·ALS (Node DB 넷)", cmd: 'pnpm -C packages/auth test -t "TC-M0.T2"', expectPassed: 16 },
+      { id: "G-M0.15", how: "test", requires: ["local-services"], desc: "TC-M0.T2.a~d V29 (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M0.T2"', expectPassed: 4 },
+      { id: "G-M0.6", how: "test", requires: ["local-services"], desc: "TC-M0.T3.a·b V30 세션 삭제 즉시성·비밀번호 변경·재설정 (Node DB 넷)", cmd: 'pnpm -C packages/auth test -t "TC-M0.T3"', expectPassed: 8 },
+      { id: "G-M0.16", how: "test", requires: ["local-services"], desc: "TC-M0.T3.a·b V30 (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M0.T3"', expectPassed: 2 },
+      { id: "G-M0.7", how: "test", requires: ["local-services"], desc: "TC-M0.T4.a·b V31 로그인 거부 훅·after 훅 (Node DB 넷)", cmd: 'pnpm -C packages/auth test -t "TC-M0.T4"', expectPassed: 8 },
+      { id: "G-M0.17", how: "test", requires: ["local-services"], desc: "TC-M0.T4.a·b V31 (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M0.T4"', expectPassed: 2 },
       { id: "G-M0.8", how: "test", requires: ["local-services"], desc: "TC-M0.T5.a V32 기본으로 열린 회원 변경 경로", cmd: 'pnpm -C packages/auth test -t "TC-M0.T5"', expectPassed: 4 },
-      // M0.T6 계획서 개정 (질문 Q1~Q18)
-      { id: "G-M0.9", how: "grep", desc: "TC-M0.T6.a 계획서 v5.8 변경 이력이 질문 Q1~Q18 을 닫음", pattern: "^- v5\\.8: .*Q1\\b.*Q18\\b", in: ["docs/design/omniroute-member-layer.md"], op: "==", limit: 1 },
+      // M0.T6 계획서 개정 (질문 Q1~Q20)
+      { id: "G-M0.9", how: "grep", desc: "TC-M0.T6.a 계획서 v5.8 변경 이력이 질문 Q1~Q20 을 닫음", pattern: "^- v5\\.8: .*Q1\\b.*Q20\\b", in: ["docs/design/omniroute-member-layer.md"], op: "==", limit: 1 },
       { id: "G-M0.10", how: "grep", desc: "계획서 상태 줄이 v5.8 이상", pattern: "^상태: 초안 v5\\.([8-9]|[1-9][0-9])", in: ["docs/design/omniroute-member-layer.md"], op: "==", limit: 1 },
-      { id: "G-M0.11", how: "grep", desc: "실행판에 미정 질문 0", pattern: "결정: 미정", in: ["docs/plan/phase3-todo.md"], op: "==", limit: 0 },
+      { id: "G-M0.11", how: "grep", desc: "실행판에 미정 질문 0 (줄 전체가 '- 결정: 미정')", pattern: "^- 결정: 미정$", in: ["docs/plan/phase3-todo.md"], op: "==", limit: 0 },
       // M0.T7 CI 단계 잡·필수 검사
       { id: "G-M0.12", how: "grep", desc: "TC-M0.T7.a CI 단계 잡 (M0)", pattern: "^\\s+run: node scripts/gate\\.mjs M0\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
       { id: "G-M0.13", how: "cmd", desc: "TC-M0.T7.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
@@ -693,18 +697,19 @@ export const GATES = {
     ],
     checks: [],
   },
+  // M2 가입 정책이 M3 초대보다 먼저다. 초대 수락이 signup/**(정책 판정·초대 문맥 ALS·응답 최소 시간)를 부르기 때문이다
   M2: {
     needs: ["M1"],
     waivable: false,
     strictTests: true,
-    outputs: ["apps/server/src/invites/**", "apps/server/test/invites/**"],
+    outputs: ["apps/server/src/signup/**", "apps/server/test/signup/**", "packages/auth/test/signup-policy/**"],
     checks: [],
   },
   M3: {
     needs: ["M2"],
     waivable: false,
     strictTests: true,
-    outputs: ["apps/server/src/signup/**", "apps/server/test/signup/**", "packages/auth/test/signup-policy/**"],
+    outputs: ["apps/server/src/invites/**", "apps/server/test/invites/**"],
     checks: [],
   },
   M4: {
