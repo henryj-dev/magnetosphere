@@ -198,7 +198,8 @@ export async function runDue(h: DbHandle, handlers: Handlers, now: Date, opts: R
     } catch {
       permanent = "payload JSON 아님";
     }
-    if (!permanent && !handlers[row.action as JobAction]) permanent = "모르는 작업";
+    // 표에 직접 있는 것만 핸들러다. "toString" 같은 프로토타입 이름이 함수로 불려 done 이 되지 않게 (K1 재검토)
+    if (!permanent && !(Object.hasOwn(handlers, row.action) && typeof handlers[row.action as JobAction] === "function")) permanent = "모르는 작업";
     if (!permanent && row.interrupts >= MAX_INTERRUPTS) permanent = `임대를 ${MAX_INTERRUPTS}번 잃음`;
     // 실패 처리만 남은 작업: 재시도 다 씀(attempts = 길이 + 1) 뒤 실패 처리를 한 번 더 못 쓴 것까지 넘었다
     const failOnly = !permanent && row.attempts + 1 > RETRY_DELAYS_MS.length + 2;
