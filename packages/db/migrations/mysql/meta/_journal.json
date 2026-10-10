@@ -15,6 +15,13 @@
       "when": 1791612333965,
       "tag": "0001_k1_jobs",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1791616161272,
+      "tag": "0002_k2_usage_daily",
+      "breakpoints": true
     }
   ]
 }

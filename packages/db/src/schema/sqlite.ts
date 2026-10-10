@@ -1,6 +1,6 @@
 // 자동 생성 파일이다. 손으로 고치지 않는다.
 // 원본: packages/db/src/schema/common.ts · 생성: pnpm -C packages/db gen
-import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 // 회원. Better Auth 칼럼 + 권한 칼럼 다섯
 export const user = sqliteTable("user", {
@@ -129,8 +129,19 @@ export const apiKeys = sqliteTable("api_keys", {
   budgetUsd: real("budget_usd"),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
   deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
+  budgetAt: integer("budget_at", { mode: "timestamp_ms" }),
 }, (table) => [
   index("idx_api_keys_user").on(table.userId),
+]);
+
+// 지난 날 키별 비용 (계획서 v5.7 5.3·5.9). 1분 분배는 오늘 창만 부르고 이것을 더한다
+export const usageDaily = sqliteTable("usage_daily", {
+  keyId: text("key_id").notNull(),
+  day: text("day").notNull(),
+  costUsd: real("cost_usd").notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.keyId, table.day] }),
 ]);
 
 // OmniRoute 에 보낼 작업 대기열 (재시도)

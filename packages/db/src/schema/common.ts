@@ -52,6 +52,8 @@ export interface Table {
   owner: "better-auth" | "app";
   doc: string;
   columns: Record<string, Column>;
+  /** 여러 칼럼 기본 키 (필드 이름). 칼럼 하나면 Column.primaryKey 를 쓴다 */
+  primaryKey?: string[];
   indexes?: { name: string; columns: string[] }[];
 }
 
@@ -173,7 +175,14 @@ export const TABLES: Record<string, Table> = {
     owner: "app",
     doc: "운영 설정. 키마다 한 행, 값은 JSON",
     columns: {
-      key: { name: "key", kind: "string", length: 64, exact: true, primaryKey: true, doc: "signup_mode, allowed_domains, default_limit_usd, default_max_keys, signup_requires_approval, daily_signup_cap, public_base_url, ..." },
+      key: {
+        name: "key",
+        kind: "string",
+        length: 64,
+        exact: true,
+        primaryKey: true,
+        doc: "signup_mode, allowed_domains, default_limit_usd, default_max_keys, signup_requires_approval, daily_signup_cap, public_base_url, budget_rebalance_month, usage_daily_confirmed, ...",
+      },
       value: { name: "value", kind: "json", notNull: true },
       updatedAt: { name: "updated_at", kind: "timestamp", notNull: true },
       updatedBy: { name: "updated_by", kind: "id", doc: "바꾼 회원 id. 시드는 NULL" },
@@ -226,8 +235,21 @@ export const TABLES: Record<string, Table> = {
       budgetUsd: { name: "budget_usd", kind: "usd", doc: "마지막으로 OmniRoute 에 건 월 예산" },
       createdAt: { name: "created_at", kind: "timestamp", notNull: true },
       deletedAt: { name: "deleted_at", kind: "timestamp" },
+      budgetAt: { name: "budget_at", kind: "timestamp", doc: "budget_usd·limit 끄기를 계산한 분석 시각. 이보다 이른 분석으로 계산한 쓰기는 0행이다 (K2.T4)" },
     },
     indexes: [{ name: "idx_api_keys_user", columns: ["userId"] }],
+  },
+  usageDaily: {
+    name: "usage_daily",
+    owner: "app",
+    doc: "지난 날 키별 비용 (계획서 v5.7 5.3·5.9). 1분 분배는 오늘 창만 부르고 이것을 더한다",
+    columns: {
+      keyId: { name: "key_id", kind: "string", length: 255, exact: true, notNull: true, doc: "OmniRoute 키 id (api_keys.omniroute_key_id, 삭제한 키 포함)" },
+      day: { name: "day", kind: "string", length: 10, notNull: true, doc: "UTC 날짜 YYYY-MM-DD" },
+      costUsd: { name: "cost_usd", kind: "usd", notNull: true },
+      updatedAt: { name: "updated_at", kind: "timestamp", notNull: true, doc: "날 확정·대조 때 갱신" },
+    },
+    primaryKey: ["keyId", "day"],
   },
   omnirouteJobs: {
     name: "omniroute_jobs",

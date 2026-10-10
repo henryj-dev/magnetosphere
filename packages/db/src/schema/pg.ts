@@ -1,6 +1,6 @@
 // 자동 생성 파일이다. 손으로 고치지 않는다.
 // 원본: packages/db/src/schema/common.ts · 생성: pnpm -C packages/db gen
-import { bigint, boolean, index, integer, numeric, pgTable, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import { bigint, boolean, index, integer, numeric, pgTable, primaryKey, text, timestamp, varchar } from "drizzle-orm/pg-core";
 
 // 회원. Better Auth 칼럼 + 권한 칼럼 다섯
 export const user = pgTable("user", {
@@ -129,8 +129,19 @@ export const apiKeys = pgTable("api_keys", {
   budgetUsd: numeric("budget_usd", { precision: 12, scale: 6, mode: "number" }),
   createdAt: timestamp("created_at").notNull(),
   deletedAt: timestamp("deleted_at"),
+  budgetAt: timestamp("budget_at"),
 }, (table) => [
   index("idx_api_keys_user").on(table.userId),
+]);
+
+// 지난 날 키별 비용 (계획서 v5.7 5.3·5.9). 1분 분배는 오늘 창만 부르고 이것을 더한다
+export const usageDaily = pgTable("usage_daily", {
+  keyId: varchar("key_id", { length: 255 }).notNull(),
+  day: varchar("day", { length: 10 }).notNull(),
+  costUsd: numeric("cost_usd", { precision: 12, scale: 6, mode: "number" }).notNull(),
+  updatedAt: timestamp("updated_at").notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.keyId, table.day] }),
 ]);
 
 // OmniRoute 에 보낼 작업 대기열 (재시도)

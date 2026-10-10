@@ -156,11 +156,21 @@ function render(dialect) {
       }
       lines.push(`  ${field}: ${code},`);
     }
-    let tail = "";
+    // 표 단위 제약: 여러 칼럼 기본 키(primaryKey)와 인덱스
+    const extras = [];
+    if (t.primaryKey?.length) {
+      for (const f of t.primaryKey) {
+        if (!t.columns[f]) throw new Error(`${key}.primaryKey: 칼럼 ${f} 가 없다`);
+        if (t.columns[f].primaryKey) throw new Error(`${key}.${f}: 표 단위 primaryKey 와 칼럼 primaryKey 를 같이 쓰지 않는다`);
+      }
+      imports.add("primaryKey");
+      extras.push(`  primaryKey({ columns: [${t.primaryKey.map((c) => `table.${c}`).join(", ")}] }),`);
+    }
     if (t.indexes?.length) {
       imports.add("index");
-      tail = `, (table) => [\n${t.indexes.map((i) => `  index(${lit(i.name)}).on(${i.columns.map((c) => `table.${c}`).join(", ")}),`).join("\n")}\n]`;
+      extras.push(...t.indexes.map((i) => `  index(${lit(i.name)}).on(${i.columns.map((c) => `table.${c}`).join(", ")}),`));
     }
+    const tail = extras.length ? `, (table) => [\n${extras.join("\n")}\n]` : "";
     blocks.push(`// ${t.doc}\nexport const ${key} = ${d.table}(${lit(t.name)}, {\n${lines.join("\n")}\n}${tail});`);
   }
   const head = [

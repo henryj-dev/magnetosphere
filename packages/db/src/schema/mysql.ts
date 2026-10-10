@@ -1,6 +1,6 @@
 // 자동 생성 파일이다. 손으로 고치지 않는다.
 // 원본: packages/db/src/schema/common.ts · 생성: pnpm -C packages/db gen
-import { bigint, boolean, customType, datetime, decimal, index, int, mysqlTable, text, varchar } from "drizzle-orm/mysql-core";
+import { bigint, boolean, customType, datetime, decimal, index, int, mysqlTable, primaryKey, text, varchar } from "drizzle-orm/mysql-core";
 
 // 대소문자까지 정확히 같아야 하는 칼럼 (common.ts 의 exact). MySQL·MariaDB 기본 정렬은 대소문자를 무시한다.
 const varcharBin = customType<{ data: string; config: { length: number } }>({
@@ -135,8 +135,19 @@ export const apiKeys = mysqlTable("api_keys", {
   budgetUsd: decimal("budget_usd", { precision: 12, scale: 6, mode: "number" }),
   createdAt: datetime("created_at", { fsp: 3 }).notNull(),
   deletedAt: datetime("deleted_at", { fsp: 3 }),
+  budgetAt: datetime("budget_at", { fsp: 3 }),
 }, (table) => [
   index("idx_api_keys_user").on(table.userId),
+]);
+
+// 지난 날 키별 비용 (계획서 v5.7 5.3·5.9). 1분 분배는 오늘 창만 부르고 이것을 더한다
+export const usageDaily = mysqlTable("usage_daily", {
+  keyId: varcharBin("key_id", { length: 255 }).notNull(),
+  day: varchar("day", { length: 10 }).notNull(),
+  costUsd: decimal("cost_usd", { precision: 12, scale: 6, mode: "number" }).notNull(),
+  updatedAt: datetime("updated_at", { fsp: 3 }).notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.keyId, table.day] }),
 ]);
 
 // OmniRoute 에 보낼 작업 대기열 (재시도)
