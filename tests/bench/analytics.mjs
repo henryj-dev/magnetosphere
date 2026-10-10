@@ -174,7 +174,8 @@ async function main() {
     host: `${os.platform()} ${os.arch()}`,
   };
   console.log(JSON.stringify(result, null, 2));
-  // CI 에서는 잡 요약에도 남긴다 (게이트는 통과한 검사의 출력을 보여 주지 않는다)
+  // CI 에서는 잡 요약과 RUNNER_TEMP 파일에도 남긴다 (게이트는 통과한 검사의 출력을 보여 주지 않는다. ci.yml 의 다음 스텝이 파일을 출력한다)
+  if (process.env.RUNNER_TEMP) fs.writeFileSync(path.join(process.env.RUNNER_TEMP, "bench-analytics.json"), `${JSON.stringify(result)}\n`);
   if (process.env.GITHUB_STEP_SUMMARY) {
     fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### 분석 API 측정 (확인 15번)\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\`\n`);
   }

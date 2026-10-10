@@ -209,6 +209,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/gate.mjs K0 --explain
+      - name: 분석 API 측정값 (확인 15번, G-K0.18 이 남긴 파일)
+        run: cat "$RUNNER_TEMP/bench-analytics.json"
 
   s1-seal:
     name: 확인 항목 (S1 게이트, 봉인 커밋에서)
