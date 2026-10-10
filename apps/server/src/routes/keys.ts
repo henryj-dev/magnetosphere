@@ -10,8 +10,9 @@
 // 공통
 //   - 회원 세션 필요 (401). 역할·상태는 DB 에서 읽는다. 탈퇴(deleted) 회원은 모두 403.
 //   - 키는 id 와 세션 회원 id 로 함께 찾는다. 남의 키·삭제한 키·없는 키는 모두 404 이고 OmniRoute 를 부르지 않는다.
+//   - 키 변경(켜기·끄기·이름·재발급·삭제)은 회원당 분당 30회 (429).
 //   - 발급 중인 자리 행(issue.ts)은 목록에 state issuing 으로 보이고(개수에 든다), 바꾸는 요청은 모두 409 issuing 이다.
-//   - 변경 요청은 같은 출처만 (guard.ts sameOrigin, app.ts 에서 건다). 발급·재발급은 요청 수 제한 (Q4, 429).
+//   - 변경 요청은 같은 출처만 (guard.ts sameOrigin, app.ts 에서 건다). 발급·재발급은 요청 수 제한 (Q4, 429, IPv6 는 /64).
 //   - OmniRoute 연결(주소·관리 토큰)이 없으면 OmniRoute 를 부르는 요청은 503 omniroute_unavailable.
 import { and, asc, eq, ne } from "drizzle-orm";
 import { Hono, type Context } from "hono";
@@ -19,7 +20,7 @@ import { applyKey, KeyConflictError, requestEnable } from "../keys/apply.ts";
 import { readTarget } from "../keys/target.ts";
 import type { ClientFor } from "../limits/daily.ts";
 import type { Services } from "../app.ts";
-import { consumeIssue, sessionMember, type Member } from "./guard.ts";
+import { consumeChange, consumeIssue, sessionMember, type Member } from "./guard.ts";
 import { IssueError, issueKey, maxKeysOf, PENDING_PREFIX, type KeysClient } from "./issue.ts";
 
 /** 원문이 든 응답은 브라우저·프록시가 저장하지 않게 한다 (K4 보안 리뷰 L1) */
@@ -64,8 +65,12 @@ async function jsonBody(c: Context): Promise<Record<string, unknown> | null> {
   return b && typeof b === "object" && !Array.isArray(b) ? (b as Record<string, unknown>) : null;
 }
 
-/** 바꿀 수 있는 내 키 행. 없으면 404, 발급 중이면 409 issuing 응답 (K4 보안 리뷰 M1) */
+/**
+ * 바꿀 수 있는 내 키 행. 회원당 분당 변경 횟수를 넘으면 429 (K4 보안 리뷰 L3), 없으면 404, 발급 중이면 409 issuing 응답 (M1).
+ * 횟수는 키를 찾기 전에 센다 (남의 키 id 를 찔러 보는 요청도 센다)
+ */
 async function changeable(c: Context, s: Services, m: Member, id: string): Promise<any | Response> {
+  if (!(await consumeChange(s.db, m.id))) return c.json({ error: "too_many_requests" }, 429);
   const row = await myKey(s, m, id);
   if (!row) return c.json({ error: "not_found" }, 404);
   if (issuing(row)) return c.json({ error: "issuing" }, 409);
