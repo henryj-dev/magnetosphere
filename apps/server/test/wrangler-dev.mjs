@@ -35,15 +35,18 @@ export function d1Query(persistTo, sql) {
 }
 
 /**
- * @param {{ env: "d1" | "mysql" | "pg", persistTo: string, vars: Record<string,string>, hyperdrive?: string }} opts
+ * config 를 주면 wrangler.toml 대신 그 설정 파일로 띄운다 (env 는 그 파일의 환경, 없으면 빼도 된다).
+ * testScheduled 면 /__scheduled?cron=… 으로 Cron 호출을 흉내 낼 수 있다 (wrangler dev --test-scheduled).
+ * @param {{ env?: "d1" | "mysql" | "pg", persistTo: string, vars: Record<string,string>, hyperdrive?: string, config?: string, testScheduled?: boolean }} opts
  */
-export async function startWranglerDev({ env, persistTo, vars, hyperdrive }) {
+export async function startWranglerDev({ env, persistTo, vars, hyperdrive, config, testScheduled }) {
   const port = await freePort();
   const inspector = await freePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const allVars = { BETTER_AUTH_URL: baseUrl, ...vars };
-  const args = ["exec", "wrangler", "dev", "--env", env, "--ip", "127.0.0.1", "--port", String(port), "--inspector-port", String(inspector), "--persist-to", persistTo, "--show-interactive-dev-session=false", "--log-level", "log"];
+  const args = ["exec", "wrangler", "dev", ...(config ? ["--config", config] : []), ...(env ? ["--env", env] : []), "--ip", "127.0.0.1", "--port", String(port), "--inspector-port", String(inspector), "--persist-to", persistTo, "--show-interactive-dev-session=false", "--log-level", "log"];
   for (const [k, v] of Object.entries(allVars)) args.push("--var", `${k}:${v}`);
+  if (testScheduled) args.push("--test-scheduled");
   const childEnv = { ...process.env, ...WRANGLER_ENV };
   if (hyperdrive) childEnv.CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE = hyperdrive;
   const child = spawn("pnpm", args, { cwd: SERVER_DIR, env: childEnv, detached: true, stdio: ["ignore", "pipe", "pipe"] });

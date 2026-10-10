@@ -1,0 +1,11 @@
+{
+  // TC-K1.T4.c 전용 시험 Worker. 배포하지 않는다. 시험용 작업 둘을 src/cron.ts 의 runCron 으로 돈다 (scheduled-worker.ts).
+  // 작업은 임대 아래에서 돌므로 D1 이 있어야 한다. 마이그레이션은 시험이 wrangler d1 migrations apply --local 로 적용한다.
+  "name": "mg-server-cron-test",
+  "main": "./scheduled-worker.ts",
+  "compatibility_date": "2026-07-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "mg-server-cron-test", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "../../../../packages/db/migrations/sqlite" }
+  ]
+}

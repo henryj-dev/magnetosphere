@@ -10,5 +10,12 @@ export interface WranglerDev {
   waitOutput(re: RegExp, n?: number, timeoutMs?: number): Promise<string>;
   close(): Promise<void>;
 }
-export declare function startWranglerDev(opts: { env: "d1" | "mysql" | "pg"; persistTo: string; vars: Record<string, string>; hyperdrive?: string }): Promise<WranglerDev>;
+export declare function startWranglerDev(opts: {
+  env?: "d1" | "mysql" | "pg";
+  persistTo: string;
+  vars: Record<string, string>;
+  hyperdrive?: string;
+  config?: string;
+  testScheduled?: boolean;
+}): Promise<WranglerDev>;
 export declare function lastSetupToken(output: string): string | null;
