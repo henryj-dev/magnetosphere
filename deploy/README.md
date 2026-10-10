@@ -72,3 +72,10 @@ OmniRoute 는 어느 조합이든 상시 서버 한 대(위 Compose)에서 돈�
    - mysql·pg: `MIGRATE_DATABASE_URL`(Hyperdrive 가 가리키는 DB 의 직접 주소)로 `apps/server/src/migrate.ts` → `wrangler deploy`
    - `--dry-run` 은 실행할 단계만 순서대로 출력한다.
 4. 최초 설치가 끝나면 `OMNIROUTE_INITIAL_PASSWORD` 시크릿을 넣었다면 지운다 (`wrangler secret delete`). 남아 있으면 첫 요청 때 경고가 나온다.
+
+## 회원 한도의 한계
+
+회원 월 한도는 결제 상한이 아니다. 회원 앱이 1분마다 회원의 남은 한도를 키별 예산으로 나눠 걸고, 실제 차단은 OmniRoute 가 한다 (계획서 5.3).
+
+- 짧은 시간에 몰아 쓰면 한도를 넘을 수 있다. OmniRoute 지출은 60초마다 기록되고 분배도 1분 주기라, 최악의 경우 대략 "남은 한도 × 동시에 쓰는 키 수"까지 넘는다. 회원당 최대 키 개수(기본 2)가 이 폭을 제한한다.
+- 비용은 OmniRoute 가격표로 계산한 추정치다. 제공자가 실제로 청구하는 금액과 다를 수 있다.

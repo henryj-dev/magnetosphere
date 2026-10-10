@@ -618,6 +618,9 @@ export const GATES = {
       { id: "G-K6.1", how: "grep", desc: "TC-K6.T1.a 운영 코드에 시험 갈림길 0", pattern: "process\\.env\\.(TEST_|E2E_|FAKE_|MG_TEST)|globalThis\\.__test", in: ["apps/server/src", "packages/auth/src", "packages/db/src", "packages/omniroute/src", "packages/runtime/src"], op: "==", limit: 0 },
       // G-S7.3 과 같은 패턴·제외. 1단계 경로에 2단계가 더한 test/ 를 함께 본다
       { id: "G-K6.2", how: "grep", desc: "TC-K6.T1.b 꺼진 테스트·미구현 표식 0 (2단계 경로 포함)", pattern: "\\.(only|skip|skipIf|todo)\\(|\\.(skip|only)\\.|runIf\\(|\\b(skip|todo)\\s*:\\s*true|\\b(xit|xdescribe|xtest)\\(|TODO|FIXME|not implemented", in: ["apps", "packages", "tests", "scripts", "test"], exclude: ["apps/web/build/**", "**/.svelte-kit/**", "**/.wrangler/**", "**/dist/**", "scripts/gate.test.mjs"], op: "==", limit: 0 },
+      // K6.T2 운영 문서에 계획서 5.3 한계 두 줄
+      { id: "G-K6.3", how: "grep", desc: "TC-K6.T2.a 운영 문서에 몰아 쓰기 초과 폭", pattern: "남은 한도 × 동시에 쓰는 키 수", in: ["deploy/README.md"], op: "==", limit: 1 },
+      { id: "G-K6.14", how: "grep", desc: "TC-K6.T2.a 운영 문서에 비용은 추정치", pattern: "추정", in: ["deploy/README.md"], op: ">=", limit: 1 },
     ],
   },
 };
