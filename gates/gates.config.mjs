@@ -502,6 +502,22 @@ export const GATES = {
       // 재현 빨강
       { id: "G-K3.22", how: "cmd", desc: "재현 빨강: TC-K3.T2.f 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K3.20 --since seal:K2" },
       { id: "G-K3.23", how: "cmd", desc: "재현 빨강: TC-K3.T3.f 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K3.16 --since seal:K2" },
+      // K3 리뷰 고침 (#1~#9)
+      { id: "G-K3.24", how: "test", requires: ["local-services"], desc: "TC-K3.T2.g 정지·해제 반영이 admin 이유를 건드리지 않는다 (네 DB, 리뷰 #9)", cmd: 'pnpm -C apps/server test:db -t "TC-K3.T2.g" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-K3.25", how: "test", desc: "TC-K3.T2.h 분배의 limit 켜기 실패는 active·pending·큐 1분 뒤 (리뷰 #9)", cmd: 'pnpm -C apps/server test -t "TC-K3.T2.h"', expectPassed: 1 },
+      { id: "G-K3.26", how: "test", desc: "TC-K3.T2.i 사라진 키(404)가 다른 키 켜기를 막지 않는다·alert.key_missing (리뷰 #6)", cmd: 'pnpm -C apps/server test -t "TC-K3.T2.i"', expectPassed: 1 },
+      { id: "G-K3.27", how: "test", desc: "TC-K3.T3.i manage 범위 키는 이유와 상관없이 admin 고정 (리뷰 #1, V10)", cmd: 'pnpm -C apps/server test -t "TC-K3.T3.i"', expectPassed: 1 },
+      { id: "G-K3.28", how: "test", desc: "TC-K3.T3.j 점검 시간 예산·이어 가기·끊겨도 알림 (리뷰 #2)", cmd: 'pnpm -C apps/server test -t "TC-K3.T3.j"', expectPassed: 1 },
+      { id: "G-K3.29", how: "test", requires: ["local-services"], desc: "TC-K3.T3.k listKeys 는 limit 없이 모든 키 (계약, V28, 리뷰 #3)", cmd: 'pnpm test:contract -t "TC-K3.T3.k"', expectPassed: 1 },
+      { id: "G-K3.30", how: "test", desc: "TC-K3.T3.l 키 목록이 total 보다 적으면 형식 오류 (V28, 리뷰 #3)", cmd: 'pnpm -C packages/omniroute test -t "TC-K3.T3.l"', expectPassed: 1 },
+      { id: "G-K3.31", how: "test", desc: "TC-K3.T3.m 옛 목록 값으로 synced 를 적지 않는다 (리뷰 #4)", cmd: 'pnpm -C apps/server test -t "TC-K3.T3.m"', expectPassed: 1 },
+      { id: "G-K3.32", how: "test", desc: "TC-K3.T3.n 이유 없는 꺼진 키는 alert.key_stuck 하루 한 번 (리뷰 #8)", cmd: 'pnpm -C apps/server test -t "TC-K3.T3.n"', expectPassed: 1 },
+      { id: "G-K3.33", how: "cmd", desc: "재현 빨강: TC-K3.T2.i 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K3.26 --since seal:K2" },
+      { id: "G-K3.34", how: "cmd", desc: "재현 빨강: TC-K3.T3.i 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K3.27 --since seal:K2" },
+      { id: "G-K3.35", how: "cmd", desc: "재현 빨강: TC-K3.T3.j 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K3.28 --since seal:K2" },
+      { id: "G-K3.36", how: "cmd", desc: "재현 빨강: TC-K3.T3.l 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K3.30 --since seal:K2" },
+      { id: "G-K3.37", how: "cmd", desc: "재현 빨강: TC-K3.T3.m 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K3.31 --since seal:K2" },
+      { id: "G-K3.38", how: "cmd", desc: "재현 빨강: TC-K3.T3.n 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-K3.32 --since seal:K2" },
       // K3.T4 CI 단계 잡과 ruleset 필수 검사
       { id: "G-K3.14", how: "grep", desc: "TC-K3.T4.a CI 단계 잡 (K3)", pattern: "^\\s+run: node scripts/gate\\.mjs K3\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
       { id: "G-K3.15", how: "cmd", desc: "TC-K3.T4.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
