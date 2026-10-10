@@ -201,3 +201,137 @@ describe("TC-K2.T6.p 무제한(NULL)으로 바뀐 회원의 옛 예산은 clearB
     expect(await keyRow(h, "ork-B")).toMatchObject({ state: "active", reason: null });
   });
 });
+
+// ---- K2 재검토 H1·M-a·M-b·M-c·L-a ----
+
+const setKey = (ork: string, set: Record<string, unknown>) => h.db.update(h.schema.apiKeys).set(set).where(eq(h.schema.apiKeys.omnirouteKeyId, ork));
+
+describe("TC-K2.T6.t 늦게 도착한 clearBudget·setBudget 이 더 새 계산을 덮어도 다음 분배가 다시 건다 (재검토 H1)", () => {
+  it("한도 NULL 분배(t1)의 clearBudget 도중 한도 10·즉시 분배(t2) setBudget → 늦은 clear 뒤 budget_usd·budget_month NULL, 다음 분배 setBudget(10). 반대 순서(늦은 setBudget 이 새 clear 를 덮음)도 다음 분배가 clearBudget", async () => {
+    const { rebalanceMember } = await import("../../src/limits/member.ts");
+    await confirmedToday();
+    await writeSetting(h, REBALANCE_MONTH_KEY, "2026-04", NOW);
+    const t1 = NOW;
+    const t2 = new Date(NOW.getTime() + 5_000);
+    const t3 = new Date(NOW.getTime() + 60_000);
+    const { userId } = await addMember(h, null, [{ ork: "ork-A", budgetUsd: 5 }]);
+    await setKey("ork-A", { budgetMonth: "2026-04", budgetAt: new Date(NOW.getTime() - 60_000) });
+    const later = fakeOmni(() => ({}));
+    const slow = fakeOmni(() => ({}), {
+      onChange: async (c) => {
+        if (c.fn !== "clearBudget") return;
+        await h.db.update(h.schema.user).set({ monthlyLimitUsd: 10 }).where(eq(h.schema.user.id, userId));
+        await rebalanceMember(h, userId, { now: t2, client: later.client });
+      },
+    });
+    await rebalanceAll({ db: h, now: t1, client: slow.client });
+    expect(later.of("setBudget").map((c) => c.value)).toEqual([10]);
+    expect(await keyRow(h, "ork-A")).toMatchObject({ budgetUsd: null, budgetMonth: null });
+    const next = fakeOmni(() => ({}));
+    await rebalanceAll({ db: h, now: t3, client: next.client });
+    expect(next.of("setBudget").map((c) => [c.id, c.value])).toEqual([["ork-A", 10]]);
+
+    // 반대: 한도 10 분배(t4)의 setBudget 도중 한도 NULL·즉시 분배(t5) clearBudget → 늦은 setBudget 뒤 다음 분배가 clearBudget
+    const t4 = new Date(NOW.getTime() + 120_000);
+    const t5 = new Date(NOW.getTime() + 125_000);
+    await setKey("ork-A", { budgetUsd: 9, budgetMonth: "2026-04" });
+    const later2 = fakeOmni(() => ({}));
+    const slow2 = fakeOmni(() => ({}), {
+      onChange: async (c) => {
+        if (c.fn !== "setBudget") return;
+        await h.db.update(h.schema.user).set({ monthlyLimitUsd: null }).where(eq(h.schema.user.id, userId));
+        await rebalanceMember(h, userId, { now: t5, client: later2.client });
+      },
+    });
+    await rebalanceAll({ db: h, now: t4, client: slow2.client });
+    expect(later2.of("clearBudget").length).toBe(1);
+    const next2 = fakeOmni(() => ({}));
+    await rebalanceAll({ db: h, now: new Date(NOW.getTime() + 180_000), client: next2.client });
+    expect(next2.of("clearBudget").map((c) => c.id)).toEqual(["ork-A"]);
+  });
+});
+
+describe("TC-K2.T6.u 예산 값을 모르는(NULL) 키도 무제한 전환 때 푼다 (재검토 M-a)", () => {
+  it("한도 NULL, 키 budget_usd NULL·budget_month NULL·budget_at 있음(setBudget 실패 뒤) → clearBudget 1건, 다음 실행은 0건. 한 번도 예산을 건 적 없는 키(budget_at NULL)는 0건", async () => {
+    await confirmedToday();
+    await addMember(h, null, [{ ork: "ork-A" }, { ork: "ork-N" }]);
+    await setKey("ork-A", { budgetAt: new Date("2026-04-10T11:00:00Z") });
+    const o = fakeOmni(() => ({}));
+    await rebalanceAll({ db: h, now: NOW, client: o.client });
+    expect(o.of("clearBudget").map((c) => c.id)).toEqual(["ork-A"]);
+    const again = fakeOmni(() => ({}));
+    await rebalanceAll({ db: h, now: new Date(NOW.getTime() + 60_000), client: again.client });
+    expect(again.of("clearBudget")).toEqual([]);
+  });
+});
+
+describe("TC-K2.T6.q 매번 실패하는 회원이 앞에 있어도 두 tick 안에 뒤 회원이 새 달 예산을 받는다 (재검토 M-b)", () => {
+  it("새 달, 첫 회원 키 3개가 setBudget 마다 15초 뒤 시간 초과, 뒤 회원 10 → 둘째 tick 이 뒤 회원 10명 모두 setBudget", async () => {
+    await writeSetting(h, CONFIRMED_KEY, "2026-04-01", new Date("2026-04-01T00:00:30Z"));
+    await writeSetting(h, REBALANCE_MONTH_KEY, "2026-03", new Date("2026-03-31T23:59:00Z"));
+    await addMember(h, 10, [{ ork: "ork-f1", budgetUsd: 10 }, { ork: "ork-f2", budgetUsd: 10 }, { ork: "ork-f3", budgetUsd: 10 }]);
+    const rest: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      rest.push(`ork-r${i}`);
+      await addMember(h, 10, [{ ork: `ork-r${i}`, budgetUsd: 10 }]);
+    }
+    const tick = async (now: Date) => {
+      let t = 0;
+      const o = fakeOmni(() => ({}), {
+        onChange: (c) => {
+          if (String(c.id).startsWith("ork-f")) {
+            t += 15_000;
+            throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+          }
+          t += 1_000;
+        },
+      });
+      await rebalanceAll({ db: h, now, client: o.client, clock: () => t, budgetMs: 36_666 });
+      return o;
+    };
+    await tick(new Date("2026-04-01T00:01:00Z"));
+    const second = await tick(new Date("2026-04-01T00:02:00Z"));
+    expect(second.of("setBudget").map((c) => c.id).filter((id) => String(id).startsWith("ork-r")).sort()).toEqual(rest.sort());
+  });
+});
+
+describe("TC-K2.T6.r 계산이 깨진 회원은 키를 limit 으로 끄고, 같은 오류 알림은 하루 한 번 (재검토 M-c)", () => {
+  it("음수 저장값 회원 → 첫 실행 setKeyActive(false)·limit, 같은 날 두 번 돌아도 alert.rebalance_failed 1행. 값이 고쳐지면 [setBudget, setKeyActive(true)]", async () => {
+    await confirmedToday();
+    await addMember(h, 5, [{ ork: "ork-x" }]);
+    await addMember(h, 5, [{ ork: "ork-y" }]);
+    await h.db.insert(h.schema.usageDaily).values({ keyId: "ork-x", day: "2026-04-03", costUsd: -1, updatedAt: new Date() });
+    const first = fakeOmni(() => ({}));
+    await rebalanceAll({ db: h, now: NOW, client: first.client });
+    expect(first.calls.filter((c) => c.id === "ork-x").map((c) => [c.fn, c.value])).toEqual([["setKeyActive", false]]);
+    expect(await keyRow(h, "ork-x")).toMatchObject({ state: "disabled", reason: "limit" });
+    await rebalanceAll({ db: h, now: new Date(NOW.getTime() + 60_000), client: fakeOmni(() => ({})).client });
+    const alerts = await h.db.select().from(h.schema.auditLog).where(eq(h.schema.auditLog.action, "alert.rebalance_failed"));
+    expect(alerts).toHaveLength(1);
+    await h.db.delete(h.schema.usageDaily).where(eq(h.schema.usageDaily.keyId, "ork-x"));
+    const fixed = fakeOmni(() => ({}));
+    await rebalanceAll({ db: h, now: new Date(NOW.getTime() + 120_000), client: fixed.client });
+    expect(fixed.calls.filter((c) => c.id === "ork-x").map((c) => c.fn)).toEqual(["setBudget", "setKeyActive"]);
+    expect(await keyRow(h, "ork-x")).toMatchObject({ state: "active", reason: null });
+  });
+});
+
+describe("TC-K2.T6.s 분배가 연속 10번 실패하면 alert.rebalance_stalled 를 하루 한 번 (재검토 L-a)", () => {
+  it("오늘 창 분석이 OmniRouteError → 9번째까지 0행, 10번째 1행, 12번째도 1행. 성공하면 연속 수가 0", async () => {
+    const { OmniRouteError } = await import("@magnetosphere/omniroute");
+    await confirmedToday();
+    await addMember(h, 5, [{ ork: "ork-A" }]);
+    let down = true;
+    const o = fakeOmni(() => (down ? new OmniRouteError("GET", "analytics", 503, null, "down") : {}));
+    const stalled = async () => (await h.db.select().from(h.schema.auditLog).where(eq(h.schema.auditLog.action, "alert.rebalance_stalled"))).length;
+    for (let i = 1; i <= 12; i++) {
+      await expect(rebalanceAll({ db: h, now: new Date(NOW.getTime() + i * 60_000), client: o.client })).rejects.toThrow(OmniRouteError);
+      if (i === 9) expect(await stalled()).toBe(0);
+      if (i === 10) expect(await stalled()).toBe(1);
+    }
+    expect(await stalled()).toBe(1);
+    down = false;
+    await rebalanceAll({ db: h, now: new Date(NOW.getTime() + 13 * 60_000), client: o.client });
+    expect(await readSetting<{ count: number }>(h, "budget_rebalance_stalled")).toMatchObject({ count: 0 });
+  });
+});

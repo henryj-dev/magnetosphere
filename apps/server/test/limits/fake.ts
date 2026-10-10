@@ -38,7 +38,13 @@ export async function addMember(h: DbHandle, limitUsd: number | null, keys: KeyS
 export async function keyRow(h: DbHandle, ork: string) {
   const k = h.schema.apiKeys;
   const [r] = await h.db.select().from(k).where(eq(k.omnirouteKeyId, ork));
-  return { state: r.state as string, reason: r.disabledReason as string | null, budgetUsd: r.budgetUsd == null ? null : Number(r.budgetUsd), budgetAt: r.budgetAt as Date | null };
+  return {
+    state: r.state as string,
+    reason: r.disabledReason as string | null,
+    budgetUsd: r.budgetUsd == null ? null : Number(r.budgetUsd),
+    budgetAt: r.budgetAt as Date | null,
+    budgetMonth: (r.budgetMonth ?? null) as string | null,
+  };
 }
 
 export interface OmniCall {
@@ -54,7 +60,7 @@ export interface OmniCall {
 /** onChange: setBudget·setKeyActive·clearBudget 를 기록하기 전에 부른다. 던지면 그 호출이 실패한다 (임대 상실·OmniRoute 오류 흉내) */
 export function fakeOmni(
   analytics: (q: { apiKeyIds?: string[]; start: string; end: string; timeoutMs?: number }) => { [id: string]: number | undefined } | Error,
-  hooks: { onChange?: (call: OmniCall) => void } = {},
+  hooks: { onChange?: (call: OmniCall) => void | Promise<void> } = {},
 ) {
   const calls: OmniCall[] = [];
   const client = (opts?: { timeoutMs?: number }): LimitsClient => ({
@@ -72,17 +78,17 @@ export function fakeOmni(
     },
     async setBudget(id, b) {
       const call: OmniCall = { fn: "setBudget", id, value: b.monthlyUsd };
-      hooks.onChange?.(call);
+      await hooks.onChange?.(call);
       calls.push(call);
     },
     async clearBudget(id) {
       const call: OmniCall = { fn: "clearBudget", id };
-      hooks.onChange?.(call);
+      await hooks.onChange?.(call);
       calls.push(call);
     },
     async setKeyActive(id, active) {
       const call: OmniCall = { fn: "setKeyActive", id, value: active };
-      hooks.onChange?.(call);
+      await hooks.onChange?.(call);
       calls.push(call);
     },
   });

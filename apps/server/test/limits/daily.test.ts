@@ -245,3 +245,16 @@ describe("TC-K2.T7.i 대조 응답에 없는 키의 저장값은 지우지 않�
     expect(await drifts()).toEqual([]);
   });
 });
+
+describe("TC-K2.T7.j 지난달 분할 대조 상태는 새 달 첫 실행이 지운다 (재검토 L-b)", () => {
+  it('split { next 03-25, until 03-31 }, now 04-01T00:01 → split 지움, 3월 하루 창 호출 0건 (같은 날 두 번째 실행도)', async () => {
+    await member([{ ork: "ork-A" }]);
+    await writeSetting(h, CONFIRMED_KEY, "2026-03-31", new Date("2026-03-31T00:01:00Z"));
+    await writeSetting(h, SPLIT_KEY, { next: "2026-03-25", until: "2026-03-31" }, new Date("2026-03-31T00:01:00Z"));
+    const { client, calls } = fakeClient(() => ({}));
+    await confirmDays(h, new Date("2026-04-01T00:01:00Z"), client);
+    expect(await readSetting(h, SPLIT_KEY)).toBeUndefined();
+    await confirmDays(h, new Date("2026-04-01T00:02:00Z"), client);
+    expect(calls.map((c) => c.start)).toEqual(["2026-03-31T00:00:00.000Z"]);
+  });
+});
