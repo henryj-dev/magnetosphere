@@ -1,0 +1,26 @@
+{
+  "item": "V18",
+  "question": "삭제한 키의 기록이 apiKeyIds 필터 분석에 계속 잡히는가 (5.3 한도 초기화 방지의 전제)",
+  "answer": {
+    "deletedKeyCounted": true,
+    "byApiKeyIncludesDeleted": true,
+    "totalCost": 0.014633,
+    "rawKeyAfterDelete": 200,
+    "graceRequestsAttributed": false,
+    "keyCacheTtlMs": 60000,
+    "rawKeyAfterOffWaitDelete": 401,
+    "budgetDeletedWithKey": true,
+    "designImpact": "DELETE 직후 최대 60초 동안 옛 원문 키가 통과하고, 그 요청은 키 id 없이 기록돼 회원 사용액에도 예산에도 잡히지 않는다. 키를 먼저 끄고(즉시 403, V11) 60초가 지난 뒤 지우면 바로 401 이다. 계획서 v5.6 5.2 삭제 순서를 이것으로 바꾼다"
+  },
+  "evidence": [
+    "소스(chunks/27730.js deleteApiKey): DELETE FROM api_keys · domain_budgets · domain_cost_history WHERE api_key_id. usage_history·call_logs·request_cost_ledger 는 그대로",
+    "소스(app/api/usage/analytics): 필터는 (api_key_name IN … OR api_key_id IN …) — 삭제한 id 도 잡힌다",
+    "계약 환경 실측 (2026-10-10): 요청 3건 → DELETE → apiKeyIds=[삭제한 id] totalCost 0.014633·totalRequests 3, 필터 없는 byApiKey 에 그 id 있음",
+    "실측: DELETE 직후 옛 원문 키 요청 3건 모두 200, 분석 전체 합계에는 들었지만 apiKeyId null 이라 그 키 id 분석은 1건 그대로. 65초 뒤 401 AUTH_002",
+    "실측: 끄기(PATCH isActive=false) → 403 → 65초 뒤 401 → DELETE → 바로 401 (2초 뒤도 401)",
+    "packages/omniroute/test/contract/verify/v18.contract.ts (TC-K0.T8.a)"
+  ],
+  "blocking": true,
+  "was_blocking": true,
+  "resolved_in": null
+}
