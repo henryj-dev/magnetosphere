@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 // 분석 API 성능 측정 (2단계 실행판 K0.T7, 확인 15번 — 계획서 5.3 분배가 1분마다 분석을 부른다).
 //
-//   node tests/bench/analytics.mjs [--assert] [--keep]
+//   node tests/bench/analytics.mjs [--assert] [--keep] [--rebalance]
+//
+// --rebalance (2단계 실행판 K2.T6, TC-K2.T6.h): 6 의 세 호출 대신 1분 분배(apps/server/src/limits/rebalance.ts) 한 번을 잰다.
+//   회원 150명·각 키 2개(키 300개 전부 매핑, 둘째 키는 삭제한 키)를 SQLite 파일 DB 에 넣고 실제 어댑터로 이 OmniRoute 에 붙는다.
+//   - 날이 바뀐 첫 분배: 날 확정(어제 창)·대조(이번 달 1일 ~ 어제)·오늘 창·키마다 setBudget. 기준 ≤ 55,000ms (1분 작업 임대)
+//   - 보통 분배: 같은 날 두 번째 실행. 모든 회원 한도를 올려 키마다 setBudget 이 다시 나가게 한다. 기준 ≤ 30,000ms
 //
 // 1. 측정용 OmniRoute(tests/bench/docker-compose.yml, 127.0.0.1:20171)를 빈 상태로 다시 띄운다 (down → up)
 // 2. 계약 환경과 같은 준비(tests/contract/setup.mjs: 제공자 노드 둘·연결·가격)를 한다
@@ -37,7 +42,8 @@ const RUNS = 10;
 const DAYS = 30;
 const PER_DAY = RECORDS / DAYS;
 const DAY_MS = 86_400_000;
-const LIMIT = { todayP95Ms: 2_000, memberP95Ms: 1_000, reconcileP95Ms: 55_000 };
+const LIMIT = { todayP95Ms: 2_000, memberP95Ms: 1_000, reconcileP95Ms: 55_000, rebalanceFirstMs: 55_000, rebalanceMs: 30_000 };
+const MEMBERS = KEYS / 2;
 
 const args = new Set(process.argv.slice(2));
 
@@ -155,6 +161,7 @@ async function main() {
 
   const iso = (t) => new Date(t).toISOString();
   const all = await http("GET", `/api/usage/analytics?startDate=${iso(from)}&endDate=${iso(Date.now())}`, { token: tok.token });
+  if (args.has("--rebalance")) return rebalanceBench(all, keys, tok.token, total);
   const todayWindow = await measure("today", () => `/api/usage/analytics?startDate=${iso(today)}&endDate=${iso(Date.now())}`);
   const member = await measure("member", () => `/api/usage/analytics?apiKeyIds=${member1.id},${member2.id}&startDate=${iso(from)}&endDate=${iso(Date.now())}`);
   const reconcile = await measure("reconcile", () => `/api/usage/analytics?startDate=${iso(from)}&endDate=${iso(today - 1)}`);
@@ -201,6 +208,71 @@ async function main() {
       for (const p of problems) console.error(`bench: ${p}`);
       process.exitCode = 1;
     } else console.log("bench: 기준 통과");
+  }
+}
+
+/** 1분 분배 한 번의 소요 (TC-K2.T6.h). keys[1] 은 main 이 지운 키다 (회원 0 의 삭제한 키) */
+async function rebalanceBench(all, keys, token, inserted) {
+  const { migrateDatabase } = await import("../../apps/server/src/migrate.ts");
+  const { connectNode } = await import("../../packages/runtime/src/node.ts");
+  const { createClient } = await import("../../packages/omniroute/src/index.ts");
+  const { rebalanceAll } = await import("../../apps/server/src/limits/rebalance.ts");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mg-bench-rebalance-"));
+  const url = `file:${path.join(dir, "app.sqlite")}`;
+  await migrateDatabase(url);
+  const h = await connectNode(url);
+  try {
+    const s = h.schema;
+    for (let m = 0; m < MEMBERS; m++) {
+      const userId = crypto.randomUUID();
+      await h.db.insert(s.user).values({ id: userId, name: `bench-${m}`, email: `bench-${m}@example.com`, monthlyLimitUsd: 1000 });
+      for (const i of [2 * m, 2 * m + 1]) {
+        const deleted = i === 1;
+        await h.db.insert(s.apiKeys).values({ id: crypto.randomUUID(), userId, omnirouteKeyId: keys[i].id, keyPreview: keys[i].key.slice(-4), state: deleted ? "deleted" : "active", createdAt: new Date(), deletedAt: deleted ? new Date() : null });
+      }
+    }
+    const client = (o) => createClient({ baseUrl: BENCH_URL, credential: { token }, timeoutMs: o?.timeoutMs ?? 15_000 });
+    let t0 = performance.now();
+    const first = await rebalanceAll({ db: h, now: new Date(), client });
+    const firstMs = Math.round(performance.now() - t0);
+    await h.db.update(s.user).set({ monthlyLimitUsd: 1001 });
+    t0 = performance.now();
+    const normal = await rebalanceAll({ db: h, now: new Date(), client });
+    const normalMs = Math.round(performance.now() - t0);
+    const usageDailyRows = (await h.db.select({ k: s.usageDaily.keyId }).from(s.usageDaily)).length;
+    const result = {
+      dataset: { records: all.summary.totalRequests, keys: all.byApiKey.length, inserted, members: MEMBERS },
+      rebalance: {
+        firstMs,
+        normalMs,
+        first: { members: first.members, setBudget: first.setBudget, failed: first.failed, confirmed: first.confirm.confirmed, reconciled: first.confirm.reconciled, timedOut: first.confirm.timedOut },
+        normal: { members: normal.members, setBudget: normal.setBudget, failed: normal.failed, confirmed: normal.confirm.confirmed },
+        usageDailyRows,
+      },
+      host: `${os.platform()} ${os.arch()}`,
+    };
+    console.log(JSON.stringify(result, null, 2));
+    if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### 1분 분배 측정 (TC-K2.T6.h)\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\`\n`);
+    console.error(`bench: 분배 ${JSON.stringify({ firstMs, normalMs, firstSetBudget: first.setBudget, normalSetBudget: normal.setBudget })}`);
+    if (args.has("--assert")) {
+      const problems = [];
+      const active = KEYS - 1;
+      if (all.summary.totalRequests !== RECORDS) problems.push(`30일 창 totalRequests ${all.summary.totalRequests} (기대 ${RECORDS})`);
+      if (first.members !== MEMBERS || normal.members !== MEMBERS) problems.push(`분배 회원 ${first.members}·${normal.members} (기대 ${MEMBERS})`);
+      if (first.setBudget !== active || normal.setBudget !== active) problems.push(`setBudget ${first.setBudget}·${normal.setBudget} (기대 ${active}, 켜진 키마다)`);
+      if (first.failed || normal.failed) problems.push(`OmniRoute 호출 실패 ${first.failed}·${normal.failed}`);
+      if (!first.confirm.confirmed) problems.push("첫 분배가 어제를 확정하지 않았다");
+      if (normal.confirm.confirmed) problems.push("같은 날 두 번째 분배가 날 확정을 다시 했다");
+      if (firstMs > LIMIT.rebalanceFirstMs) problems.push(`날이 바뀐 첫 분배 ${firstMs}ms (기준 ≤ ${LIMIT.rebalanceFirstMs}, 임대)`);
+      if (normalMs > LIMIT.rebalanceMs) problems.push(`보통 분배 ${normalMs}ms (기준 ≤ ${LIMIT.rebalanceMs})`);
+      if (problems.length) {
+        for (const p of problems) console.error(`bench: ${p}`);
+        process.exitCode = 1;
+      } else console.log("bench: 분배 기준 통과");
+    }
+  } finally {
+    await h.close();
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 }
 

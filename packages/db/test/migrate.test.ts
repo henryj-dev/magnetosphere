@@ -32,8 +32,8 @@ describe.each(cases)("$label", (d) => {
     await h?.close();
   });
 
-  test("TC-S2.T3.a 빈 상태 → 최신 마이그레이션 성공, 테이블 13개, 시드", async () => {
-    expect(EXPECTED_TABLES).toHaveLength(13);
+  test("TC-S2.T3.a 빈 상태 → 최신 마이그레이션 성공, 테이블 14개(K2 usage_daily 포함), 시드", async () => {
+    expect(EXPECTED_TABLES).toHaveLength(14);
     expect(await h.tables()).toEqual(EXPECTED_TABLES);
 
     // 두 인스턴스가 동시에 시드해도 실패하지 않고 기본값이 한 번만 들어간다.

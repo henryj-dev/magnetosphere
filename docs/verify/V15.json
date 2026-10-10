@@ -88,7 +88,8 @@
     "CI x64 세 번 (2026-10-10): run 38014182652 p95 6,396ms 실패, run 38015589318 통과(≤ 5,000ms), run 38015602005 전체 5,599~6,104ms (p95 6,104) 실패 · 회원 313~403ms. 잡 '장치·확인 (K0 게이트, OmniRoute 3.8.51)'",
     "로컬 arm64 (Docker 4 CPU·4GB, 호스트 부하 평균 8~18): 전체 p95 5458·3675·6732·13823·6422·9813·5558ms, 회원 p95 261·230·570·577·341·337·137ms. 중앙값은 전체 약 2.8~6초",
     "같은 데이터에서 오늘(UTC) 창만 부르면(2,537건) p95 765ms, 이번 달 창은 3,000~7,700ms (로컬)",
-    "필터 apiKeyIds 에 키 300개를 다 넣으면 오히려 느리다 (5.6~9.6초, 로컬) — IN (…) OR api_key_name IN (…)"
+    "필터 apiKeyIds 에 키 300개를 다 넣으면 오히려 느리다 (5.6~9.6초, 로컬) — IN (…) OR api_key_name IN (…)",
+    "소스(3.8.51 app/api/usage/analytics route.js, K2 리뷰): byApiKey = Array.from(키별 Map.values()).map(...).sort(cost 내림차순) — 개수 제한(slice·LIMIT) 없음. 같은 파일의 LIMIT 50 은 byAccount 집계에만 걸린다. 그래서 1분 분배의 필터 없는 오늘 창은 키 수와 무관하게 모든 키를 돌려준다"
   ],
   "blocking": false,
   "was_blocking": true,
