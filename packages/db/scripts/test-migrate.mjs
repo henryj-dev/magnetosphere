@@ -8,6 +8,7 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { composeUp } from "../../../scripts/compose-up.mjs";
 
 const PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const COMPOSE = path.resolve(PKG, "../../docker-compose.test.yml");
@@ -34,7 +35,7 @@ if (services.length) {
     process.exit(1);
   }
   console.log(`[test:migrate] docker compose up --wait ${services.join(" ")}`);
-  const up = spawnSync("docker", ["compose", "-f", COMPOSE, "up", "-d", "--wait", ...services], { stdio: "inherit" });
+  const up = composeUp(COMPOSE, services);
   if (up.status !== 0) {
     console.error(`test:migrate: 테스트 DB 컨테이너를 띄우지 못했다 (docker compose 종료코드 ${up.status}).`);
     process.exit(1);
