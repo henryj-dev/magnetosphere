@@ -4,7 +4,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startSignupWorker } from "../signup/d1-rig.ts";
 import { mail, PASSWORD } from "../../../../packages/auth/test/signup-policy/rig.ts";
-import { ACCEPT, acceptBody, INVALID, makeInvite, prepareAccept, tcM3T2a } from "./accept-checks.ts";
+import { signJWT } from "better-auth/crypto";
+import { TEST_SECRET } from "../helpers.ts";
+import { ACCEPT, acceptBody, INVALID, makeInvite, prepareAccept, tcM3T2a, tcM3T2g } from "./accept-checks.ts";
 
 let w: Awaited<ReturnType<typeof startSignupWorker>>;
 beforeAll(async () => {
@@ -51,4 +53,7 @@ describe("초대 수락 — Workers + D1", () => {
     expect(await w.rig.op("userCount")).toBe(before + 1);
     expect(await w.rig.op("audits", "invite.accept")).toBe(accepts + 1);
   });
+
+  it("TC-M3.T2.g Workers + D1: 이메일 없는 초대를 남의 이메일로 수락해도 가로채지 못한다 — 메일 링크·core /verify-email 401·모르는 비밀번호 401·공격자 로그인 403·피해자 재설정으로 회복 (보안 리뷰 H-1)", () =>
+    tcM3T2g(w.rig, (email) => signJWT({ email }, TEST_SECRET, 3600)));
 });

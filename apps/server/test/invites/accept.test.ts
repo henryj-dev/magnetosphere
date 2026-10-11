@@ -3,10 +3,11 @@
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mail, PASSWORD } from "../../../../packages/auth/test/signup-policy/rig.ts";
-import { makeTestEnv, type TestEnv } from "../helpers.ts";
+import { makeTestEnv, TEST_SECRET, type TestEnv } from "../helpers.ts";
 import { fakeOmni } from "../routes/env.ts";
 import { serverRig, type ServerRig } from "../signup/env.ts";
-import { ACCEPT, acceptBody, INVALID, makeInvite, prepareAccept, unknownToken } from "./accept-checks.ts";
+import { signJWT } from "better-auth/crypto";
+import { ACCEPT, acceptBody, INVALID, makeInvite, prepareAccept, tcM3T2g, unknownToken } from "./accept-checks.ts";
 
 let t: TestEnv;
 let rig: ServerRig;
@@ -208,5 +209,11 @@ describe("TC-M3.T2 초대 수락", () => {
     // 토큰 해시는 기록되지 않는다 (요청 수 제한 칸 이름에도)
     const keys = (await rig.h.db.select({ key: rig.h.schema.rateLimit.key }).from(rig.h.schema.rateLimit)).map((r: { key: string }) => r.key);
     expect(keys.filter((k: string) => k.startsWith("invite-accept|"))).toEqual(["invite-accept|203.0.113.77", "invite-accept|203.0.113.78"]);
+  });
+
+  it("TC-M3.T2.g 이메일 없는 초대를 남의 이메일로 수락해도 가로채지 못한다: 메일 링크·core /verify-email 로 인증 안 됨(401), 모르는 비밀번호 확인 401, 공격자 로그인 403, 피해자 재설정 → 인증·공격자 비밀번호 무효·피해자 로그인, 이메일 지정 초대는 그대로 바로 로그인·키 201 (보안 리뷰 H-1)", async () => {
+    const om = fakeOmni();
+    rig.services.keysClient = async () => () => om.client();
+    await tcM3T2g(rig, (email) => signJWT({ email }, TEST_SECRET, 3600), { keys: true });
   });
 });
