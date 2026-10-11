@@ -19,7 +19,7 @@ async function post(d: WranglerDev, p: string, body: unknown) {
 }
 
 describe("TC-SEC.2.a Workers + D1 비밀번호 재설정", () => {
-  it("로그인 → 재설정 요청 → /reset-password 200, 토큰은 한 번만, 새 비밀번호로만 로그인", async () => {
+  it("로그인 → 재설정 요청 → /reset-password 200, 동시에 와도 토큰은 한 번만, 새 비밀번호로만 로그인", async () => {
     const persistTo = mkdtempSync(path.join(tmpdir(), "mg-auth-d1-"));
     cleanups.push(() => rmSync(persistTo, { recursive: true, force: true }));
     const mig = wrangler(["d1", "migrations", "apply", "DB", "--local", "--config", CONFIG, "--persist-to", persistTo]);
@@ -43,10 +43,12 @@ describe("TC-SEC.2.a Workers + D1 비밀번호 재설정", () => {
     expect(link, "재설정 메일").toBeDefined();
     const token = new URL(link!).pathname.split("/").at(-1);
 
-    const reset = await post(d, "/reset-password", { newPassword, token });
+    // 같은 토큰을 동시에 두 번: 200 은 정확히 하나, 다른 하나는 400 INVALID_TOKEN
+    const both = await Promise.all([post(d, "/reset-password", { newPassword, token }), post(d, "/reset-password", { newPassword, token })]);
     // 실패하면 Worker 의 오류 줄(응답보다 늦게 올 수 있다)을 메시지에 붙인다
-    const log = reset.status === 200 ? "" : (await d.waitOutput(/POST \/api\/auth\/reset-password/)).split("\n").filter((l) => /Failed query|D1_ERROR/.test(l)).join("\n").slice(0, 2000);
-    expect(reset.status, `${JSON.stringify(reset.json)}\n${log}`).toBe(200);
+    const log = both.some((r) => r.status === 500) ? (await d.waitOutput(/POST \/api\/auth\/reset-password/, 2)).split("\n").filter((l) => /Failed query|D1_ERROR/.test(l)).join("\n").slice(0, 2000) : "";
+    expect(both.map((r) => r.status).sort(), `${JSON.stringify(both)}\n${log}`).toEqual([200, 400]);
+    expect(both.find((r) => r.status === 400)?.json?.code).toBe("INVALID_TOKEN");
     // 토큰은 소비됐다: 행이 없고, 같은 토큰을 다시 쓰면 400 INVALID_TOKEN
     expect(((await (await fetch(`${d.baseUrl}/__test/verifications`)).json()) as { reset: number }).reset).toBe(0);
     const again = await post(d, "/reset-password", { newPassword: "third-horse-battery-3", token });
