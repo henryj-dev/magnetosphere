@@ -88,3 +88,34 @@ test("TC-K0.T4.e --set 없이 부르면 1단계 일곱 항목을 본다", () => 
   assert.match(plain.stdout, /7개 항목 통과/);
   assert.notEqual(check(dir, "present", ...set2).status, 0, "1단계 파일만 있는 폴더는 phase2 로 실패해야 한다");
 });
+
+// ---------- 3단계 실행판 M0.T1: --set phase3 ----------
+
+const PHASE3 = ["V29", "V30", "V31", "V32"];
+const phase3 = (overrides = {}) => fixture(overrides, { items: PHASE3, version: "v5.8" });
+const set3 = ["--set", "phase3"];
+
+test("TC-M0.T1.a phase3 정상 파일 넷은 세 모드 모두 통과한다", () => {
+  const dir = phase3();
+  for (const mode of ["present", "unblocked", "resolved"]) {
+    const r = check(dir, mode, ...set3);
+    assert.equal(r.status, 0, `${mode}: ${r.stderr}`);
+    assert.match(r.stdout, /4개 항목 통과/, "묶음이 빈 목록이면 0개 항목으로 늘 초록이다");
+  }
+});
+
+test("TC-M0.T1.b phase3 에서 하나가 빠지거나 막으면 실패한다", () => {
+  assert.notEqual(check(phase3({ V31: null }), "present", ...set3).status, 0, "V31 없음");
+  assert.notEqual(check(phase3({ V29: { blocking: true, was_blocking: true } }), "unblocked", ...set3).status, 0, "V29 blocking");
+  assert.notEqual(check(phase3({ V30: { was_blocking: true, resolved_in: "v5.7" } }), "resolved", ...set3).status, 0, "옛 버전");
+});
+
+test("TC-M0.T1.c phase1·phase2 묶음은 그대로다", () => {
+  const one = check(fixture(), "present");
+  assert.equal(one.status, 0, one.stderr);
+  assert.match(one.stdout, /present \(phase1\): 7개 항목 통과/);
+  const two = check(phase2(), "present", ...set2);
+  assert.equal(two.status, 0, two.stderr);
+  assert.match(two.stdout, /present \(phase2\): 7개 항목 통과/);
+  assert.notEqual(check(phase2(), "present", ...set3).status, 0, "2단계 파일만 있는 폴더는 phase3 로 실패해야 한다");
+});
