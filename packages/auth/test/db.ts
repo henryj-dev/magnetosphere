@@ -31,6 +31,7 @@ async function openSqlite(): Promise<TestDb> {
   return {
     label: "SQLite(libsql)",
     db,
+    kind: "sqlite",
     provider: "sqlite",
     schema: sqliteSchema,
     async close() {
@@ -55,6 +56,7 @@ async function openMysql(port: number, label: string): Promise<TestDb> {
   return {
     label,
     db,
+    kind: "mysql",
     provider: "mysql",
     schema: mysqlSchema,
     async close() {
@@ -81,6 +83,7 @@ async function openPg(): Promise<TestDb> {
   return {
     label: "Postgres 14",
     db,
+    kind: "pg",
     provider: "pg",
     schema: pgSchema,
     async close() {

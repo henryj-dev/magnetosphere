@@ -37,6 +37,8 @@ export interface AuthDatabase {
   db: any;
   provider: "sqlite" | "mysql" | "pg";
   schema: Record<string, unknown>;
+  /** 런타임 DbHandle 의 kind. "d1" 이면 Drizzle 어댑터의 트랜잭션을 끈다 (D1 은 BEGIN 을 받지 않는다, TC-SEC.2.a) */
+  kind: "sqlite" | "mysql" | "pg" | "d1";
 }
 
 export interface AuthConfig {
@@ -131,8 +133,11 @@ export function authOptions(cfg: AuthConfig) {
     baseURL: cfg.baseURL,
     secret: cfg.secret,
     trustedOrigins: cfg.trustedOrigins,
-    // 네 DB 모두 트랜잭션을 켠다. 끄면 resolveUser 를 쓰는 SSO 로그인이 거부된다 (V26).
-    database: drizzleAdapter(cfg.database.db, { provider: cfg.database.provider, schema: cfg.database.schema, transaction: true }),
+    // Node 네 DB·Hyperdrive 는 트랜잭션을 켠다. 끄면 resolveUser 를 쓰는 SSO 로그인이 거부된다 (V26).
+    // D1 만 끈다. 켜면 drizzle 이 begin 을 보내 D1 이 거부하고, runWithTransaction 을 쓰는 경로(/reset-password·가입 등)가 늘 500 이다 (TC-SEC.2.a).
+    // 꺼도 재설정 토큰 소비는 한 번뿐이다: sqlite 어댑터의 consumeOne 이 DELETE … RETURNING 한 문장이라 행을 지운 요청 하나만 토큰을 얻는다.
+    // 대신 D1 에서 SSO 사용자 확인은 SSO_USER_RESOLUTION_REQUIRES_NATIVE_TRANSACTIONS 로 거부되고, 여러 문장 쓰기(가입의 user·account)는 원자적이지 않다.
+    database: drizzleAdapter(cfg.database.db, { provider: cfg.database.provider, schema: cfg.database.schema, transaction: cfg.database.kind !== "d1" }),
     emailAndPassword: {
       ...AUTH_SCHEMA_OPTIONS.emailAndPassword,
       // 인증 전에는 로그인되지 않는다 (계획서 4.2 "인증 후 키 발급"의 전제)

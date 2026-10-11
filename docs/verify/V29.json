@@ -79,7 +79,8 @@
         "/reset-password (internalAdapter.consumeVerificationValue 가 runWithTransaction, internal-adapter.mjs:815) — M0 리뷰가 찾음, 500",
         "/delete-user/callback (같은 consumeVerificationValue, update-user.mjs:375) — 지금은 deleteUser 가 꺼져 404",
         "OAuth·SSO JIT: internalAdapter.createOAuthUser (internal-adapter.mjs:121 runWithTransaction), oauth2/link-account.mjs, @better-auth/sso runWithTransaction 4곳 (dist/index.mjs:2373·2470·3018·3960) — D1 은 SSO 가 잠겨 있다(3.2)"
-      ]
+      ],
+      "fixedBy": "PR #15 (fix/d1-transaction): createAuth 가 DbHandle.kind === \"d1\" 이면 transaction: false. 위 currentConfig 는 그 전 측정값 그대로다. #15 뒤 운영 구성 D1 가입은 200·user +1·account +1·메일 1통 (TC-M0.T2.b 가 단언), /reset-password 는 200 (TC-SEC.2.a)"
     },
     "sqliteConcurrentSignUp": {
       "concurrent": 10,
