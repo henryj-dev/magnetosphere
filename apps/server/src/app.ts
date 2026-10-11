@@ -7,6 +7,7 @@
 //   /api/setup     최초 설치 (setup/). /api/setup/omniroute 는 OmniRoute 토큰 상태·붙여 넣기 (관리자 세션)
 //   /api/me/keys   회원 키 API (routes/keys.ts). /api/admin/users/:id 는 관리자 한도·최대 개수 (routes/admin-limits.ts)
 //                  두 경로의 GET 아닌 요청은 Origin 이 BETTER_AUTH_URL 출처와 같아야 한다 (routes/guard.ts, 7장 CSRF)
+//   /api/admin/settings/{signup,mail} 가입 정책·메일 설정 API (signup/admin.ts·signup/mail.ts, M2.T5). 같은 CSRF 검사
 //   /api/*         그 밖은 JSON 404. 모르는 API 경로가 index.html 200 이 되면 클라이언트가 오류를 성공으로 오인한다
 //   나머지         SPA 정적 파일 (apps/web 빌드). 없는 경로는 index.html (TC-S4.T3.a)
 // 모든 응답(SPA·API)에 보안 헤더를 단다 (TC-S4.T3.f). 스크립트·스타일 출처는 SPA 빌드가 <meta> CSP 로 건다
@@ -16,6 +17,7 @@
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
+import type { Mailer } from "@magnetosphere/auth";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import type { ClientFor } from "./limits/daily.ts";
@@ -25,7 +27,9 @@ import type { KeysClient } from "./routes/issue.ts";
 import { keyRoutes } from "./routes/keys.ts";
 import type { OmniRouteConfig } from "./setup/omniroute.ts";
 import { setupRoutes } from "./setup/routes.ts";
+import { signupSettingsRoutes } from "./signup/admin.ts";
 import { publicSignupDenial } from "./signup/gate.ts";
+import { mailSettingsRoutes } from "./signup/mail.ts";
 import { withRequestMemo } from "./signup/request-memo.ts";
 
 /** /api/* 요청 본문 상한. 인증·설치 요청은 1KB 안팎이다 */
@@ -46,6 +50,8 @@ export interface Services {
   appOrigin?: string;
   /** OmniRoute 어댑터 (주소 + 설치 때 저장한 관리 토큰). 연결이 없으면 null */
   keysClient?: () => Promise<ClientFor<KeysClient> | null>;
+  /** 메일 어댑터 (인증 메일과 같은 것, 보낼 때마다 메일 설정을 읽는다). 설정 API 의 테스트 메일이 쓴다 */
+  mailer?: Mailer;
 }
 
 export interface AppDeps {
@@ -123,6 +129,8 @@ export function createApp(deps: AppDeps) {
   app.use("/api/me/*", sameOrigin(deps.services));
   app.use("/api/admin/*", sameOrigin(deps.services));
   app.route("/api/me/keys", keyRoutes(deps.services));
+  app.route("/api/admin/settings/signup", signupSettingsRoutes(deps.services));
+  app.route("/api/admin/settings/mail", mailSettingsRoutes(deps.services));
   app.route("/api/admin", adminLimitRoutes(deps.services));
   app.all("/api/*", (c) => c.json({ error: "not_found" }, 404));
   app.get("*", deps.assets);

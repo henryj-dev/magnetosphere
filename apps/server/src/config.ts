@@ -46,12 +46,13 @@ export async function buildServices(rt: Runtime, opts: ServiceOptions): Promise<
   // 키가 없거나 32바이트가 아니면 여기서 시작을 거부한다 (TC-S4.T2.c)
   const cipher = await createCipher(requireSecret(rt, "APP_ENCRYPTION_KEY"));
   const baseURL = requireSecret(rt, "BETTER_AUTH_URL");
+  const mailer = opts.mailer ?? settingsMailer(async () => db, async () => cipher, opts.fallbackMailer ?? fallbackMailer());
   const auth = createAuth({
     database: db,
     baseURL,
     secret: requireSecret(rt, "BETTER_AUTH_SECRET"),
     trustedOrigins: [new URL(baseURL).origin],
-    mailer: opts.mailer ?? settingsMailer(async () => db, async () => cipher, opts.fallbackMailer ?? fallbackMailer()),
+    mailer,
     clientIp: rt.clientIp,
     waitUntil: opts.waitUntil,
     onMailError: (e, info) => console.error(`[mail] ${info.to} 에게 "${info.subject}" 를 보내지 못했다`, e),
@@ -70,5 +71,5 @@ export async function buildServices(rt: Runtime, opts: ServiceOptions): Promise<
     if (!baseUrl || !token) return null;
     return (o?: { timeoutMs?: number }) => createClient({ baseUrl, credential: { token }, timeoutMs: o?.timeoutMs });
   };
-  return { db, auth, cipher, omniroute, setupToken, clientIp: rt.clientIp, appOrigin: new URL(baseURL).origin, keysClient };
+  return { db, auth, cipher, omniroute, setupToken, clientIp: rt.clientIp, appOrigin: new URL(baseURL).origin, keysClient, mailer };
 }
