@@ -825,6 +825,9 @@ export const GATES = {
       { id: "G-M3.23", how: "test", requires: ["local-services"], desc: "TC-M3.T1.i·g·h 실제 동시 초대 만들기는 모두 201·이메일마다 살아 있는 초대 1개·감사 = 실제 변경 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-M3.T1.[ghi]" --db sqlite,mysql,mariadb,pg', expectPassed: 12 },
       { id: "G-M3.24", how: "test", desc: "TC-M3.T1.i 실제 동시 초대 만들기 (SQLite)", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.i"', expectPassed: 1 },
       { id: "G-M3.25", how: "cmd", desc: "재현 빨강: TC-M3.T1.i 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M3.23 --since seal:M2" },
+      // M3.T2 보안 리뷰 고침 (H-1)
+      { id: "G-M3.26", how: "test", desc: "TC-M3.T2.g 이메일 없는 초대를 남의 이메일로 수락해도 가로채지 못한다 (리뷰 H-1)", cmd: 'pnpm -C apps/server test -t "TC-M3.T2.g"', expectPassed: 1 },
+      { id: "G-M3.27", how: "cmd", desc: "재현 빨강: TC-M3.T2.g 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M3.26 --since seal:M2" },
     ],
   },
   M4: {
