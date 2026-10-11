@@ -27,11 +27,15 @@ async function bodyEmail(req: Request): Promise<unknown> {
   }
 }
 
-/** 하루 상한 알림을 그날 처음 한 번만 (rate_limit 칸 하나를 넣은 요청만 쓴다 — 여러 인스턴스가 동시에 닿아도 1행) */
+/**
+ * 하루 상한 알림을 그날 처음 한 번만 (rate_limit 칸 하나를 넣은 요청만 쓴다 — 여러 인스턴스가 동시에 닿아도 1행).
+ * 그날 칸이 이미 있으면 읽기만 한다. 상한 뒤의 공개 거부는 인증 없이 얼마든지 오므로 거부마다 쓰지 않는다 (TC-M2.T3.d, 리뷰 M2).
+ */
 async function alertSignupCapOnce(h: DbHandle, cap: number | null, now: Date): Promise<void> {
   const t = h.schema.rateLimit;
   const day = now.toISOString().slice(0, 10);
   const key = `signup-cap-alert|${day}`;
+  if ((await h.db.select({ id: t.id }).from(t).where(eq(t.key, key)).limit(1)).length) return;
   await h.db.delete(t).where(and(sql`${t.key} like 'signup-cap-alert|%'`, sql`${t.key} <> ${key}`));
   const row = { id: crypto.randomUUID(), key, count: 1, lastRequest: now.getTime() };
   const first = h.provider === "mysql" ? (await h.db.insert(t).ignore().values(row))[0].affectedRows === 1 : (await h.db.insert(t).values(row).onConflictDoNothing().returning()).length === 1;
