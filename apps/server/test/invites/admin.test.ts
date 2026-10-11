@@ -1,5 +1,5 @@
 // 관리자 초대 API (3단계 실행판 M3.T1) — 앱 전체, SQLite 파일 DB (pnpm test). 세션은 가짜 인증(routes/env.ts)이고
-// 역할·상태는 DB 에서 읽는다. 단언은 실행판 TC-M3.T1.a~f 그대로다.
+// 역할·상태는 DB 에서 읽는다. 단언은 실행판 TC-M3.T1.a~f 그대로다. g·h·i 는 checks.ts 를 네 DB 판(admin.db.test.ts)과 함께 쓴다.
 //   DELETE 는 살아 있는(미사용·미취소) 초대만 취소한다. 없는 id·이미 취소한 초대·이미 사용한 초대는 404 not_found 이고
 //   아무것도 바뀌지 않으며 감사 기록도 남지 않는다.
 import { createHash } from "node:crypto";
@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { addUser, call, openRoutes, type RouteEnv } from "../routes/env.ts";
+import { NODE_AND_D1, tcM3T1g, tcM3T1h, tcM3T1i } from "./checks.ts";
 
 const BASE = "https://llm.example.com";
 const DAY = 86_400_000;
@@ -38,52 +39,6 @@ const invites = () => e.h.db.select().from(e.h.schema.invites);
 const audits = (action: string) => e.h.db.select().from(e.h.schema.auditLog).where(eq(e.h.schema.auditLog.action, action));
 const create = (user: string, body: unknown, origin?: string | null) => call(e, "POST", "/api/admin/invites", { user, body, origin });
 const ms = (v: unknown) => (v instanceof Date ? v.getTime() : new Date(v as string | number).getTime());
-
-/**
- * 끼어들기 장치. 같은 DB 에 앱을 하나 더 띄우되, 그 앱의 db.transaction·db.batch 를 부를 때마다 queue 의 앞 함수를 먼저 부른다
- * (읽은 뒤 쓰기 전에 다른 요청이 초대를 차지·취소·추가한 상황). d1 이면 DbHandle.kind 를 "d1" 로 바꿔 D1 경로(batch)를 탄다.
- * Node SQLite 드라이버(libsql)도 drizzle batch 를 지원한다 — 실제 D1 런타임은 아니다.
- */
-async function interleaved(d1: boolean) {
-  const queue: (undefined | (() => Promise<void>))[] = [];
-  const target = e.h.db;
-  const db = new Proxy(target, {
-    get(o, p, r) {
-      if (p === "transaction" || p === "batch") {
-        const f = o[p].bind(o);
-        return async (...a: unknown[]) => {
-          const before = queue.shift();
-          if (before) await before();
-          return f(...a);
-        };
-      }
-      return Reflect.get(o, p, r);
-    },
-  });
-  const app = await openRoutes({ h: { ...e.h, db, kind: d1 ? "d1" : e.h.kind } });
-  return { app, queue };
-}
-const VARIANTS = [
-  ["Node SQLite", false],
-  ["D1 경로(libsql batch)", true],
-] as const;
-/** 시험 준비용 초대 행을 바로 넣는다 */
-async function rawInvite(o: { email: string | null; createdBy: string; expiresAt?: Date; usedAt?: Date | null; revokedAt?: Date | null }) {
-  const id = crypto.randomUUID();
-  await e.h.db.insert(e.h.schema.invites).values({
-    id,
-    email: o.email,
-    tokenHash: createHash("sha256").update(id).digest("hex"),
-    role: "member",
-    expiresAt: o.expiresAt ?? new Date(Date.now() + 7 * DAY),
-    usedAt: o.usedAt ?? null,
-    usedBy: null,
-    createdBy: o.createdBy,
-    revokedAt: o.revokedAt ?? null,
-  });
-  return id;
-}
-const inviteById = async (id: string) => (await e.h.db.select().from(e.h.schema.invites).where(eq(e.h.schema.invites.id, id)))[0];
 
 describe("TC-M3.T1 관리자 초대 API", () => {
   it("TC-M3.T1.a 이메일 없는 관리자 초대는 400 admin_invite_requires_email·0행, 이메일 있으면 201·소문자 저장", async () => {
@@ -301,87 +256,12 @@ describe("TC-M3.T1 관리자 초대 API", () => {
     for (const i of list.json.invites) expect(Object.keys(i).sort()).toEqual(["createdBy", "email", "expiresAt", "id", "revokedAt", "role", "status", "usedAt", "usedBy"]);
   });
 
-  it("TC-M3.T1.g 감사 기록은 실제 변경과 같다: 읽은 뒤 사용·취소된 초대의 DELETE 는 404·감사 0행, 재초대 invite.revoke 는 실제로 취소된 행만 (Node SQLite·D1 경로)", async () => {
-    const admin = await addUser(e.h, { role: "admin" });
-    for (const [label, d1] of VARIANTS) {
-      const { app, queue } = await interleaved(d1);
-      try {
-        const revokes = async () => (await audits("invite.revoke")).map((a: any) => a.target as string).sort();
-        const before = await revokes();
-        // DELETE: 읽은 뒤 다른 요청이 사용(수락)·취소한다
-        for (const claim of ["usedAt", "revokedAt"] as const) {
-          const id = await rawInvite({ email: `g-del-${claim}-${d1}@example.com`, createdBy: admin });
-          queue.push(async () => void (await e.h.db.update(e.h.schema.invites).set({ [claim]: new Date() }).where(eq(e.h.schema.invites.id, id))));
-          const del = await call(app, "DELETE", `/api/admin/invites/${id}`, { user: admin });
-          expect({ label, claim, status: del.status, error: del.json?.error }).toEqual({ label, claim, status: 404, error: "not_found" });
-          expect(await revokes(), `${label} ${claim}`).toEqual(before);
-          const row = await inviteById(id);
-          if (claim === "usedAt") expect(row.revokedAt, label).toBeNull();
-        }
-        // 재초대: 앞서 살아 있던 A 를 읽은 뒤 A 는 사용되고, 같은 이메일 B 가 끼어든다
-        const email = `g-re-${d1}@example.com`;
-        const a = await rawInvite({ email, createdBy: admin });
-        let b = "";
-        queue.push(async () => {
-          await e.h.db.update(e.h.schema.invites).set({ usedAt: new Date() }).where(eq(e.h.schema.invites.id, a));
-          b = await rawInvite({ email, createdBy: admin });
-        });
-        const re = await call(app, "POST", "/api/admin/invites", { user: admin, body: { role: "member", email } });
-        expect(re.status, `${label} ${re.text}`).toBe(201);
-        expect((await inviteById(a)).revokedAt, `${label} 사용한 A 는 취소되지 않는다`).toBeNull();
-        expect((await inviteById(b)).revokedAt, `${label} 끼어든 B 는 취소된다`).not.toBeNull();
-        const added = (await revokes()).filter((x: string) => !before.includes(x));
-        expect({ label, revoked: added }).toEqual({ label, revoked: [b] });
-      } finally {
-        await app.close();
-      }
-    }
-  });
+  it("TC-M3.T1.g 감사 기록은 실제 변경과 같다: 읽은 뒤 사용·취소된 초대의 DELETE 는 404·감사 0행, 재초대 invite.revoke 는 실제로 취소된 행만 (Node SQLite·D1 경로)", () => tcM3T1g(e, NODE_AND_D1));
 
-  it("TC-M3.T1.h 같은 이메일 동시 재초대 → 살아 있는 초대 1개 (승자는 (expires_at, id) 가 큰 쪽, 진 쪽은 409 invite_conflict·링크 없음) (Node SQLite·D1 경로)", async () => {
-    const admin = await addUser(e.h, { role: "admin" });
-    const liveOf = async (email: string) => (await invites()).filter((r: any) => r.email === email && r.usedAt === null && r.revokedAt === null && ms(r.expiresAt) > Date.now());
-    const supersededTargets = async () =>
-      (await audits("invite.revoke")).filter((a: any) => JSON.parse(a.detail).reason === "superseded").map((a: any) => a.target as string).sort();
-    for (const [label, d1] of VARIANTS) {
-      const { app, queue } = await interleaved(d1);
-      try {
-        // 내 트랜잭션이 커밋된 뒤, 정리 전에 서로의 취소를 못 본 동시 요청의 초대가 생긴다 (첫 번째 호출 = 만들기, 두 번째 = 정리)
-        // 더 큰 형제(만료 30일) → 나는 진다
-        const big = `h-big-${d1}@example.com`;
-        let sib = "";
-        queue.push(undefined, async () => void (sib = await rawInvite({ email: big, createdBy: admin, expiresAt: new Date(Date.now() + 30 * DAY) })));
-        const lose = await call(app, "POST", "/api/admin/invites", { user: admin, body: { role: "member", email: big } });
-        expect({ label, status: lose.status, error: lose.json?.error, link: lose.json?.link }).toEqual({ label, status: 409, error: "invite_conflict", link: undefined });
-        expect(lose.text).not.toContain("/invite#");
-        expect((await liveOf(big)).map((r: any) => r.id), label).toEqual([sib]);
-        // 더 작은 형제(만료 1일) → 내가 이기고 형제를 취소한다
-        const small = `h-small-${d1}@example.com`;
-        let low = "";
-        const before = await supersededTargets();
-        queue.push(undefined, async () => void (low = await rawInvite({ email: small, createdBy: admin, expiresAt: new Date(Date.now() + DAY) })));
-        const win = await call(app, "POST", "/api/admin/invites", { user: admin, body: { role: "member", email: small } });
-        expect(win.status, `${label} ${win.text}`).toBe(201);
-        expect((await liveOf(small)).map((r: any) => r.id), label).toEqual([win.json.invite.id]);
-        expect((await inviteById(low)).revokedAt, label).not.toBeNull();
-        const added = (await supersededTargets()).filter((x: string) => !before.includes(x));
-        expect(added.includes(low), label).toBe(true);
-        // 진 요청의 자기 행은 취소됐고 superseded 감사가 있다. 이긴 형제(sib)에는 취소 기록이 없다
-        const loser = (await invites()).filter((r: any) => r.email === big && r.id !== sib);
-        expect(loser.map((r: any) => r.revokedAt !== null), label).toEqual([true]);
-        const targets = await supersededTargets();
-        expect([targets.includes(loser[0].id), targets.includes(sib)], label).toEqual([true, false]);
-      } finally {
-        await app.close();
-      }
-    }
-    // 실제로 겹친 요청 여럿: 살아 있는 초대는 정확히 1개이고 그것은 201 을 받은 것 중 하나다
-    const email = "h-many@example.com";
-    const rs = await Promise.all(Array.from({ length: 6 }, (_, i) => create(admin, { role: "member", email, expiresInDays: 1 + (i % 3) })));
-    expect(rs.every((r) => r.status === 201 || (r.status === 409 && r.json?.error === "invite_conflict" && r.json?.link === undefined)), rs.map((r) => r.text).join("\n")).toBe(true);
-    const live = await liveOf(email);
-    expect(live).toHaveLength(1);
-    expect(rs.filter((r) => r.status === 201).map((r) => r.json.invite.id)).toContain(live[0].id);
+  it("TC-M3.T1.h 같은 이메일 동시 재초대 → 살아 있는 초대 1개 (승자는 (expires_at, id) 가 큰 쪽, 진 쪽은 409 invite_conflict·링크 없음) (Node SQLite·D1 경로)", () => tcM3T1h(e, NODE_AND_D1));
+
+  it("TC-M3.T1.i 실제 동시 POST(Promise.all) — 빈 표 같은 이메일 2개·같은 이메일 4·8개·서로 다른 이메일 12개, 회차 3: 500 0, 같은 이메일은 살아 있는 초대 1개 = 201 하나(해시 일치)·나머지 201 은 뒤에 취소·409 invite_conflict 링크 없음·감사 = 실제 취소, 다른 이메일은 모두 201·이메일마다 1개, expires_at 왕복 일치 (Node SQLite)", async () => {
+    await tcM3T1i(e);
   });
 });
 
