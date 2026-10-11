@@ -809,6 +809,10 @@ export const GATES = {
       { id: "G-M3.4", how: "test", desc: "TC-M3.T1.d 관리자만 초대를 다룬다", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.d"', expectPassed: 1 },
       { id: "G-M3.5", how: "test", desc: "TC-M3.T1.e 정책·메일에 따라 초대 만들기를 거부한다 (Q3·Q5)", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.e"', expectPassed: 1 },
       { id: "G-M3.6", how: "test", desc: "TC-M3.T1.f 취소한 초대와 같은 이메일 재초대", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.f"', expectPassed: 1 },
+      // M3.T1 보안 리뷰 고침 (M1·L1)
+      { id: "G-M3.20", how: "test", desc: "TC-M3.T1.g 감사 기록은 실제 변경과 같다 — 끼어든 DELETE 404·감사 0, 재초대 revoke 는 실제 취소 행만 (리뷰 M1)", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.g"', expectPassed: 1 },
+      { id: "G-M3.21", how: "cmd", desc: "재현 빨강: TC-M3.T1.g 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M3.20 --since seal:M2" },
+      { id: "G-M3.22", how: "test", desc: "TC-M3.T1.h 같은 이메일 동시 재초대 → 살아 있는 초대 1개 (리뷰 L1)", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.h"', expectPassed: 1 },
     ],
   },
   M4: {
