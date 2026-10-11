@@ -2,7 +2,7 @@
 // D1 판은 signup.workers.test.ts (같은 단언, checks.ts).
 import { afterAll, beforeAll, describe, it } from "vitest";
 import { createTestDb, enabledDbs, LABEL, type DbKind, type TestDb } from "../../../../packages/runtime/test/dbs.ts";
-import { tcM2T1a } from "./checks.ts";
+import { tcM2T1a, tcM2T3a, tcM2T5d, tcM2T5e } from "./checks.ts";
 import { serverRig, type ServerRig } from "./env.ts";
 
 describe.each(enabledDbs())("%s", (kind: DbKind) => {
@@ -18,4 +18,26 @@ describe.each(enabledDbs())("%s", (kind: DbKind) => {
   });
 
   it(`TC-M2.T1.a ${LABEL[kind]}: 정책 다섯 × 경로 둘 표 — open·domain_allowlist 만 공개 가입이 회원을 만든다, 행 수로 판정 (Q3·Q19 의존)`, () => tcM2T1a(rig));
+});
+
+describe.each(enabledDbs())("%s 하루 상한·설정 API", (kind: DbKind) => {
+  let t: TestDb;
+  let a: ServerRig;
+  // 같은 DB 의 두 번째 인스턴스 (연결 풀 따로)
+  let b: ServerRig;
+  beforeAll(async () => {
+    t = await createTestDb(kind);
+    a = await serverRig(LABEL[kind], { url: t.url });
+    b = await serverRig(LABEL[kind], { url: t.url });
+  });
+  afterAll(async () => {
+    await a?.close();
+    await b?.close();
+    await t?.drop();
+  });
+
+  it(`TC-M2.T3.a ${LABEL[kind]}: 상한 3 — 차례 4건 +3·4번째 403 signup_cap·알림 1행, 인스턴스 둘 동시 10건은 센 값 == 생긴 공개 가입 수·500 0, 실패한 가입은 세지 않음, 초대는 상한 뒤에도 +1 (Q13 의존)`, () =>
+    tcM2T3a(a, b, { atomicSignup: true }));
+  it(`TC-M2.T5.d ${LABEL[kind]}: 감사 기록 문장이 실패한 PATCH → 500·설정 그대로·감사 0, 정상 PATCH → 설정과 감사 1행 (M1 리뷰)`, () => tcM2T5d(a));
+  it(`TC-M2.T5.e ${LABEL[kind]}: 같은 updatedAt 으로 두 관리자가 같은 키 PATCH → 200 하나·409 stale_setting 하나, 다른 키는 둘 다 200 (M1 리뷰)`, () => tcM2T5e(a));
 });

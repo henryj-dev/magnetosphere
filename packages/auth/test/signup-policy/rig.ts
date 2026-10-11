@@ -3,7 +3,8 @@
 //   apps/server 네 DB:     apps/server/test/signup/env.ts — 서버 앱(createApp + buildServices) 전체
 //   apps/server D1:        apps/server/test/signup/worker.ts — 같은 서버 앱을 wrangler dev 시험 Worker 에서
 // 그래서 같은 단언이 다섯 DB 에서 같은 관찰을 요구한다. 이 파일은 Workers 에서도 import 된다 (Node 전용 모듈을 쓰지 않는다).
-import { and, eq, like } from "drizzle-orm";
+import { hashPassword } from "better-auth/crypto";
+import { and, eq, like, sql } from "drizzle-orm";
 import type { MailMessage } from "../../src/index.ts";
 
 type AnyDb = any;
@@ -77,6 +78,10 @@ export const OPS = {
     const n = async (t: any) => (await db.select({ id: t.id }).from(t)).length;
     return { user: await n(s.user), account: await n(s.account), verification: await n(s.verification), session: await n(s.session) };
   },
+  /** user 행 수만 (다른 표 이름을 바꿔 둔 시험에서도 센다) */
+  async userCount(db: AnyDb, s: Schema) {
+    return (await db.select({ id: s.user.id }).from(s.user)).length;
+  },
   /** 설치가 끝난 상태 (관리자 한 명) */
   async addAdmin(db: AnyDb, s: Schema) {
     const now = new Date();
@@ -113,6 +118,27 @@ export const OPS = {
   async audits(db: AnyDb, s: Schema, action: string) {
     return (await db.select({ id: s.auditLog.id }).from(s.auditLog).where(eq(s.auditLog.action, action))).length;
   },
+  /** 비밀번호로 로그인할 수 있는 회원 (credential 계정까지). 관리자·정지 회원을 만든다 */
+  async addPasswordUser(db: AnyDb, s: Schema, email: string, password: string, role: "member" | "admin", status: "active" | "suspended" | "pending" = "active") {
+    const now = new Date();
+    const id = crypto.randomUUID();
+    await db.insert(s.user).values({ id, name: "회원", email: email.toLowerCase(), emailVerified: true, role, status, monthlyLimitUsd: 5, createdAt: now, updatedAt: now });
+    await db.insert(s.account).values({ id: crypto.randomUUID(), accountId: id, providerId: "credential", userId: id, password: await hashPassword(password), createdAt: now, updatedAt: now });
+    return id;
+  },
+  async verify(db: AnyDb, s: Schema, email: string) {
+    await db.update(s.user).set({ emailVerified: true }).where(byEmail(s, email));
+  },
+  /** 표 이름 바꾸기. 그 표에 쓰는 문장을 실행 중에 실패시킨다 (되돌리기 시험) */
+  async renameTable(db: AnyDb, _s: Schema, from: string, to: string) {
+    const q = sql.raw(`ALTER TABLE ${from} RENAME TO ${to}`);
+    await (typeof db.run === "function" ? db.run(q) : db.execute(q));
+  },
+  /** 새 날: 하루 가입 수 칸·상한 알림 칸과 상한 알림 기록을 지운다 (날짜가 바뀐 것과 같은 상태) */
+  async newDay(db: AnyDb, s: Schema) {
+    await db.delete(s.rateLimit).where(like(s.rateLimit.key, "signup-%"));
+    await db.delete(s.auditLog).where(eq(s.auditLog.action, "alert.signup_cap"));
+  },
   /** 회원 행을 지운다 (account·session 도). 다음 단언의 행 수를 0 에서 다시 센다 */
   async deleteMembers(db: AnyDb, s: Schema) {
     const members = await db.select({ id: s.user.id }).from(s.user).where(eq(s.user.role, "member"));
@@ -129,7 +155,7 @@ export type OpResult<K extends OpName> = Awaited<ReturnType<(typeof OPS)[K]>>;
 export type OpArgs<K extends OpName> = (typeof OPS)[K] extends (db: any, s: any, ...a: infer A) => any ? A : never;
 
 /** 회원 행 수 */
-export const userRows = async (rig: Rig) => (await rig.op("rows")).user;
+export const userRows = (rig: Rig) => rig.op("userCount");
 
 let seq = 0;
 /** 겹치지 않는 이메일. 기본 도메인은 example.test */

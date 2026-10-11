@@ -1,14 +1,52 @@
 // 가입 정책 시험(M2)의 서버 단언. Node 네 DB(policy.db.test.ts)와 D1(signup.workers.test.ts)이 같은 함수를 부른다.
 // 가입 거부는 응답 코드가 아니라 생긴 행 수(user·account·verification)와 메일 수로 본다 (실행판 0절).
 import { expect } from "vitest";
-import { attempt, body, mail, type Rig } from "../../../../packages/auth/test/signup-policy/rig.ts";
+import { attempt, body, mail, PASSWORD, userRows, type Rig } from "../../../../packages/auth/test/signup-policy/rig.ts";
+
+export interface CallOpts {
+  body?: unknown;
+  cookie?: string;
+  ip?: string;
+  /** 기본 같은 출처. null 이면 Origin 을 빼고 보낸다 */
+  origin?: string | null;
+  headers?: Record<string, string>;
+}
+export interface CallRes {
+  status: number;
+  json: any;
+  body: string;
+  setCookie: string[];
+}
+/** 서버 앱 전체에 요청을 보내는 Rig (Node 네 DB env.ts, D1 d1-rig.ts) */
+export interface HttpRig extends Rig {
+  call(method: string, path: string, o?: CallOpts): Promise<CallRes>;
+}
+
+export async function callRes(res: Response): Promise<CallRes> {
+  const body = await res.text();
+  let json: any = null;
+  try {
+    json = JSON.parse(body);
+  } catch {}
+  return { status: res.status, json, body, setCookie: res.headers.getSetCookie() };
+}
+
+/** 비밀번호 회원을 만들고 로그인해 세션 쿠키 머리글 값을 돌려준다 */
+export async function login(rig: HttpRig, role: "member" | "admin", status: "active" | "suspended" = "active") {
+  const email = mail(`login-${role}-${status}`);
+  const id = await rig.op("addPasswordUser", email, PASSWORD, role, status);
+  const r = await rig.call("POST", "/api/auth/sign-in/email", { body: { email, password: PASSWORD } });
+  if (r.status !== 200) throw new Error(`로그인 실패 ${r.status} ${r.body}`);
+  const cookie = r.setCookie.map((c) => c.split(";")[0]).join("; ");
+  return { id, email, cookie };
+}
 
 const MODES = ["open", "invite_only", "domain_allowlist", "closed", "sso_only"] as const;
 /** 공개 가입을 받는 정책 (Q1·Q19) */
 const PUBLIC_OPEN = new Set(["open", "domain_allowlist"]);
 
 /** 설치 뒤·메일 있음·허용 도메인 example.test·승인 끔·상한 없음 */
-async function installed(rig: Rig) {
+export async function installed(rig: Rig) {
   await rig.op("addAdmin");
   await rig.op("setMail", true);
   await rig.op("setSetting", "allowed_domains", ["example.test"]);
@@ -46,3 +84,123 @@ export async function tcM2T1a(rig: Rig) {
 export const FAKE_INVITE = { inviteId: "inv-test", role: "member", email: null, verified: false } as const;
 /** 초대를 받는 정책 (Q3) */
 const INVITE_OPEN = new Set(["invite_only", "open", "domain_allowlist"]);
+
+/**
+ * TC-M2.T3.a 상한을 넘으면 그날 남은 공개 가입을 막는다 (Q13 (가)). a·b 는 같은 DB 의 서버 인스턴스 둘이다.
+ * atomicSignup: 가입의 user·account 삽입이 한 트랜잭션인가 (Node 네 DB). D1 은 아니다 (#15) — (3) 에서 user 행이 남을 수 있고, 센 값만 0 이어야 한다.
+ */
+export async function tcM2T3a(a: HttpRig, b: HttpRig, o: { atomicSignup: boolean }) {
+  await installed(a);
+  await a.op("setSetting", "signup_mode", "open");
+  await a.op("setSetting", "daily_signup_cap", 3);
+  await a.op("newDay");
+
+  // (1) 차례로 4건 → +3, 4번째 403 signup_cap·행 0, 알림 1행. 한 번 더 막혀도 알림은 그대로 1행
+  const seq = [];
+  for (let i = 0; i < 4; i++) seq.push(await attempt(a, () => a.signUp(body(mail(`t3a-seq-${i}`)))));
+  expect(seq.map((r) => [r.status, r.code, r.user])).toEqual([[200, null, 1], [200, null, 1], [200, null, 1], [403, "signup_cap", 0]]);
+  expect(seq[3].mail).toBe(0);
+  await b.signUp(body(mail("t3a-seq-again")));
+  expect(await a.op("signupCount")).toBe(3);
+  expect(await a.op("audits", "alert.signup_cap")).toBe(1);
+
+  // (2) 새 날, 인스턴스 둘이 동시에 공개 가입 10건 → 센 값 == 실제로 생긴 공개 가입 수, 500(SQLITE_BUSY 등) 0
+  await a.op("newDay");
+  const u0 = await userRows(a);
+  const burst = await Promise.all(Array.from({ length: 10 }, (_, i) => (i % 2 ? b : a).signUp(body(mail(`t3a-burst-${i}`)))));
+  const created = (await userRows(a)) - u0;
+  expect(burst.filter((r) => r.status >= 500).map((r) => r.body)).toEqual([]);
+  expect(burst.filter((r) => r.status !== 200).every((r) => r.status === 403 && r.code === "signup_cap")).toBe(true);
+  expect(created).toBe(burst.filter((r) => r.status === 200).length);
+  expect(created).toBeGreaterThanOrEqual(3);
+  expect(await a.op("signupCount")).toBe(created);
+  const after = await attempt(b, () => b.signUp(body(mail("t3a-after"))));
+  expect({ status: after.status, code: after.code, user: after.user }).toEqual({ status: 403, code: "signup_cap", user: 0 });
+  expect(await a.op("audits", "alert.signup_cap")).toBe(1);
+
+  // (3) 가입이 account 넣기에서 실패하면 세지 않는다 (트랜잭션이면 user 도 0)
+  await a.op("newDay");
+  await a.op("renameTable", "account", "account_off");
+  // account 표가 없으므로 행 수는 user 만 센다
+  const ub = await userRows(a);
+  let broken;
+  try {
+    broken = await a.signUp(body(mail("t3a-broken")));
+  } finally {
+    await a.op("renameTable", "account_off", "account");
+  }
+  const brokenUsers = (await userRows(a)) - ub;
+  expect(broken.status, broken.body).not.toBe(200);
+  expect(await a.op("signupCount")).toBe(0);
+  if (o.atomicSignup) expect(brokenUsers).toBe(0);
+  else expect(brokenUsers).toBeLessThanOrEqual(1);
+
+  // 초대 수락은 세지 않고 상한 뒤에도 된다
+  await a.op("setSetting", "daily_signup_cap", 0);
+  const inv = await attempt(a, () => a.apiSignUp(body(mail("t3a-inv")), FAKE_INVITE));
+  expect({ status: inv.status, user: inv.user }, inv.body).toEqual({ status: 200, user: 1 });
+  expect(await a.op("signupCount")).toBe(0);
+}
+
+/** 가입 정책 설정 GET 의 updatedAt (필드 → ISO|null) */
+async function readUpdatedAt(rig: HttpRig, cookie: string) {
+  const r = await rig.call("GET", "/api/admin/settings/signup", { cookie });
+  expect(r.status, r.body).toBe(200);
+  return r.json.updatedAt as Record<string, string | null>;
+}
+
+/** TC-M2.T5.d 설정 쓰기와 감사 기록은 같이 남거나 같이 남지 않는다 (M1 리뷰) */
+export async function tcM2T5d(rig: HttpRig) {
+  await rig.op("setSetting", "daily_signup_cap", 20);
+  const admin = await login(rig, "admin");
+  const before = await rig.op("audits", "settings.update");
+  let at = await readUpdatedAt(rig, admin.cookie);
+  // 감사 기록 문장이 실행 중에 실패한다 (표가 없다) → 500, 설정 그대로, 감사 기록 0
+  await rig.op("renameTable", "audit_log", "audit_log_off");
+  let failed;
+  try {
+    failed = await rig.call("PATCH", "/api/admin/settings/signup", { cookie: admin.cookie, body: { dailySignupCap: 7, updatedAt: { dailySignupCap: at.dailySignupCap } } });
+  } finally {
+    await rig.op("renameTable", "audit_log_off", "audit_log");
+  }
+  expect(failed.status, failed.body).toBe(500);
+  const kept = await rig.call("GET", "/api/admin/settings/signup", { cookie: admin.cookie });
+  expect(kept.json.settings.dailySignupCap).toBe(20);
+  expect(kept.json.updatedAt.dailySignupCap).toBe(at.dailySignupCap);
+  expect(await rig.op("audits", "settings.update")).toBe(before);
+  // 정상 PATCH → 설정 행과 감사 기록 1행
+  at = await readUpdatedAt(rig, admin.cookie);
+  const ok = await rig.call("PATCH", "/api/admin/settings/signup", { cookie: admin.cookie, body: { dailySignupCap: 7, updatedAt: { dailySignupCap: at.dailySignupCap } } });
+  expect(ok.status, ok.body).toBe(200);
+  expect(ok.json.settings.dailySignupCap).toBe(7);
+  expect(await rig.op("audits", "settings.update")).toBe(before + 1);
+}
+
+/** TC-M2.T5.e 오래된 값으로 덮어쓰지 않는다 — 같은 키 동시 PATCH 는 하나만 200, 다른 키는 둘 다 200 (M1 리뷰) */
+export async function tcM2T5e(rig: HttpRig) {
+  await rig.op("setSetting", "daily_signup_cap", 20);
+  const [x, y] = [await login(rig, "admin"), await login(rig, "admin")];
+  const before = await rig.op("audits", "settings.update");
+  const at = await readUpdatedAt(rig, x.cookie);
+  const patch = (who: { cookie: string }, cap: number) =>
+    rig.call("PATCH", "/api/admin/settings/signup", { cookie: who.cookie, body: { dailySignupCap: cap, updatedAt: { dailySignupCap: at.dailySignupCap } } });
+  const [rx, ry] = await Promise.all([patch(x, 11), patch(y, 12)]);
+  expect([rx.status, ry.status].sort(), `${rx.body} / ${ry.body}`).toEqual([200, 409]);
+  const lost = rx.status === 409 ? rx : ry;
+  expect(lost.json).toEqual({ error: "stale_setting" });
+  const won = rx.status === 200 ? 11 : 12;
+  const now = await rig.call("GET", "/api/admin/settings/signup", { cookie: x.cookie });
+  expect(now.json.settings.dailySignupCap).toBe(won);
+  expect(await rig.op("audits", "settings.update")).toBe(before + 1);
+  // 옛 화면의 값으로 다시 써도 409 (방금 바뀐 값을 되돌리지 않는다)
+  const stale = await patch(x, 20);
+  expect(stale.status).toBe(409);
+  // 다른 키를 동시에 → 둘 다 200 (키 단위)
+  const fresh = await readUpdatedAt(rig, x.cookie);
+  const [ka, kb] = await Promise.all([
+    rig.call("PATCH", "/api/admin/settings/signup", { cookie: x.cookie, body: { dailySignupCap: 13, updatedAt: { dailySignupCap: fresh.dailySignupCap } } }),
+    rig.call("PATCH", "/api/admin/settings/signup", { cookie: y.cookie, body: { signupRequiresApproval: true, updatedAt: { signupRequiresApproval: fresh.signupRequiresApproval } } }),
+  ]);
+  expect([ka.status, kb.status], `${ka.body} / ${kb.body}`).toEqual([200, 200]);
+  expect(await rig.op("audits", "settings.update")).toBe(before + 3);
+}

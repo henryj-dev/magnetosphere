@@ -6,7 +6,8 @@ import type { MailMessage, Mailer } from "@magnetosphere/auth";
 import { runAsInvite } from "@magnetosphere/auth/invite-context";
 import { connectNode } from "@magnetosphere/runtime/node";
 import type { DbHandle, Runtime } from "@magnetosphere/runtime/types";
-import { apiReply, OPS, reply, type Rig } from "../../../../packages/auth/test/signup-policy/rig.ts";
+import { apiReply, OPS, reply } from "../../../../packages/auth/test/signup-policy/rig.ts";
+import { callRes, type CallOpts, type HttpRig } from "./checks.ts";
 import { createApp, type Services } from "../../src/app.ts";
 import { buildServices } from "../../src/config.ts";
 import { TEST_ENCRYPTION_KEY, TEST_SECRET } from "../helpers.ts";
@@ -16,12 +17,10 @@ const ENV: Record<string, string> = { BETTER_AUTH_URL: ORIGIN, BETTER_AUTH_SECRE
 
 export const randomIp = () => `198.18.${Math.floor(Math.random() * 256)}.${Math.floor(Math.random() * 254) + 1}`;
 
-export interface ServerRig extends Rig {
+export interface ServerRig extends HttpRig {
   h: DbHandle;
   services: Services;
   app: ReturnType<typeof createApp>;
-  /** 서버 앱에 요청 하나 (/api/*). 기본 같은 출처, 시험 IP 무작위 */
-  call(method: string, path: string, o?: { body?: unknown; cookie?: string; ip?: string; origin?: string | null; headers?: Record<string, string> }): Promise<Response>;
   close(): Promise<void>;
 }
 
@@ -50,7 +49,7 @@ export async function serverRig(label: string, o: { h?: DbHandle; url?: string }
   const app = createApp({ services: async () => services, assets: async (c) => c.text("spa"), setupTokenFromSecret: false, log: () => {} });
   const api = (services.auth as any).api;
 
-  const call: ServerRig["call"] = async (method, path, c = {}) => {
+  const raw = async (method: string, path: string, c: CallOpts = {}) => {
     const headers: Record<string, string> = { "x-test-ip": c.ip ?? randomIp(), ...(c.headers ?? {}) };
     if (c.origin !== null) headers.origin = c.origin ?? ORIGIN;
     if (c.cookie) headers.cookie = c.cookie;
@@ -65,8 +64,8 @@ export async function serverRig(label: string, o: { h?: DbHandle; url?: string }
     h,
     services,
     app,
-    call,
-    signUp: async (b, so = {}) => reply(await call("POST", "/api/auth/sign-up/email", { body: b, ip: so.ip, headers: so.headers })),
+    call: async (method, path, c) => callRes(await raw(method, path, c)),
+    signUp: async (b, so = {}) => reply(await raw("POST", "/api/auth/sign-up/email", { body: b, ip: so.ip, headers: so.headers })),
     apiSignUp: async (b, invite) => {
       const r = await apiReply(invite ? runAsInvite(invite, () => api.signUpEmail({ body: b })) : api.signUpEmail({ body: b }));
       await settle();
@@ -75,7 +74,7 @@ export async function serverRig(label: string, o: { h?: DbHandle; url?: string }
     internalCreate: async () => {
       throw new Error("서버 Rig 는 internalAdapter 를 열지 않는다 (packages/auth Rig·D1 Rig 가 본다)");
     },
-    request: async (method, path, b, headers) => reply(await call(method, `/api/auth${path}`, { body: b, headers })),
+    request: async (method, path, b, headers) => reply(await raw(method, `/api/auth${path}`, { body: b, headers })),
     op: async (name, ...args) => (OPS[name] as any)(h.db, h.schema, ...args),
     outbox: async () => (await settle(), outbox),
     apiPaths: async () => Object.entries(api).map(([k, ep]: [string, any]) => ep.path ?? `(server) ${k}`),
