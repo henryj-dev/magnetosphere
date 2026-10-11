@@ -732,7 +732,54 @@ export const GATES = {
     waivable: false,
     strictTests: true,
     outputs: ["apps/server/src/signup/**", "apps/server/test/signup/**", "packages/auth/test/signup-policy/**"],
-    checks: [],
+    checks: [
+      // M2.T1 정책 판정·앞 판정·뒷받침 훅·초대 문맥. 가입 거부는 생긴 행 수로 본다 (실행판 0절)
+      { id: "G-M2.1", how: "test", requires: ["local-services"], desc: "TC-M2.T1.a 정책 다섯 × 경로 둘 표, 행 수로 판정 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-M2.T1.a" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-M2.17", how: "test", requires: ["local-services"], desc: "TC-M2.T1.a 정책 표 (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M2.T1.a"', expectPassed: 1 },
+      { id: "G-M2.2", how: "test", requires: ["local-services"], desc: "TC-M2.T1.b user 를 만드는 다른 경로는 뒷받침 훅이 막는다 (Node DB 넷)", cmd: 'pnpm -C packages/auth test -t "TC-M2.T1.b"', expectPassed: 4 },
+      { id: "G-M2.18", how: "test", requires: ["local-services"], desc: "TC-M2.T1.b 다른 생성 경로 (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M2.T1.b"', expectPassed: 1 },
+      { id: "G-M2.3", how: "test", desc: "TC-M2.T1.c 메일이 없으면 open·domain_allowlist 자기 가입을 거부한다", cmd: 'pnpm -C apps/server test -t "TC-M2.T1.c"', expectPassed: 1 },
+      { id: "G-M2.4", how: "test", desc: "TC-M2.T1.d 이메일 변경·회원 삭제 경로가 닫혀 있다", cmd: 'pnpm -C apps/server test -t "TC-M2.T1.d"', expectPassed: 1 },
+      { id: "G-M2.5", how: "test", desc: "TC-M2.T1.e 정책 거부 응답은 이메일 존재와 무관하다", cmd: 'pnpm -C apps/server test -t "TC-M2.T1.e"', expectPassed: 1 },
+      { id: "G-M2.6", how: "test", desc: "TC-M2.T1.f 공개 요청은 초대 문맥을 흉내 낼 수 없다", cmd: 'pnpm -C apps/server test -t "TC-M2.T1.f"', expectPassed: 1 },
+      { id: "G-M2.28", how: "test", requires: ["local-services"], desc: "TC-M2.T1.g 초대 문맥의 서버 호출은 signUpGate 를 지난다 (Node DB 넷)", cmd: 'pnpm -C packages/auth test -t "TC-M2.T1.g"', expectPassed: 4 },
+      { id: "G-M2.29", how: "test", requires: ["local-services"], desc: "TC-M2.T1.g 초대 문맥 (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M2.T1.g"', expectPassed: 1 },
+      { id: "G-M2.21", how: "cmd", desc: "재현 빨강: TC-M2.T1.a 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M2.1 --since seal:M1" },
+      // M2.T2 허용 도메인·승인 대기·기본값
+      { id: "G-M2.7", how: "test", desc: "TC-M2.T2.a 승인 대기 (Q6)", cmd: 'pnpm -C apps/server test -t "TC-M2.T2.a"', expectPassed: 1 },
+      { id: "G-M2.8", how: "test", desc: "TC-M2.T2.b 허용 도메인은 정확히 일치한다 (Q14·Q19)", cmd: 'pnpm -C apps/server test -t "TC-M2.T2.b"', expectPassed: 1 },
+      { id: "G-M2.9", how: "test", desc: "TC-M2.T2.c 새 회원에게 기본 월 한도가 걸린다 (Q16)", cmd: 'pnpm -C apps/server test -t "TC-M2.T2.c"', expectPassed: 1 },
+      { id: "G-M2.34", how: "test", requires: ["local-services"], desc: "TC-M2.T2.d domain_allowlist + 빈 허용 도메인 → 403 (Node DB 넷, M1 리뷰)", cmd: 'pnpm -C packages/auth test -t "TC-M2.T2.d"', expectPassed: 4 },
+      { id: "G-M2.35", how: "test", requires: ["local-services"], desc: "TC-M2.T2.d (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M2.T2.d"', expectPassed: 1 },
+      // M2.T3 하루 가입 상한 (Q13 (가): user.create.after 에서 센다)
+      { id: "G-M2.10", how: "test", requires: ["local-services"], desc: "TC-M2.T3.a 상한을 넘으면 그날 남은 공개 가입을 막는다 — 차례·동시 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-M2.T3.a" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-M2.12", how: "test", requires: ["local-services"], desc: "TC-M2.T3.a 상한 차례·동시 (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M2.T3.a"', expectPassed: 1 },
+      { id: "G-M2.11", how: "test", desc: "TC-M2.T3.b 실패한 시도는 상한을 쓰지 않는다", cmd: 'pnpm -C apps/server test -t "TC-M2.T3.b"', expectPassed: 1 },
+      { id: "G-M2.19", how: "test", desc: "TC-M2.T3.c 상한 null 과 0", cmd: 'pnpm -C apps/server test -t "TC-M2.T3.c"', expectPassed: 1 },
+      // M2.T4 가입 응답 시간 (백로그 둘)
+      { id: "G-M2.13", how: "test", requires: ["local-services"], desc: "TC-M2.T4.a 가입 응답 시간이 있는 계정·없는 계정에서 같다 (차이 < 30ms, 모두 ≥ 400ms)", cmd: 'pnpm -C packages/auth test -t "TC-M2.T4.a"', expectPassed: 1 },
+      // TC-S3.T2.e 는 세 테스트(재설정·가입 메일 몫, 전송 실패)라 통과 수가 3 이다
+      { id: "G-M2.14", how: "test", requires: ["local-services"], desc: "TC-M2.T4.b 메일 지연 몫 < 150ms (TC-S3.T2.e 개정)", cmd: 'pnpm -C packages/auth test -t "TC-S3.T2.e"', expectPassed: 3 },
+      { id: "G-M2.15", how: "test", desc: "TC-M2.T4.c 최소 시간 기다림이 요청 수 제한을 우회하지 않는다", cmd: 'pnpm -C apps/server test -t "TC-M2.T4.c"', expectPassed: 1 },
+      { id: "G-M2.20", how: "grep", desc: "메일 몫 상한 상수 150ms", pattern: "LIMIT_MS = 150", in: ["packages/auth/test/mail-timing.test.ts"], op: "==", limit: 1 },
+      { id: "G-M2.22", how: "cmd", desc: "재현 빨강: TC-M2.T4.a 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M2.13 --since seal:M1" },
+      // M2.T5 정책·메일 설정 API (Q15·Q20)
+      { id: "G-M2.23", how: "test", desc: "TC-M2.T5.a 관리자만 정책을 바꾸고, 바꾸면 다음 가입부터 적용된다", cmd: 'pnpm -C apps/server test -t "TC-M2.T5.a"', expectPassed: 1 },
+      { id: "G-M2.24", how: "test", desc: "TC-M2.T5.b 메일 없는 설치에서 open 으로 못 바꾸고, 메일을 설정하면 바꿀 수 있다", cmd: 'pnpm -C apps/server test -t "TC-M2.T5.b"', expectPassed: 1 },
+      { id: "G-M2.25", how: "test", desc: "TC-M2.T5.c 메일 API 키는 암호화되어 저장되고 응답·감사 기록에 없다", cmd: 'pnpm -C apps/server test -t "TC-M2.T5.c"', expectPassed: 1 },
+      { id: "G-M2.36", how: "test", requires: ["local-services"], desc: "TC-M2.T5.d 설정 쓰기와 감사 기록은 같이 남거나 같이 남지 않는다 (Node DB 넷, M1 리뷰)", cmd: 'pnpm -C apps/server test:db -t "TC-M2.T5.d" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-M2.37", how: "test", requires: ["local-services"], desc: "TC-M2.T5.d (D1 batch)", cmd: 'pnpm -C apps/server test:workers -t "TC-M2.T5.d"', expectPassed: 1 },
+      { id: "G-M2.38", how: "test", requires: ["local-services"], desc: "TC-M2.T5.e 오래된 값으로 덮어쓰지 않는다 — 409 stale_setting (Node DB 넷, M1 리뷰)", cmd: 'pnpm -C apps/server test:db -t "TC-M2.T5.e" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-M2.39", how: "test", requires: ["local-services"], desc: "TC-M2.T5.e (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M2.T5.e"', expectPassed: 1 },
+      // M2.T7 Node SQLite 동시 쓰기 (D1 트랜잭션은 PR #15)
+      { id: "G-M2.30", how: "test", requires: ["local-services"], desc: "TC-M2.T7.a D1 에서 Better Auth 가입이 회원을 만든다 (PR #15 뒤 단언)", cmd: 'pnpm -C apps/server test:workers -t "TC-M2.T7.a"', expectPassed: 1 },
+      { id: "G-M2.31", how: "test", requires: ["local-services"], desc: "TC-M2.T7.b Node SQLite 겹친 쓰기가 SQLITE_BUSY 로 깨지지 않는다", cmd: 'pnpm -C packages/auth test -t "TC-M2.T7.b"', expectPassed: 1 },
+      { id: "G-M2.33", how: "cmd", desc: "재현 빨강: TC-M2.T7.b 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M2.31 --since seal:M1" },
+      // 타입·CI 단계 잡·필수 검사
+      { id: "G-M2.16", how: "cmd", desc: "타입 검사", cmd: "pnpm -r typecheck" },
+      { id: "G-M2.26", how: "grep", desc: "TC-M2.T6.a CI 단계 잡 (M2)", pattern: "^\\s+run: node scripts/gate\\.mjs M2\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
+      { id: "G-M2.27", how: "cmd", desc: "TC-M2.T6.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
+    ],
   },
   M3: {
     needs: ["M2"],
