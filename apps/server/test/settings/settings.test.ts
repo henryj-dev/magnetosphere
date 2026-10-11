@@ -1,7 +1,7 @@
 // M1.T1 설정 저장소 (SQLite). 값 검사·정규화(TC-M1.T1.a), 정책 검사(TC-M1.T1.b), 시드 기본값 채우기(TC-M1.T1.c).
 // 동시 쓰기는 다섯 DB 에서 따로 본다 (concurrent.db.test.ts·concurrent.workers.test.ts, TC-M1.T1.d).
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SETTINGS, seedAppSettings } from "@magnetosphere/db/src/seed.ts";
 import { connectNode } from "@magnetosphere/runtime/node";
 import type { DbHandle } from "@magnetosphere/runtime/types";
@@ -139,11 +139,43 @@ describe("M1.T1 설정 저장소", () => {
     const s = await readSettings(h);
     expect(s).toEqual({ ...DEFAULT_SETTINGS, allowed_domains: [] });
     expect(Array.isArray(s.allowed_domains)).toBe(true);
-    // 손으로 고친 잘못된 행·깨진 JSON 은 시드 값으로 읽는다 (가입 판정이 TypeError 로 500 이 나지 않게)
+  });
+
+  it("TC-M1.T1.e 깨진 보안 설정 행은 더 닫힌 값으로 읽는다 — signup_mode closed·cap 0·승인 true·도메인 [], 기본 한도는 5, 경고 로그", async () => {
+    await seedAppSettings(h.db, h.schema as { appSettings: unknown }, NOW);
     const t2 = h.schema.appSettings;
-    await h.db.update(t2).set({ value: JSON.stringify(-5) }).where(eq(t2.key, "daily_signup_cap"));
-    await h.db.update(t2).set({ value: "{깨짐" }).where(eq(t2.key, "signup_mode"));
-    await h.db.insert(t2).values({ key: "allowed_domains", value: JSON.stringify("a.com"), updatedAt: NOW, updatedBy: null });
-    expect(await readSettings(h)).toEqual({ ...DEFAULT_SETTINGS, allowed_domains: [] });
+    const put = async (key: string, raw: string) => {
+      await h.db.delete(t2).where(eq(t2.key, key));
+      await h.db.insert(t2).values({ key, value: raw, updatedAt: NOW, updatedBy: null });
+    };
+    const warns: unknown[][] = [];
+    const spy = vi.spyOn(console, "warn").mockImplementation((...a: unknown[]) => void warns.push(a));
+    try {
+      // 손으로 고친 잘못된 값·깨진 JSON. 시드 값(invite_only·20·…)으로 읽으면 운영자가 둔 closed·0 보다 열린다
+      await put("signup_mode", "{깨짐");
+      await put("daily_signup_cap", JSON.stringify(-5));
+      await put("signup_requires_approval", JSON.stringify("no"));
+      await put("allowed_domains", JSON.stringify("a.com"));
+      await put("default_limit_usd", JSON.stringify(null));
+      expect(await readSettings(h)).toEqual({
+        signup_mode: "closed",
+        daily_signup_cap: 0,
+        signup_requires_approval: true,
+        allowed_domains: [],
+        default_limit_usd: DEFAULT_SETTINGS.default_limit_usd,
+        default_max_keys: DEFAULT_SETTINGS.default_max_keys,
+      });
+      const lines = warns.map((a) => a.map(String).join(" "));
+      for (const key of ["signup_mode", "daily_signup_cap", "signup_requires_approval", "allowed_domains", "default_limit_usd"]) {
+        expect(lines.some((l) => l.includes(key)), `경고 로그에 ${key}`).toBe(true);
+      }
+      // 대조: 맞는 값은 경고 없이 그대로다
+      warns.length = 0;
+      await put("signup_mode", JSON.stringify("open"));
+      expect((await readSettings(h)).signup_mode).toBe("open");
+      expect(warns.map((a) => a.map(String).join(" ")).some((l) => l.includes("signup_mode"))).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
