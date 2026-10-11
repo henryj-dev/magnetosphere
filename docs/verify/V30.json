@@ -1,0 +1,24 @@
+{
+  "item": "V30",
+  "question": "지금 구성(session 설정 없음)에서 회원의 session 행을 DB 에서 지우면 옛 쿠키가 바로 끊기나, 비밀번호 변경·재설정 뒤 다른 세션이 남나 (다섯 DB)",
+  "answer": {
+    "cookieCacheEnabled": false,
+    "firstRequestAfterDelete": null,
+    "otherSessionsAfterPasswordChange": true,
+    "sessionsAfterReset": {
+      "off": 2,
+      "on": 0
+    },
+    "designImpact": "쿠키 캐시가 꺼져 있어 get-session 이 요청마다 session 행을 읽는다 → 정지·강등·탈퇴의 세션 무효화(4.5)는 session 행을 지우는 것으로 바로 걸린다 (지연 없음). 다만 /change-password 는 revokeOtherSessions 를 보내지 않으면 다른 세션을 남기고, /reset-password 는 revokeSessionsOnPasswordReset 이 꺼져 있어(지금) 세션을 하나도 지우지 않는다 → M4.T3 이 재설정 무효화를 켜고, 비밀번호 변경은 다른 세션 지우기를 서버가 강제한다"
+  },
+  "evidence": [
+    "실측 (2026-10-11, better-auth 1.7.7): packages/auth/test/verify-p3/v30.test.ts (TC-M0.T3.a·b × 네 DB), apps/server/test/verify-p3/v30.workers.test.ts (Workers + D1, transaction: false). Node 네 DB 와 transaction: false 로 올린 D1 이 같다. D1 운영 구성(transaction: true)에서는 /reset-password 가 500 이다 — consumeVerificationValue 가 runWithTransaction 안에서 돈다 (internal-adapter.mjs:815, V29 d1Transaction). 그래서 sessionsAfterReset 의 D1 값은 트랜잭션을 끈 구성의 값이다",
+    "소스: api/routes/session.mjs:39 cookieCacheEnabled = options.session?.cookieCache?.enabled === true, cookies/index.mjs:77 같은 조건. authOptions 에 session 설정이 없다",
+    "TC-M0.T3.a: 로그인(200) → get-session 이 그 회원 → session 행 삭제 → 같은 쿠키로 get-session 첫 요청 null",
+    "TC-M0.T3.b: 같은 회원 세션 둘 → 한쪽에서 /change-password (revokeOtherSessions 없음, 200) → 다른 쪽 get-session 이 그대로 그 회원. 세션 둘 → /request-password-reset → 메일 링크의 토큰으로 /reset-password (200) → session 2행 그대로 (password.mjs:169 revokeSessionsOnPasswordReset 이 꺼짐), 켠 구성(resetRevoke)은 0행",
+    "음성 대조 (2026-10-11): firstRequestAfterDelete {} → TC-M0.T3.a 실패, sessionsAfterReset.off 0 → TC-M0.T3.b 실패, 시험 구성 plain 에 session.cookieCache { enabled: true, maxAge: 300 } → 지운 뒤 첫 get-session 이 세션 객체를 돌려줘 TC-M0.T3.a 실패 (여기까지 SQLite). D1: sessionsAfterReset.on 2 → TC-M0.T3.b 실패, 시험 구성 plain 에 session.cookieCache { enabled: true, maxAge: 300 } → TC-M0.T3.a 실패"
+  ],
+  "blocking": false,
+  "was_blocking": false,
+  "resolved_in": null
+}
