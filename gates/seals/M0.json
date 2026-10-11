@@ -1,0 +1,118 @@
+{
+  "phase": "M0",
+  "sealed": true,
+  "head": "2ae512187b3ad5e51792e3ca4e8c42a22a7e6c03",
+  "at": "2026-10-11T02:02:48.628Z",
+  "waived": false,
+  "reason": null,
+  "checks": [
+    {
+      "id": "G-M0.1",
+      "ok": true,
+      "measured": "통과 3 / 기대 3",
+      "limit": "종료코드 0, 통과 == 3"
+    },
+    {
+      "id": "G-M0.2",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-M0.3",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-M0.4",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-M0.5",
+      "ok": true,
+      "measured": "통과 16 / 기대 16",
+      "limit": "종료코드 0, 통과 == 16"
+    },
+    {
+      "id": "G-M0.15",
+      "ok": true,
+      "measured": "통과 4 / 기대 4",
+      "limit": "종료코드 0, 통과 == 4"
+    },
+    {
+      "id": "G-M0.6",
+      "ok": true,
+      "measured": "통과 8 / 기대 8",
+      "limit": "종료코드 0, 통과 == 8"
+    },
+    {
+      "id": "G-M0.16",
+      "ok": true,
+      "measured": "통과 2 / 기대 2",
+      "limit": "종료코드 0, 통과 == 2"
+    },
+    {
+      "id": "G-M0.7",
+      "ok": true,
+      "measured": "통과 8 / 기대 8",
+      "limit": "종료코드 0, 통과 == 8"
+    },
+    {
+      "id": "G-M0.17",
+      "ok": true,
+      "measured": "통과 2 / 기대 2",
+      "limit": "종료코드 0, 통과 == 2"
+    },
+    {
+      "id": "G-M0.8",
+      "ok": true,
+      "measured": "통과 4 / 기대 4",
+      "limit": "종료코드 0, 통과 == 4"
+    },
+    {
+      "id": "G-M0.18",
+      "ok": true,
+      "measured": "통과 1 / 기대 1",
+      "limit": "종료코드 0, 통과 == 1"
+    },
+    {
+      "id": "G-M0.9",
+      "ok": true,
+      "measured": 1,
+      "limit": "== 1"
+    },
+    {
+      "id": "G-M0.10",
+      "ok": true,
+      "measured": 1,
+      "limit": "== 1"
+    },
+    {
+      "id": "G-M0.11",
+      "ok": true,
+      "measured": 0,
+      "limit": "== 0"
+    },
+    {
+      "id": "G-M0.12",
+      "ok": true,
+      "measured": 1,
+      "limit": "== 1"
+    },
+    {
+      "id": "G-M0.13",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-M0.14",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    }
+  ]
+}
