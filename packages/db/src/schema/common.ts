@@ -67,6 +67,8 @@ export const USER_ADDITIONAL_FIELDS = {
   monthlyLimitUsd: { type: "number", required: false, input: false },
   maxKeys: { type: "number", required: false, input: false },
   isBootstrapAdmin: { type: "boolean", required: false, defaultValue: false, input: false },
+  // 기본값이 없어 가입 본문에 넣으면 400 FIELD_NOT_ALLOWED, 회원정보 수정도 400 이다 (TC-M1.T4.b)
+  deletedAt: { type: "date", required: false, input: false },
 } as const;
 
 export const TABLES: Record<string, Table> = {
@@ -74,7 +76,7 @@ export const TABLES: Record<string, Table> = {
   user: {
     name: "user",
     owner: "better-auth",
-    doc: "회원. Better Auth 칼럼 + 권한 칼럼 다섯",
+    doc: "회원. Better Auth 칼럼 + 권한 칼럼 다섯 + 삭제 시각",
     columns: {
       id: { name: "id", kind: "id", primaryKey: true },
       name: { name: "name", kind: "text", notNull: true },
@@ -88,6 +90,7 @@ export const TABLES: Record<string, Table> = {
       monthlyLimitUsd: { name: "monthly_limit_usd", kind: "usd", doc: "NULL 이면 무제한" },
       maxKeys: { name: "max_keys", kind: "integer", doc: "NULL 이면 설정 기본값" },
       isBootstrapAdmin: { name: "is_bootstrap_admin", kind: "boolean", notNull: true, default: false },
+      deletedAt: { name: "deleted_at", kind: "timestamp", doc: "삭제(탈퇴) 시각. 개인정보를 지운 행이다 (Q9). NULL 이면 삭제되지 않음" },
     },
   },
   session: {
@@ -217,7 +220,11 @@ export const TABLES: Record<string, Table> = {
       expiresAt: { name: "expires_at", kind: "timestamp", notNull: true },
       usedAt: { name: "used_at", kind: "timestamp" },
       createdBy: { name: "created_by", kind: "id", notNull: true },
+      revokedAt: { name: "revoked_at", kind: "timestamp", doc: "관리자가 취소한 시각 (Q4). NULL 이면 취소되지 않음" },
+      usedBy: { name: "used_by", kind: "id", doc: "이 초대로 가입한 회원 id. 수락을 마친 뒤 쓴다 (M3.T2)" },
     },
+    // 만료한 초대 정리(M3.T3)가 expires_at 으로 찾는다
+    indexes: [{ name: "idx_invites_expires", columns: ["expiresAt"] }],
   },
   apiKeys: {
     name: "api_keys",

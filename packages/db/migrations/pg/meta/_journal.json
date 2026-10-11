@@ -22,6 +22,13 @@
       "when": 1791619641832,
       "tag": "0002_k2_usage_daily",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791688805013,
+      "tag": "0003_m1_members",
+      "breakpoints": true
     }
   ]
 }

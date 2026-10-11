@@ -8,7 +8,7 @@ const varcharBin = customType<{ data: string; config: { length: number } }>({
 });
 const textBin = customType<{ data: string }>({ dataType: () => "text CHARACTER SET utf8mb4 COLLATE utf8mb4_bin" });
 
-// 회원. Better Auth 칼럼 + 권한 칼럼 다섯
+// 회원. Better Auth 칼럼 + 권한 칼럼 다섯 + 삭제 시각
 export const user = mysqlTable("user", {
   id: varchar("id", { length: 36 }).primaryKey(),
   name: text("name").notNull(),
@@ -22,6 +22,7 @@ export const user = mysqlTable("user", {
   monthlyLimitUsd: decimal("monthly_limit_usd", { precision: 12, scale: 6, mode: "number" }),
   maxKeys: int("max_keys"),
   isBootstrapAdmin: boolean("is_bootstrap_admin").default(false).notNull(),
+  deletedAt: datetime("deleted_at", { fsp: 3 }),
 });
 
 // 로그인 세션
@@ -120,7 +121,11 @@ export const invites = mysqlTable("invites", {
   expiresAt: datetime("expires_at", { fsp: 3 }).notNull(),
   usedAt: datetime("used_at", { fsp: 3 }),
   createdBy: varchar("created_by", { length: 36 }).notNull(),
-});
+  revokedAt: datetime("revoked_at", { fsp: 3 }),
+  usedBy: varchar("used_by", { length: 36 }),
+}, (table) => [
+  index("idx_invites_expires").on(table.expiresAt),
+]);
 
 // 회원 키와 OmniRoute 키의 대응 (계획서 5.2, 5.7)
 export const apiKeys = mysqlTable("api_keys", {
