@@ -1,0 +1,171 @@
+{
+  "item": "V32",
+  "question": "지금 구성에서 설치 뒤(관리자 있음) 로그인한 회원이 부를 수 있는 Better Auth 1.7.7 경로 가운데 회원 정보를 바꾸거나 회원을 만드는 것의 상태코드와 효과 (다섯 DB)",
+  "answer": {
+    "paths": [
+      {
+        "path": "/update-user email",
+        "status": 400,
+        "effect": "없음",
+        "createsUser": false
+      },
+      {
+        "path": "/update-user name",
+        "status": 200,
+        "effect": "이름 바뀜",
+        "createsUser": false
+      },
+      {
+        "path": "/update-user role·status",
+        "status": 400,
+        "effect": "없음",
+        "createsUser": false
+      },
+      {
+        "path": "/change-email",
+        "status": 400,
+        "effect": "없음",
+        "createsUser": false
+      },
+      {
+        "path": "/delete-user",
+        "status": 404,
+        "effect": "없음",
+        "createsUser": false
+      },
+      {
+        "path": "/delete-user/callback",
+        "status": 404,
+        "effect": "없음",
+        "createsUser": false
+      },
+      {
+        "path": "/unlink-account",
+        "status": 400,
+        "effect": "없음",
+        "createsUser": false
+      },
+      {
+        "path": "/link-social",
+        "status": 404,
+        "effect": "없음",
+        "createsUser": false
+      },
+      {
+        "path": "/sign-in/social",
+        "status": 404,
+        "effect": "없음",
+        "createsUser": true
+      },
+      {
+        "path": "/callback/google",
+        "status": 302,
+        "effect": "없음",
+        "createsUser": true
+      },
+      {
+        "path": "/sign-in/sso",
+        "status": 404,
+        "effect": "없음",
+        "createsUser": false
+      },
+      {
+        "path": "/sso/callback/probe",
+        "status": 302,
+        "effect": "없음",
+        "createsUser": true
+      },
+      {
+        "path": "/sso/callback",
+        "status": 302,
+        "effect": "없음",
+        "createsUser": true
+      },
+      {
+        "path": "/sso/saml2/sp/acs/probe",
+        "status": 404,
+        "effect": "없음",
+        "createsUser": true
+      },
+      {
+        "path": "/sign-up/email",
+        "status": 403,
+        "effect": "없음",
+        "createsUser": true
+      },
+      {
+        "path": "/change-password",
+        "status": 200,
+        "effect": "비밀번호 바뀜",
+        "createsUser": false
+      },
+      {
+        "path": "/revoke-session",
+        "status": 200,
+        "effect": "세션 4→3",
+        "createsUser": false
+      },
+      {
+        "path": "/revoke-other-sessions",
+        "status": 200,
+        "effect": "세션 3→1",
+        "createsUser": false
+      },
+      {
+        "path": "/revoke-sessions",
+        "status": 200,
+        "effect": "세션 1→0",
+        "createsUser": false
+      }
+    ],
+    "mustDisable": [],
+    "backstopTargets": [
+      "/sign-in/social",
+      "/callback/google",
+      "/sso/callback/probe",
+      "/sso/callback",
+      "/sso/saml2/sp/acs/probe",
+      "/sign-up/email"
+    ],
+    "otherPaths": [
+      "(server) setPassword",
+      "/account-info",
+      "/error",
+      "/get-access-token",
+      "/get-session",
+      "/list-accounts",
+      "/list-sessions",
+      "/ok",
+      "/refresh-token",
+      "/request-password-reset",
+      "/reset-password",
+      "/reset-password/:token",
+      "/send-verification-email",
+      "/sign-in/email",
+      "/sign-out",
+      "/sso/delete-provider",
+      "/sso/get-provider",
+      "/sso/providers",
+      "/sso/register",
+      "/sso/saml2/logout/:providerId",
+      "/sso/saml2/sp/metadata",
+      "/sso/saml2/sp/slo/:providerId",
+      "/sso/update-provider",
+      "/update-session",
+      "/verify-email",
+      "/verify-password"
+    ],
+    "designImpact": "이메일을 바꾸거나 회원을 지우는 경로는 기본으로 닫혀 있다 (/change-email 400 비활성, /update-user email 400, /delete-user·/delete-user/callback 404 비활성) → M2.T1 이 disabledPaths 에 더할 경로는 없다. Q14 (가) '이메일 변경 막음'은 user.changeEmail·user.deleteUser 를 켜지 않는 것으로 지킨다 (켜지 않음을 M2 가 검사로 고정). 회원을 만들 수 있는 경로(이메일 가입, OAuth·SSO 콜백, SAML ACS, idToken 소셜 로그인)는 모두 user.create.before(userCreateGuard)를 지나고 지금은 거부·제공자 없음으로 회원이 생기지 않는다 → 3단계 초대·정책 판정은 그 훅과 앞 판정 두 자리에 둔다. 로그인한 회원이 이름·비밀번호·자기 세션은 바꿀 수 있다 (역할·상태는 input:false 로 400)"
+  },
+  "evidence": [
+    "실측 (2026-10-11, better-auth 1.7.7 + @better-auth/sso 1.7.7): packages/auth/test/verify-p3/v32.test.ts (TC-M0.T5.a × 네 DB), apps/server/test/verify-p3/v32.workers.test.ts (Workers + D1, transaction: false). Node 네 DB 와 transaction: false 로 올린 D1 이 같다 (D1 운영 구성은 V29 d1Transaction). 인증된 회원 세션 넷, 관리자 1명(설치 뒤) 상태에서 measure.ts V32_CALLS 순서로 부르고 user·account·session 을 앞뒤로 비교",
+    "경로 목록은 auth.api 의 키에서 뽑았다 (경로 없는 서버 전용 setPassword 포함). TC-M0.T5.a 는 auth.api 의 경로 전체 == 부른 경로 ∪ otherPaths 를 단언해, 판을 올려 새 경로가 생기면 실패한다",
+    "소스: update-user.mjs:52 body.email → EMAIL_CAN_NOT_BE_UPDATED 400, :278·:366 user.deleteUser.enabled 없으면 /delete-user·/delete-user/callback 404, :425 user.changeEmail.enabled 없으면 /change-email 400. 역할·상태·최초 관리자 칼럼은 input: false 라 /update-user 400 (V17)",
+    "createsUser: sign-up.mjs createUser, oauth2/link-account.mjs handleOAuthUserInfo → createOAuthUser (/callback/:id, /sign-in/social 의 idToken 로그인), @better-auth/sso callbackSSO·callbackSSOShared·acsEndpoint 의 JIT. 지금은 제공자가 없어 404·302 오류 리다이렉트로 끝나고, 제공자가 생겨도 userCreateGuard 가 설치 뒤 400 SIGNUP_CLOSED 로 막는다 (TC-SEC.1.b)",
+    "otherPaths 가운데 회원 행을 쓰는 것: /reset-password (credential 계정이 없으면 새로 만든다, password.mjs:161 — 5단계 SSO 전용 회원에게 비밀번호가 생기는 길), /verify-email (emailVerified, 이메일 변경 확인 링크는 change-email 이 꺼져 있어 생기지 않음), (server) setPassword (서버 전용)",
+    "음성 대조 (2026-10-11): paths[0](/update-user email).status 200 → TC-M0.T5.a 실패, mustDisable [\"/change-email\"] → TC-M0.T5.a 실패, otherPaths 에서 /sso/register 를 뺌 → 경로 전체 단언 실패, 시험 구성 plain 에 user.changeEmail { enabled: true } → /change-email 응답·효과가 달라져 TC-M0.T5.a 실패 (여기까지 SQLite). D1: paths[1](/update-user name).effect '없음' → TC-M0.T5.a 실패"
+  ],
+  "blocking": false,
+  "was_blocking": false,
+  "resolved_in": null
+}

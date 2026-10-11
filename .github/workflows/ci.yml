@@ -342,6 +342,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/gate.mjs K6 --explain
 
+  p3-m0:
+    name: 확인 (M0 게이트, 다섯 DB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # V29~V32 를 Node 네 DB(테스트 DB 는 packages/auth 실행기가 docker compose 로 띄운다)와 로컬 D1(시험 Worker, wrangler dev)에서 돈다.
+    # G-M0.13 은 gh api 로 main 규칙을 읽는다.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: M0 게이트
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/gate.mjs M0 --explain
+
   s1-seal:
     name: 확인 항목 (S1 게이트, 봉인 커밋에서)
     runs-on: ubuntu-latest

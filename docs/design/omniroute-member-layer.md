@@ -5,9 +5,10 @@
 실행판(1단계)은 [`../plan/phase1-todo.md`](../plan/phase1-todo.md) 다.
 2단계 실행판은 [`../plan/phase2-todo.md`](../plan/phase2-todo.md) 다.
 3단계 실행판은 [`../plan/phase3-todo.md`](../plan/phase3-todo.md) 다 (맨 위에 사용자에게 묻는 설계 질문 Q1~Q20).
-상태: 초안 v5.7 (설계 검토 1회 + S1 확인 + S2 리뷰 + S4 보안 리뷰 + K0 확인 반영)
+상태: 초안 v5.8 (설계 검토 1회 + S1 확인 + S2 리뷰 + S4 보안 리뷰 + K0 확인 + 3단계 M0 확인 반영)
 
 변경 이력
+- v5.8: 3단계 M0 확인(`../verify/` V29~V32)과 3단계 질문 결정(모두 추천안, 2026-10-11) 반영. Q1 설치 뒤 공개 가입 일괄 차단은 보안 고침 #13 으로 이미 들어감. Q2 3단계는 API 만, 로그인·가입·초대 수락 화면은 4단계 앞머리 (6장). Q3 초대는 `invite_only`·`open`·`domain_allowlist`에서만. Q4 초대는 한 번만, 만료 기본 7일·최대 30일, 이메일 지정 초대는 그 이메일로만, 취소 가능. Q5 이메일 지정 초대 수락 = 인증됨, 메일 없는 설치는 이메일 없는 링크 불가. Q6 승인은 자기 가입에만. Q7 `pending`·`suspended` 로그인 차단. Q8 상태 전이 넷, 거절 = 행 삭제. Q9 삭제 회원은 행을 남기고 개인정보·토큰을 지움. Q10 자기 탈퇴. Q11 역할 둘 그대로. Q12 최초·마지막 활성·자기 자신 관리자 보호. Q13 하루 상한은 실제로 생긴 자기 가입만 커밋 뒤 셈. Q14 도메인 정확히 일치·이메일 변경 막음. Q15 메일 = `mail_settings` 행, fail-closed. Q16 가입 때 기본 한도 복사, 설정 API 는 null 을 받지 않음. Q17 3단계 상태 변경을 모두 감사 기록 (개인정보 없음·무기한). Q18 켜진 IdP 가 없으면 `sso_only` 저장 거부. Q19 정책 거부는 403·사유 코드. Q20 설치 뒤 메일 설정 API. 확인 결과로 가입 거부 사유는 이메일을 찾기 전 `hooks.before`에 두고 생성 훅은 뒷받침 (V29), 세션 행 삭제는 바로 걸림 (V30), 로그인 차단은 `session.create.before` (V31), 이메일 변경·회원 삭제 경로는 기본으로 닫힘 (V32). V29 가 막은 것 둘: D1 은 Better Auth 트랜잭션을 켜면 가입·재설정·OAuth/SSO JIT 가 500 (3단계 전 고침 PR #15 (`fix/d1-transaction`) 이 D1 에서 끈다), Node SQLite 는 동시 가입이 `SQLITE_BUSY`로 깨짐 (3단계 M2 가 고친다) (3.2). 5.9 의 낡은 문장(사용량 데이터를 DB 에 두지 않음)을 `usage_daily`에 맞춤.
 - v5.7: 확인 15번 결정(선택지 B). 1분 분배는 오늘(UTC) 창만 분석으로 부르고, 지난 날 몫은 `usage_daily`에 키·날짜별로 저장한다. 날이 바뀐 첫 분배가 어제를 확정 저장하고, 하루 한 번 이번 달 1일~어제를 다시 불러 대조한다(차이는 `alert.usage_drift`). 측정 기준은 오늘 창 p95 ≤ 2초·회원 하나 ≤ 1초·대조 ≤ 임대 55초 (5.3·5.4·5.9·8장).
 - v5.6: K0 확인(`../verify/` V12·V13·V15·V18·V19·V20)과 설계 공백 결정 반영. Q1 남은 한도가 0 이면 키를 끈다(`disabled_reason` `limit`, 한도가 다시 생기면 자동으로 켬, 목표 상태 입력에 남은 한도). Q2 재시도 간격 1분·2분·10분·30분 (실행기 최소 주기 1분). Q3 4번째 재시도 실패 → 작업 `failed`·키 `sync_state` `failed`, 정합성 점검이 계속 다시 맞추고 `failed` 30분이 지나면 "오래 실패". Q4 키 발급 요청 수 제한 회원당 1시간 10회·IP 당 1시간 30회 (429). Q5 1분 분배가 달 바뀜을 스스로 판단 (월간 cron 없음). Q6 "관리자에게 알린다" = `audit_log` action `alert.<종류>`. 확인 결과로 재발급은 `regenerate` 대신 새 키 발급 + 옛 키 삭제, 삭제는 끄고 60초가 지난 뒤 `DELETE` (V18·V19), 쿼터 풀 공동 예산은 쓰지 않고 분배 유지 (V12), 월 기준은 UTC (V20). 확인 15번(분석 API 성능)은 기준을 넘어 5.3 의 1분 분배 분석 호출 방식이 아직 열려 있다.
 - v5.5: S4 보안 리뷰 반영. Workers 조합의 요청 수 제한 저장소도 DB(`rate_limit`)로 바꾼다 (KV 아님).
@@ -132,7 +133,9 @@ DB 지원 원칙
   - 금액은 `REAL` 대신 소수 자리를 정한 `DECIMAL(12,6)`(SQLite·D1은 실수)로 둔다.
   - 대소문자 구분: 이메일은 소문자로 바꿔 저장한다. MySQL 기본 정렬 규칙은 대소문자를 구분하지 않아 다른 DB와 결과가 달라질 수 있다.
   - SQLite 드라이버는 libSQL만 쓴다. better-sqlite3는 트랜잭션이 동기 전용이라 Better Auth 트랜잭션 경로에서 500이 나고, 그러면서도 user 행이 남아 원자성이 깨진다 (V26).
-  - Better Auth Drizzle 어댑터는 네 DB 모두 `drizzleAdapter(db, { transaction: true })`. 기본값 false면 SSO 로그인이 `SSO_USER_RESOLUTION_REQUIRES_NATIVE_TRANSACTIONS`로 거부된다 (V26).
+  - Better Auth Drizzle 어댑터는 Node 네 DB 모두 `drizzleAdapter(db, { transaction: true })`. 기본값 false면 SSO 로그인이 `SSO_USER_RESOLUTION_REQUIRES_NATIVE_TRANSACTIONS`로 거부된다 (V26).
+  - D1 은 `transaction: false`여야 한다 (v5.8, V29). 지금 코드(`packages/auth/src/index.ts`)는 D1 에도 `true`라, D1 이 Drizzle 의 `begin`을 거부해 Better Auth 의 `runWithTransaction` 경로가 모두 500 이다: 가입, 비밀번호 재설정(`consumeVerificationValue`), OAuth·SSO JIT(`createOAuthUser`, `@better-auth/sso` 4곳). 설치 뒤에는 앞 판정이 가입을 트랜잭션 전에 막아 드러나지 않았고, 재설정 500 은 M0 리뷰가 찾았다. 3단계 전 고침 PR #15 (`fix/d1-transaction`) 이 D1 에서만 `false`로 바꾼다. 끄면 가입의 user·account 삽입이 한 트랜잭션이 아니다. 그래서 가입 거부는 삽입 전 자리(`hooks.before`·`user.create.before`)에서만 한다. account 삽입이 실패해 비밀번호 없는 user 가 남으면 비밀번호 재설정이 credential 계정을 새로 만들어 되살린다 (`password.mjs:161`).
+  - SQLite(libSQL)는 Better Auth 가입 트랜잭션 둘이 겹치면 훅과 관계없이 `SQLITE_BUSY`로 500 이다 (V29: 3건 동시 → 2건 실패, 10건 동시 → 10건 실패. libSQL `timeout`으로도 풀리지 않고, WAL + `timeout`은 멈춘다 — 동기 드라이버라 기다리는 동안 앞 트랜잭션이 끝나지 못한다). Docker + SQLite 는 인스턴스 하나이므로 3단계 M2 가 그 프로세스 안에서 고친다. 방법은 M2 가 정하고, 동시 가입 10건이 모두 성공하는 것으로 확인한다.
   - Better Auth는 이메일을 소문자로 바꿔 저장한다. Better Auth를 거치지 않고 이메일을 쓰거나 찾는 우리 코드도 같은 규칙을 따른다. 직접 넣으면 SQLite·Postgres는 대소문자 중복을 받고 MySQL·MariaDB는 정렬 규칙 때문에 거부해 DB마다 결과가 달라진다 (V26).
   - 요청 수 제한: Docker 조합은 Better Auth `rateLimit: { storage: "database" }`로 `rate_limit` 테이블에 센다. 여러 인스턴스가 한도를 함께 센다. 스키마를 바꾸는 Better Auth 옵션(추가 칼럼, 플러그인, `rateLimit` 저장소)은 `packages/db/src/auth-options.ts` 한 곳에 두고 스키마 생성기와 Better Auth 구성이 같이 쓴다.
   - 시각 칼럼은 MySQL·MariaDB에서 `DATETIME(3)`로 둔다. `TIMESTAMP`는 2038-01-19 이후 값을 거부한다. 값은 UTC로 쓰고 읽는다.
@@ -142,7 +145,7 @@ DB 지원 원칙
 - OmniRoute는 어느 조합이든 상시 서버 1대(Docker)에서 돈다. Workers 조합은 회원 앱만 Workers로 옮긴 형태다.
 - 플랫폼 의존 코드는 `src/runtime/` 어댑터로 모은다: DB 연결, 작업 스케줄, 요청 수 제한 저장소, 비밀 값 읽기, 클라이언트 IP 얻기.
 - 여러 인스턴스(MySQL·Postgres)에서는 작업이 중복 실행되지 않게 `job_leases` 테이블로 임대 잠금을 건다 (5.9).
-- **D1 제약**: D1은 대화형 트랜잭션이 없어 Better Auth `resolveUser`(SSO 도메인 검사·역할 계산에 쓰는 훅)를 쓸 수 없다. 대체 수단(8장 확인 22번)이 검증되기 전까지 D1 조합에서는 SSO 설정 화면을 잠근다. 검사를 못 하는 채로 SSO를 여는 것보다 기능을 막는 쪽이 안전하다.
+- **D1 제약**: D1은 대화형 트랜잭션이 없어 Better Auth 를 `transaction: false`로 올려야 한다 (위 작성 규칙, V29). 그래서 `resolveUser`(SSO 도메인 검사·역할 계산에 쓰는 훅)를 쓸 수 없다. 대체 수단(8장 확인 22번)이 검증되기 전까지 D1 조합에서는 SSO 설정 화면을 잠근다. 검사를 못 하는 채로 SSO를 여는 것보다 기능을 막는 쪽이 안전하다.
 
 ### 3.3 회원 앱 ↔ OmniRoute 연결
 
@@ -174,22 +177,34 @@ DB 지원 원칙
 | `invite_only` | 운영자 초대 링크로만 가입 (기본값) | 아니요 (링크를 화면에서 복사) |
 | `open` | 누구나 가입 | **예** |
 | `domain_allowlist` | 허용한 이메일 도메인만 가입 | **예** |
-| `sso_only` | 로컬 가입 막음. IdP 로그인 시 자동 생성(JIT) | 아니요 |
-| `closed` | 신규 가입 막음 | 아니요 |
+| `sso_only` | 로컬 가입 막음. IdP 로그인 시 자동 생성(JIT, 5단계). 켜진 IdP 가 없으면 저장할 수 없다 (409 `no_idp`) | 아니요 |
+| `closed` | 신규 가입 막음. 초대도 막는다 | 아니요 |
 
 - 메일이 설정되지 않았으면 `open`·`domain_allowlist`를 고를 수 없다. 이메일 인증 없이는 도메인 제한도, "인증 후 키 발급"도 의미가 없기 때문이다.
+  - "메일 설정됨"은 `app_settings.mail_settings` 행이 있다는 뜻이다. 저장 때 409 `mail_required`, 가입 때도 다시 봐서 거부한다 (fail-closed). 메일 설정을 지우는 API 는 두지 않는다 (v5.8).
+  - 설치 때 메일을 건너뛴 설치도 나중에 고를 수 있게 메일 설정 API(`PUT /api/admin/settings/mail`, 관리자에게 보내는 테스트 메일)를 3단계에 둔다. 화면은 7단계 (v5.8).
+- 허용 도메인은 정확히 일치해야 한다. 소문자로 비교하고 국제 도메인은 punycode 로 저장해 비교한다. 하위 도메인은 포함하지 않고 `*.` 표기는 없다 (v5.8).
+- 공개 가입을 정책이 거부하면 명시적 403 과 사유 코드(`signup_closed`·`domain_not_allowed`·`mail_required`·`signup_cap`)를 낸다. 판정은 Better Auth 가 이메일을 찾기 **전** 자리(서버 `/api/auth/*` 미들웨어, Better Auth `hooks.before`)에서 해서, 같은 정책·같은 도메인이면 있는 이메일·없는 이메일 응답이 같다 (v5.8, V29).
+  - `databaseHooks.user.create.before`는 경로와 관계없이 모든 회원 생성의 뒷받침이다. 그 자리의 403 은 Better Auth 가 가짜 200 으로 숨기고, 400 은 숨기지 않아 이미 있는 이메일(가짜 200)과 응답이 갈린다 (V29). 그래서 공개 가입의 사유 응답에는 쓰지 않고, 거부는 행 수로 시험한다.
 - 기본값이 `invite_only`인 이유: 설치 직후 모르는 사람이 가입해 운영자 비용을 쓰는 일을 막는다.
 
 `open`일 때 남용 방지
 - 이메일 인증을 마쳐야 키를 발급할 수 있다.
-- 가입 직후 상태는 기본 `pending`(운영자 승인 필요). 운영자가 설정에서 끌 수 있다.
+- 가입 직후 상태는 기본 `pending`(운영자 승인 필요). 운영자가 설정에서 끌 수 있다. 승인은 자기 가입(`open`·`domain_allowlist`)에 걸고 초대 수락은 바로 `active`다 (v5.8).
 - 신규 회원 기본 월 한도 (설정값, 기본 $5)와 기본 최대 키 개수 (설정값, 기본 2).
+  - 가입·초대 수락 때 `default_limit_usd`를 회원 행 `monthly_limit_usd`에 복사한다 (보안 고침 #13 이 구현). 기본값을 나중에 바꿔도 기존 회원은 그대로다. `max_keys`는 NULL 로 두어 기본값을 계속 따른다. 설정 API 는 기본 한도로 null 을 받지 않는다. 무제한은 관리자가 회원마다 준다 (v5.8).
 - 하루 가입 수 상한 (설정값, 기본 20). 넘으면 그날 가입을 막고 운영자에게 알린다.
+  - UTC 날짜로 센다. 실제로 생긴 자기 가입만 `user.create.after`(가입 트랜잭션 커밋 뒤, V29)에서 센다. 앞 판정은 오늘 수를 읽기만 하므로, 같은 순간 앞 판정을 지난 가입은 상한을 조금 넘을 수 있다. 실패한 시도·이미 있는 이메일·초대 수락은 세지 않는다. `null`은 상한 없음, `0`은 자기 가입을 모두 막음. 넘으면 403 `signup_cap`, `audit_log` `alert.signup_cap`은 하루 한 번 (v5.8).
 - CAPTCHA는 2차.
 
 초대
 - 초대 링크는 역할과 만료 시각을 가진다.
 - **관리자 역할 초대는 이메일 지정이 필수다.** 이메일이 없는 링크는 `member` 역할로만 만들 수 있다. 링크가 새어도 관리자 권한이 넘어가지 않게 한다.
+- 초대는 `invite_only`·`open`·`domain_allowlist`에서 통한다. `closed`·`sso_only`에서는 만들기도 수락도 409 `signup_closed`다 (v5.8).
+- 모든 초대는 한 번만 쓴다. 만료 기본 7일, 최대 30일. 이메일을 지정한 초대는 그 이메일로만 수락한다. 관리자가 취소할 수 있다 (v5.8).
+- 이메일을 지정한 초대를 수락하면 `emailVerified = true`로 만든다. 관리자가 그 주소의 주인에게 링크를 건넸다고 본다. Better Auth 는 `emailVerified`와 관계없이 가입 인증 메일을 보내므로(V29) 발송기가 초대 문맥을 보고 건너뛴다. 이메일 없는 링크로 가입하면 인증 메일로 인증한다. 메일 없는 설치에서는 이메일 없는 링크를 만들 수 없다 (409 `mail_required`). 남는 위험은 4.4 (v5.8).
+- 초대에 한도를 싣지 않는다. 관리자가 수락 뒤 회원 한도를 바꾼다 (v5.8).
+- 초대 수락은 서버가 앱 쪽 `AsyncLocalStorage` 초대 문맥 안에서 `auth.api.signUpEmail`을 부른다. Better Auth 1.7.7 은 서버 호출에도 `hooks.before`를 돌리므로, 앞 판정과 생성 훅이 그 문맥을 보고 초대 가입으로 판정한다. 문맥은 Node·Workers 모두 두 훅과 `user.create.after`에서 보이고, 공개 요청은 본문·헤더로 만들 수 없다 (V29).
 
 ### 4.3 SSO 제공자 설정 화면
 
@@ -235,6 +250,7 @@ DB 지원 원칙
   - 공격자가 피해자 이메일로 로컬 계정을 먼저 만들어 두고, 피해자가 나중에 IdP로 로그인할 때 그 계정에 붙는 선점 공격을 막는다.
   - 인증 안 된 로컬 계정이 있으면 연결하지 않고, 회원에게 "로컬 계정 이메일 인증 후 연결"을 안내한다.
 - `trustEmailVerified`는 켜지 않는다.
+- 초대로 인증된 계정(4.2, 이메일 지정 초대)은 이메일 소유를 메일로 확인하지 않았다. 관리자가 이메일을 잘못 치거나 링크가 새면 남의 주소로 인증된 계정이 생기고, 그 주소 주인이 나중에 IdP 로 로그인할 때 그 계정에 붙으면 위의 선점 공격과 같은 결과다. 5단계가 "초대로 인증된 계정은 자동 연결하지 않음"을 따로 정한다 (v5.8, 5단계 보안 리뷰 대상).
 - 회원은 내 정보 화면에서 연결된 로그인 방식을 보고 끊을 수 있다. 마지막 남은 로그인 방식은 끊을 수 없다.
 
 ### 4.5 역할과 세션
@@ -244,18 +260,30 @@ DB 지원 원칙
 | `member` | 자기 키·사용량 |
 | `admin` | 전체 회원·사용량, 설정, IdP 관리 |
 
+역할은 이 둘뿐이다. 읽기 전용 관리자 등은 2차.
+
 - IdP 역할 매핑은 로그인할 때마다 다시 계산한다. 최초 관리자는 매핑 결과와 관계없이 `admin`을 유지한다.
 - 구현: `resolveUser`(트랜잭션 안, 원본 클레임 수신)에서 도메인 검사와 함께 역할을 계산한다. `provisionUser` + `provisionUserOnEveryLogin: true` 경로를 쓸 때는 세션이 생긴 뒤 실행되므로, 역할 갱신이 실패하면 방금 만든 세션을 무효화한다.
-- **세션 무효화**: 다음 경우에 해당 회원의 모든 세션을 지운다.
+- **세션 무효화**: 다음 경우에 해당 회원의 모든 세션 행을 지운다. Better Auth 쿠키 캐시(`session.cookieCache`)는 켜지 않는다. 꺼져 있으면 세션 행을 지운 다음 요청부터 세션이 없다. 켜면 지운 세션이 캐시 수명 동안 살아 있다 (V30).
   - 역할 변경, 정지, 탈퇴
   - IdP 삭제·비활성화 (그 IdP로 만든 세션)
-  - 비밀번호 변경 (현재 세션 제외)
+  - 비밀번호 변경 (현재 세션 제외). Better Auth `/change-password`는 클라이언트가 `revokeOtherSessions`를 보낼 때만 다른 세션을 지우므로 서버가 강제한다 (V30)
+  - 비밀번호 재설정 (모든 세션). `revokeSessionsOnPasswordReset`을 켠다. 꺼져 있으면(지금) 재설정 뒤에도 세션이 그대로다 (V30)
+- 로그인과 정지가 겹치면 `databaseHooks.session.create.after`에서 방금 만든 세션 행을 지운다. 그 응답의 쿠키는 바로 쓸모없어진다 (V31).
+
+회원 상태 (v5.8)
+- 전이는 넷만 허용하고 그 밖은 409 다: `pending → active`(승인), `pending → 행 삭제`(거절. 키·사용 기록이 없으므로 같은 이메일로 다시 가입할 수 있게 지운다), `active ↔ suspended`, `active·suspended → deleted`(되돌릴 수 없음).
+- `pending`·`suspended` 회원은 로그인되지 않는다. 비밀번호가 맞을 때만 403 `account_pending`·`account_suspended`를 내고 세션을 만들지 않는다. 틀린 비밀번호는 상태와 관계없이 401 이라 상태로 계정 존재가 더 드러나지 않는다. 자리는 `databaseHooks.session.create.before`다. 비밀번호 재설정·이메일 인증 링크는 세션을 만들지 않는다 (`autoSignInAfterVerification` 꺼짐) (V31).
+- 관리자 보호: 최초 관리자(`is_bootstrap_admin`)는 강등·정지·삭제할 수 없다. 마지막 활성 관리자는 강등·정지·삭제할 수 없다. 자기 자신은 강등·정지할 수 없다. 관리자가 다른 관리자를 정지하는 것은 된다.
+- 탈퇴: 관리자 삭제와 자기 탈퇴(`DELETE /api/me` + 비밀번호 재확인, 최초 관리자는 불가). `open` 정책에서 외부 사용자가 자기 계정을 지울 길이 있어야 한다.
+- 삭제한 회원의 데이터: `user` 행은 남기고 개인정보를 지운다 (이메일 `deleted-<id>@invalid`, 이름 빈 값, `deleted_at`). `account`·`session`, 그 회원의 `verification` 행(재설정 토큰 값이 회원 id 다)은 지운다. `api_keys` 행(`deleted`, 사용액 근거)·OmniRoute 기록·`usage_daily`·`audit_log`는 남긴다. OmniRoute 키는 5.2 순서(끄기 → 60초 → `DELETE`)로 지운다. 회원 한도는 계정 단위라 같은 사람이 탈퇴 뒤 다시 가입하면 그달 한도를 새로 받는다. `open`에서는 다른 이메일로 가입해도 같으므로 사람 단위 한도는 지킬 수 없다 — 운영 문서에 적는다.
 
 ### 4.6 권한 칼럼 보호
 
 - Better Auth `user` 테이블에 더하는 칼럼(`role`, `status`, `monthly_limit_usd`, `max_keys`, `is_bootstrap_admin`)은 모두 `input: false`로 둔다. Better Auth 추가 칼럼은 기본이 입력 허용이라, 지정하지 않으면 가입·회원정보 수정 요청 본문에 `role=admin`을 넣어 관리자가 될 수 있다.
 - 실제 동작 (V17): 회원정보 수정은 다섯 칼럼 모두 `400 FIELD_NOT_ALLOWED`. 가입은 기본값이 있는 칼럼(`role`, `status`, `is_bootstrap_admin`)을 조용히 기본값으로 바꿔 200, 기본값이 없는 칼럼(`monthly_limit_usd`, `max_keys`)은 400. 어느 경우든 DB에는 기본값이 남는다.
 - 이 칼럼은 관리자 API에서만 바꾼다. 회귀 테스트는 칼럼마다 따로 보내 "200 + 기본값 유지" 또는 "400 + 계정 미생성"을 통과로 본다.
+- 로그인한 회원이 Better Auth 로 바꿀 수 있는 것은 이름·비밀번호·자기 세션뿐이다 (V32). 이메일 변경(`/change-email` 400, `/update-user`의 `email` 400)과 회원 삭제(`/delete-user` 404)는 Better Auth 기본으로 닫혀 있다. 허용 도메인으로 가입한 뒤 바깥 도메인으로 옮기거나 `user` 행을 지워 사용액 근거를 없애지 못하게 `user.changeEmail`·`user.deleteUser`를 켜지 않는다 (v5.8). 회원을 만들 수 있는 Better Auth 경로(이메일 가입, OAuth·SSO 콜백, SAML ACS, idToken 소셜 로그인)는 모두 `user.create.before`를 지난다.
 
 ### 4.7 최초 설치
 
@@ -431,23 +459,25 @@ OmniRoute 쿼터 풀 일정 예산은 배정된 키 여럿의 소비를 합쳐 �
 
 ### 5.9 데이터 모델
 
-Better Auth 테이블(`user`, `session`, `account`, `verification`, `ssoProvider`, `rateLimit`)은 그대로 쓰고, `user`에 칼럼을 더한다. 사용량 데이터는 OmniRoute에 있으므로 우리 DB에 두지 않는다.
+Better Auth 테이블(`user`, `session`, `account`, `verification`, `ssoProvider`, `rateLimit`)은 그대로 쓰고, `user`에 칼럼을 더한다. 요청 기록·분석은 OmniRoute 에 있고 우리 DB 에 옮기지 않는다. 우리 DB 에는 1분 분배가 쓰는 지난 날 키별 비용(`usage_daily`, v5.7)만 둔다.
 
 아래는 의미를 보여주는 SQLite 표기다. 실제 스키마는 3.2의 작성 규칙에 따라 Drizzle로 DB별로 만든다 (id는 `VARCHAR(36)`, 금액은 `DECIMAL(12,6)` 등).
 
 ```sql
 -- Better Auth user 테이블 추가 칼럼 (additionalFields, 모두 input: false)
 --   role               TEXT NOT NULL DEFAULT 'member'   -- member | admin
---   status             TEXT NOT NULL DEFAULT 'active'   -- pending | active | suspended | deleted
+--   status             TEXT NOT NULL DEFAULT 'active'   -- pending | active | suspended | deleted (전이는 4.5)
 --   monthly_limit_usd  REAL                             -- NULL이면 무제한
 --   max_keys           INTEGER                          -- NULL이면 설정 기본값
 --   is_bootstrap_admin INTEGER NOT NULL DEFAULT 0
+--   deleted_at         TEXT                             -- 삭제(탈퇴) 시각. 개인정보를 지운 행 (4.5, v5.8)
 
 CREATE TABLE app_settings (
   key        TEXT PRIMARY KEY,           -- signup_mode, allowed_domains, default_limit_usd, default_max_keys,
                                          -- signup_requires_approval, daily_signup_cap, public_base_url,
                                          -- budget_rebalance_month (1분 분배의 마지막 실행 달, UTC "YYYY-MM", 5.3),
-                                         -- usage_daily_confirmed (확정·대조한 마지막 날, UTC "YYYY-MM-DD", 5.3), ...
+                                         -- usage_daily_confirmed (확정·대조한 마지막 날, UTC "YYYY-MM-DD", 5.3),
+                                         -- mail_settings (메일 공급자, apiKey 는 APP_ENCRYPTION_KEY 로 암호화, 4.2), ...
   value      TEXT NOT NULL,              -- JSON
   updated_at TEXT NOT NULL,
   updated_by TEXT
@@ -471,8 +501,10 @@ CREATE TABLE invites (
   email       TEXT,                      -- role = admin이면 NOT NULL (앱에서 검사)
   token_hash  TEXT NOT NULL UNIQUE,
   role        TEXT NOT NULL DEFAULT 'member',
-  expires_at  TEXT NOT NULL,
-  used_at     TEXT,
+  expires_at  TEXT NOT NULL,              -- 기본 7일, 최대 30일 (4.2)
+  used_at     TEXT,                      -- 한 번만 쓴다
+  used_by     TEXT,                      -- 수락으로 생긴 회원 (v5.8)
+  revoked_at  TEXT,                      -- 관리자 취소 (v5.8)
   created_by  TEXT NOT NULL
 );
 
@@ -521,17 +553,19 @@ CREATE TABLE audit_log (
   actor_id   TEXT,
   action     TEXT NOT NULL,
   target     TEXT,
-  detail     TEXT,                       -- JSON, 비밀 값 제외
+  detail     TEXT,                       -- JSON, 비밀 값·이메일·이름 제외 (탈퇴로 지운 개인정보가 남지 않게, v5.8)
   ip         TEXT,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL               -- 보존 기한 없음
 );
 ```
+
+감사 기록 action (3단계, v5.8): 가입 `member.signup`, 초대 `invite.create`·`invite.revoke`·`invite.accept`, 회원 `member.approve`·`member.reject`·`member.suspend`·`member.unsuspend`·`member.role`·`member.delete`, 정책·메일 설정 `settings.update`, 하루 상한 `alert.signup_cap`. `target`은 회원·초대 id 다.
 
 ## 6. 화면
 
 | 화면 | 보는 사람 | 내용 |
 |---|---|---|
-| 로그인·가입 | 모두 | 이메일·비밀번호, IdP 버튼, 이메일 도메인 기반 SSO 이동, 초대 수락 |
+| 로그인·가입 | 모두 | 이메일·비밀번호, IdP 버튼, 이메일 도메인 기반 SSO 이동, 초대 수락(`<공개 주소>/invite#<토큰>`), 승인 대기·정지 안내. 4단계 앞머리에 만든다 (3단계는 API 만, v5.8) |
 | 내 사용량 | 회원 | 이번 달 추정 비용과 한도 비율, 일별 추이, 모델별 비중, 최근 요청 |
 | 키 관리 | 회원 | 발급(원문 한 번만, 남은 발급 가능 개수 표시), 이름 변경, 끄기, 키별 이번 달 사용량, 도구별 설정 예시 |
 | 내 정보 | 회원 | 이름, 비밀번호 변경, 연결된 로그인 방식 |
@@ -578,6 +612,10 @@ OmniRoute 노출
 - 키 삭제 후 재발급으로 한도 초기화
 - 키 삭제·재발급 직후 옛 원문 키로 예산·기록 밖 사용 (확인 18·19번)
 - 키 없는 `/v1` 요청, 허용 목록 밖 `/v1` 경로
+- 정책이 거부한 가입의 응답·행·메일로 계정 존재 알아내기, 가입 응답 시간으로 계정 존재 알아내기 (3단계, V29)
+- 공개 가입 요청 본문·헤더로 초대 문맥 흉내 내기 (3단계, V29)
+- 정지·승인 대기 회원의 로그인, 정지 직후 옛 세션·로그인 경쟁 세션 (3단계, V30·V31)
+- 허용 도메인으로 가입한 뒤 이메일을 바깥 도메인으로 바꾸기 (3단계, V32)
 
 운영 안내 (README)
 - 외부 사용자에게 제공할 때는 정식 API 키로 연결한 제공자만 써야 한다. 개인 구독 계정 공유는 각 제공자 약관을 확인해야 한다.
@@ -612,6 +650,12 @@ OmniRoute 노출
 - 19. `regenerate`는 같은 id·지출·예산을 유지하지만 옛 원문 키가 60초 동안 기록 없이 통과한다 → 재발급은 새 키 + 옛 키 삭제 (5.2)
 - 20. 월 예산은 UTC, 매달 1일 00:00 초기화. 올리고 내리면 다음 요청부터. 사용액 > 예산일 때만 막고 0 은 무제한 → 남은 한도 0 이면 키를 끈다 (5.3, 5.7)
 
+**확인 끝 (3단계 M0, `../verify/`)**
+- 29. 가입을 막는 자리: `hooks.before` 403 은 이메일 존재와 무관하고 행·메일 0, `user.create.before` 403 은 가짜 200·행 0, 400 은 숨기지 않음. 생성 훅 data 가 `emailVerified` 등을 덮지만 인증 메일은 나감. 앱 ALS 초대 문맥은 서버 호출의 두 훅·`create.after`에서 보이고 위조 불가 (Node·Workers). `create.after`는 커밋 뒤. 막은 것: D1 은 `transaction: true`로 가입·재설정·OAuth/SSO JIT 가 500 (3단계 전 고침 PR #15 (`fix/d1-transaction`)), Node SQLite 동시 가입 `SQLITE_BUSY` (3단계 M2) (3.2)
+- 30. 쿠키 캐시가 꺼져 세션 행을 지우면 다음 요청부터 세션 없음. `/change-password`는 `revokeOtherSessions` 없이 다른 세션을 남기고, `/reset-password`는 `revokeSessionsOnPasswordReset`이 꺼져 세션을 남김 (4.5)
+- 31. `session.create.before` 거부는 비밀번호가 맞을 때만 403·세션 0, 틀리면 401. 재설정·인증 링크는 세션을 만들지 않음. `session.create.after`가 방금 만든 세션을 지울 수 있음 (4.5)
+- 32. 이메일 변경·회원 삭제 경로는 기본으로 닫힘. 회원이 바꿀 수 있는 것은 이름·비밀번호·자기 세션. 회원을 만드는 경로 여섯은 모두 생성 훅을 지남 (4.6)
+
 **확인 남음 (1단계 초반)**
 
 OmniRoute
@@ -638,7 +682,7 @@ Better Auth
 | 0. 확인 | OmniRoute, Better Auth·Keycloak 실측 | 끝 |
 | 1. 뼈대 | Hono + Drizzle + Better Auth(이메일·비밀번호, 이메일 인증, 권한 칼럼 보호), 메일 어댑터, 런타임 어댑터, 설치 스크립트, 최초 설치 + OmniRoute 부트스트랩, Compose(Caddy 허용 목록, OmniRoute 고정), OmniRoute 어댑터 + 계약 테스트. 확인 10·11·16·17·21·26·27 | 여섯 조합(3.2) 모두에서 마이그레이션·설치·관리자 생성·로그인 성공. 계약 테스트 통과. 키 없는 `/v1`은 401 |
 | 2. 키·한도 | 키 발급 순서, 최대 개수, 남은 한도 분배 작업, 목표 상태 계산, 작업 큐, 정합성 점검, 작업 임대 잠금. 확인 12·13·15·18·19·20 | Claude Code가 발급 키로 동작. 끈 키 거부. 여러 키로 나눠 써도 회원 한도에서 429. 삭제·재발급으로 한도가 초기화되지 않음 |
-| 3. 회원·정책 | 가입 정책(메일 의존 제한 포함), 초대(관리자 초대 이메일 필수), 승인, 하루 가입 상한, 정지, 세션 무효화 | 정책별 시나리오와 7장 회귀 테스트 통과 |
+| 3. 회원·정책 | 가입 정책(메일 의존 제한 포함), 초대(관리자 초대 이메일 필수), 승인, 하루 가입 상한, 정지·탈퇴, 세션 무효화, 설치 뒤 메일 설정 API, 감사 기록. API 만 (화면은 4·7단계). Node SQLite 동시 쓰기 고침 (V29, D1 트랜잭션은 3단계 전 고침 PR #15 (`fix/d1-transaction`)). 확인 29·30·31·32 | 정책별 시나리오와 7장 회귀 테스트 통과 |
 | 4. 사용량 화면 | 내 사용량, 키별 사용량, 최근 요청(필드 허용 목록), 전체 현황 | 회원이 자기 데이터만 보임. 숫자가 OmniRoute 대시보드와 일치 |
 | 5. OIDC | 설정 화면에서 OIDC 추가, 연결 테스트, JIT, 역할 매핑, 계정 연결 조건, 비밀 값 암호화 어댑터, 공개 SSO 경로 차단. 확인 22·23 | Keycloak·Google OIDC로 가입·로그인·역할 반영. 7장 SSO 회귀 테스트 통과 |
 | 6. SAML | SAML 추가, SP 서명키 자동 생성, 검증 옵션 고정 | Keycloak SAML로 가입·로그인·역할 반영. SAML 공격 회귀 테스트 통과 |
