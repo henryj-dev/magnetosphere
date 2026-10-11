@@ -5,6 +5,7 @@
 //   임대를 늘리고, 늘리지 못하면 작업 신호를 끊는다 (runLeased, K1.T2). 같은 인스턴스에서 앞 경계 작업이 아직 돌면 건너뛴다.
 // - clientIp(): 소켓 상대 주소 + 신뢰 프록시 (packages/auth resolveClientIp). Request 에는 소켓이 없으므로
 //   listen() 이 요청마다 상대 주소를 묶어 둔다. listen() 을 거치지 않은 요청은 null 이다.
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -66,7 +67,9 @@ export async function connectNode(url: string): Promise<DbHandle> {
     const { drizzle } = await import("drizzle-orm/libsql");
     const schema = await import("@magnetosphere/db/src/schema/sqlite.ts");
     const client = createClient({ url });
-    return { kind: "sqlite", provider: "sqlite", db: drizzle(client, { schema }), schema, close: async () => client.close() };
+    const db = drizzle(client, { schema });
+    serializeSqliteWrites(url, client, db);
+    return { kind: "sqlite", provider: "sqlite", db, schema, close: async () => client.close() };
   }
   if (scheme === "mysql" || scheme === "mariadb") {
     const mysql = (await import("mysql2/promise")).default;
@@ -88,6 +91,68 @@ export async function connectNode(url: string): Promise<DbHandle> {
     return { kind: "pg", provider: "pg", db: drizzle(client, { schema }), schema, close: () => client.end() };
   }
   throw new Error(`DATABASE_URL 형식을 모른다: "${scheme}:" (file:, libsql:, mysql:, mariadb:, postgres: 중 하나)`);
+}
+
+/** SQLite 파일 하나의 쓰기 차례. 같은 파일에 붙은 연결(DbHandle)이 여럿이어도 한 프로세스에서는 하나를 같이 쓴다 */
+interface WriteQueue {
+  tail: Promise<void>;
+  /** 차례를 쥔 트랜잭션 안의 비동기 흐름. active 는 트랜잭션이 끝나면 false 가 된다 (그 뒤에 남은 흐름은 다시 차례를 기다린다) */
+  inTx: AsyncLocalStorage<{ active: boolean }>;
+}
+const writeQueues = new Map<string, WriteQueue>();
+
+/** 읽기 문장. 쓰기 잠금이 잡혀 있어도 SQLite 는 다른 연결의 읽기를 받는다 (동기 드라이버라 읽기 잠금이 문장 밖으로 남지 않는다) */
+const READ_SQL = /^\s*(select|pragma|explain)\b/i;
+
+/**
+ * Node SQLite(libSQL)의 쓰기를 프로세스 안 차례 하나로 돌린다 (3단계 실행판 M2.T7, V29 sqliteConcurrentSignUp).
+ * libSQL 클라이언트는 트랜잭션마다 풀에서 연결을 따로 잡는다 (@libsql/client sqlite3.js transaction()). 드라이버가 동기라 잠금을 기다리는 동안
+ * 앞 트랜잭션이 끝나지 못해, 한 프로세스 안에서 트랜잭션 둘이 겹치거나 열린 트랜잭션 옆에서 다른 연결이 쓰면 곧바로 SQLITE_BUSY 다
+ * (libSQL timeout 으로 풀리지 않는다). 그래서
+ *   - db.transaction 은 차례를 쥔 동안만 돈다. 트랜잭션 안의 비동기 흐름(Better Auth 훅이 바깥 연결로 읽는 것)은 차례를 다시 기다리지 않는다.
+ *   - 트랜잭션 밖의 쓰기 문장(execute·batch 등, rate_limit·세션 쓰기)도 같은 차례를 기다린다. 읽기는 기다리지 않는다.
+ *   - 트랜잭션 안의 흐름이 바깥 연결로 쓰면(그런 코드는 없다) 기다리지 않고 그대로 보낸다. 기다리면 자기 트랜잭션을 기다려 멈추므로
+ *     전처럼 SQLITE_BUSY 로 드러나게 둔다.
+ * MySQL·MariaDB·Postgres 는 이 함수를 거치지 않는다. Docker + SQLite 는 인스턴스(프로세스) 하나라 프로세스 안 차례로 충분하다.
+ */
+function serializeSqliteWrites(url: string, client: any, db: any) {
+  let q = writeQueues.get(url);
+  if (!q) writeQueues.set(url, (q = { tail: Promise.resolve(), inTx: new AsyncLocalStorage() }));
+  const queue = q;
+  const turn = async () => {
+    let release!: () => void;
+    const prev = queue.tail;
+    queue.tail = new Promise<void>((r) => (release = r));
+    await prev;
+    return release;
+  };
+  const inTx = () => queue.inTx.getStore()?.active === true;
+
+  const transaction = db.transaction.bind(db);
+  db.transaction = async (fn: unknown, config?: unknown) => {
+    if (inTx()) return transaction(fn, config);
+    const release = await turn();
+    const store = { active: true };
+    try {
+      return await queue.inTx.run(store, () => transaction(fn, config));
+    } finally {
+      store.active = false;
+      release();
+    }
+  };
+  for (const name of ["execute", "batch", "executeMultiple", "migrate"] as const) {
+    const original = client[name].bind(client);
+    client[name] = async (...args: any[]) => {
+      const sql = typeof args[0] === "string" ? args[0] : args[0]?.sql;
+      if (inTx() || (name === "execute" && typeof sql === "string" && READ_SQL.test(sql))) return original(...args);
+      const release = await turn();
+      try {
+        return await original(...args);
+      } finally {
+        release();
+      }
+    };
+  }
 }
 
 export function createNodeRuntime(opts: NodeRuntimeOptions = {}): NodeRuntime {
