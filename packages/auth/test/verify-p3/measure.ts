@@ -205,7 +205,7 @@ export async function v30Password(rig: Rig) {
 
   const sessionsAfterReset: Record<"off" | "on", number> = { off: -1, on: -1 };
   const resetStatus: Record<"off" | "on", number> = { off: -1, on: -1 };
-  for (const [key, scenario] of [["off", "plain"], ["on", "resetRevoke"]] as const) {
+  for (const [key, scenario] of [["off", "resetKeep"], ["on", "resetRevoke"]] as const) {
     const r = await verifiedMember(rig, `v30-reset-${key}`);
     await signedIn(rig, "plain", r);
     await signedIn(rig, "plain", r);

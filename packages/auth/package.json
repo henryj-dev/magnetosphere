@@ -19,12 +19,12 @@
     "@better-auth/sso": "1.7.7",
     "@magnetosphere/db": "workspace:*",
     "better-auth": "1.7.7",
+    "drizzle-orm": "0.45.4",
     "nodemailer": "10.0.10"
   },
   "devDependencies": {
     "@libsql/client": "0.18.0",
     "@types/node": "24.13.6",
-    "drizzle-orm": "0.45.4",
     "mysql2": "3.24.5",
     "postgres": "3.4.9",
     "typescript": "6.0.3",

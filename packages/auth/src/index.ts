@@ -3,11 +3,13 @@
 // 그대로 펼쳐 쓴다. 스키마 생성기와 같은 객체라 테이블·칼럼이 어긋나지 않는다 (TC-S3.T1.e).
 // 이 파일은 Workers 에서도 import 된다. Node 전용 모듈(nodemailer 등)을 여기서 부르지 않는다.
 import { betterAuth, type BetterAuthOptions } from "better-auth";
+import { eq } from "drizzle-orm";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { AUTH_SCHEMA_OPTIONS } from "@magnetosphere/db/src/auth-options.ts";
-import { countSignup, decideSignup, loadSignupInputs, type SignupInputs } from "@magnetosphere/db/src/signup.ts";
+import { countSignup, decideSignup, loadSignupInputs, VERIFY_EMAIL_EXPIRES_S, type SignupInputs } from "@magnetosphere/db/src/signup.ts";
 import { currentInvite } from "./invite-context.ts";
+import { lockOutPassword, markDispute, takeDispute } from "./signup-dispute.ts";
 import { resetPasswordMessage, verifyEmailMessage } from "./mail/messages.ts";
 import type { MailMessage, Mailer } from "./mail/types.ts";
 import { CLIENT_IP_HEADER, ipAddressOptions, rateLimitOptions, withClientIp, type ClientIp } from "./rate-limit.ts";
@@ -150,6 +152,7 @@ function userCreateGuard(cfg: AuthConfig) {
  * 회원 행이 커밋된 뒤 (user.create.after, V29 createAfterRunsAfterCommit). 공개 가입이면 하루 가입 수를 센다 (Q13 (가), M2.T3).
  * 가입 트랜잭션 안에서 세지 않는 이유: SQLite 는 가입 트랜잭션이 쓰기 잠금을 쥐어 다른 연결의 쓰기가 막히고, 뒤에 되돌려진 가입이 칸만 쓴다.
  * 이 훅이 던지면 회원 행은 이미 커밋된 채 요청이 실패하므로 던지지 않고 경고만 남긴다. 다음 가입의 세기가 이어 간다.
+ * 세기·감사 기록은 응답과 떼어 보낸다 (Workers 는 waitUntil, Node 는 기다리지 않는 백그라운드). 그래서 바로 다음 요청의 앞 판정은 몇 밀리초 늦은 값을 볼 수 있다.
  */
 function userCreated(cfg: AuthConfig) {
   const { db, schema, provider } = cfg.database;
@@ -158,12 +161,14 @@ function userCreated(cfg: AuthConfig) {
     if (!via) return;
     // HTTP 요청이면 withClientIp 가 정한 IP 머리글. 서버 안 호출(초대 수락)은 없다
     const ip = (ctx?.headers ?? ctx?.request?.headers)?.get(CLIENT_IP_HEADER) ?? null;
-    try {
+    const inviteId = currentInvite()?.inviteId ?? null;
+    // 새 가입에만 있는 쓰기라 응답 안에서 기다리면 그 시간만큼 계정 존재가 드러난다 (M2 보안 리뷰 M1). 응답과 떼어 waitUntil 로 넘긴다.
+    // 커밋 뒤에만 도는 자리(create.after)라 센 값이 커밋된 가입만 센다는 성질은 그대로다
+    const work = (async () => {
       if (via === "public") await countSignup(db, schema, provider, new Date());
-      await cfg.onUserCreated?.({ userId: String(user.id), via, inviteId: currentInvite()?.inviteId ?? null, ip });
-    } catch (e) {
-      console.warn("[auth] 가입 뒤 하루 가입 수 세기·기록 실패 (가입은 그대로)", e);
-    }
+      await cfg.onUserCreated?.({ userId: String(user.id), via, inviteId, ip });
+    })().catch((e) => console.warn("[auth] 가입 뒤 하루 가입 수 세기·기록 실패 (가입은 그대로)", e));
+    cfg.waitUntil(work);
   };
 }
 
@@ -187,12 +192,13 @@ function trimSignUpResponse(ctx: { path: string; json: (v: unknown) => unknown; 
  * Better Auth 옵션. 스키마 비교(TC-S3.T1.e)와 SSO 경로 검사(check-sso-paths.mjs)가 이 함수의 결과를 쓴다.
  * 서버는 이것으로 betterAuth() 를 직접 만들지 않고 createAuth 를 쓴다 (직접 만들면 handler 가 감싸지지 않는다).
  */
-export function authOptions(cfg: AuthConfig) {
+export function authOptions(cfg: AuthConfig, late: { api?: { requestPasswordReset(a: { body: { email: string; redirectTo: string } }): Promise<unknown> } } = {}) {
   // 세션·토큰 서명 키. 짧으면 추측·무차별 대입에 약하므로 시작을 거부한다 (S3 보안 리뷰 L1)
   if (typeof cfg.secret !== "string" || cfg.secret.length < MIN_SECRET_LENGTH) {
     throw new Error(`BETTER_AUTH_SECRET 은 ${MIN_SECRET_LENGTH}자 이상이어야 한다 (지금 ${cfg.secret?.length ?? 0}자)`);
   }
   const deliver = deliverer(cfg);
+  const { db, schema } = cfg.database as { db: any; schema: any };
   return {
     ...AUTH_SCHEMA_OPTIONS,
     baseURL: cfg.baseURL,
@@ -208,10 +214,29 @@ export function authOptions(cfg: AuthConfig) {
       // 인증 전에는 로그인되지 않는다 (계획서 4.2 "인증 후 키 발급"의 전제)
       requireEmailVerification: true,
       sendResetPassword: async ({ user, url }) => deliver(resetPasswordMessage(user.email, url)),
+      // 재설정은 그 회원의 세션을 모두 끊는다 (계획서 4.5, 실행판 M4 몫을 M2 보안 리뷰 H1 로 당겨 옴)
+      revokeSessionsOnPasswordReset: true,
+      // 재설정 링크는 그 주소로 갔다 — 성공하면 메일함 주인이다. Better Auth 는 emailVerified 를 바꾸지 않으므로 여기서 true 로 (H1)
+      onPasswordReset: async ({ user }) => {
+        await db.update(schema.user).set({ emailVerified: true, updatedAt: new Date() }).where(eq(schema.user.id, user.id));
+      },
+      // 인증 전 계정에 같은 이메일로 공개 가입이 다시 오면 다툼 표시 (H1, signup-dispute.ts). 백그라운드 작업이라 응답은 그대로다
+      onExistingUserSignUp: async ({ user }) => {
+        if (user.emailVerified || currentInvite()) return;
+        await markDispute(db, schema, user.id);
+      },
     },
     emailVerification: {
       sendOnSignUp: true,
+      expiresIn: VERIFY_EMAIL_EXPIRES_S,
       sendVerificationEmail: async ({ user, url }) => deliver(verifyEmailMessage(user.email, url)),
+      // 다툼 표시가 있는 계정이 처음 인증되면 비밀번호를 아무도 모르는 값으로 바꾸고 세션을 지운 뒤 재설정 메일을 보낸다 (H1)
+      afterEmailVerification: async (user) => {
+        if (!(await takeDispute(db, schema, user.id))) return;
+        await lockOutPassword(db, schema, user.id);
+        if (late.api) await late.api.requestPasswordReset({ body: { email: user.email, redirectTo: "/" } });
+        else console.warn("[auth] 다툼 계정의 재설정 메일을 보낼 auth.api 가 없다 (createAuth 밖에서 만든 구성)");
+      },
     },
     // 로그인·가입·비밀번호 재설정 요청 수 제한. 저장소는 AUTH_SCHEMA_OPTIONS 의 DB(rate_limit)
     rateLimit: rateLimitOptions(AUTH_SCHEMA_OPTIONS.rateLimit),
@@ -243,6 +268,9 @@ export function authOptions(cfg: AuthConfig) {
  * x-magnetosphere-client-ip 를 지어 넣어 요청 수 제한을 통째로 우회한다. api 는 서버 안 호출용(auth.api)이다.
  */
 export function createAuth(cfg: AuthConfig) {
-  const auth = betterAuth(authOptions(cfg));
+  // 다툼 계정의 재설정 메일(afterEmailVerification)이 이 인스턴스의 auth.api 를 부른다
+  const late: Parameters<typeof authOptions>[1] = {};
+  const auth = betterAuth(authOptions(cfg, late));
+  late.api = auth.api as any;
   return { handler: withClientIp(auth.handler, cfg.clientIp), api: auth.api };
 }

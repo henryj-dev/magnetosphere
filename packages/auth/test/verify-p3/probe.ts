@@ -30,10 +30,11 @@ export type HookLog =
  *   createData         user.create.before 가 { data: { emailVerified: true, status: "pending", monthlyLimitUsd: 5 } } — V29 (라)
  *   als                hooks.before·user.create.before·user.create.after 가 초대 문맥과 커밋 여부를 기록만 한다 — V29 (마)
  *   resetRevoke        revokeSessionsOnPasswordReset: true — V30
+ *   resetKeep          revokeSessionsOnPasswordReset: false — V30 의 "꺼짐" 측정 (M2 보안 리뷰 H1 로 지금 구성은 켜져 있다)
  *   sessionGuard       session.create.before 가 status suspended·pending 회원을 APIError(403, account_*) 로 거부 — V31
  *   sessionAfterDelete session.create.after 가 방금 만든 세션 행을 지운다 — V31
  */
-export const SCENARIOS = ["plain", "before403", "create403", "create400", "createData", "als", "resetRevoke", "sessionGuard", "sessionAfterDelete"] as const;
+export const SCENARIOS = ["plain", "before403", "create403", "create400", "createData", "als", "resetRevoke", "resetKeep", "sessionGuard", "sessionAfterDelete"] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export const HOOK_DATA = { emailVerified: true, status: "pending", monthlyLimitUsd: 5 } as const;
@@ -118,7 +119,8 @@ export function probeOptions(cfg: AuthConfig, scenario: Scenario, log: HookLog[]
       };
       break;
     case "resetRevoke":
-      opts.emailAndPassword = { ...base.emailAndPassword, revokeSessionsOnPasswordReset: true };
+    case "resetKeep":
+      opts.emailAndPassword = { ...base.emailAndPassword, revokeSessionsOnPasswordReset: scenario === "resetRevoke" };
       break;
     case "sessionGuard":
       opts.databaseHooks = {

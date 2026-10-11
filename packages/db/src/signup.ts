@@ -14,6 +14,9 @@ import { mailSettingsExist, normalizeDomain, readSignupSettings, type SignupSett
 type AnyDb = any;
 type Schema = Record<string, any>; // user·appSettings·rateLimit 을 쓴다
 
+/** 인증 링크 수명 (Better Auth 기본값과 같은 1시간, packages/auth emailVerification.expiresIn). 미인증 공개 가입 정리가 이 값 뒤에 지운다 */
+export const VERIFY_EMAIL_EXPIRES_S = 3600;
+
 /** 공개 자가 가입을 받는 signup_mode (Q1·Q19) */
 const PUBLIC_SIGNUP_MODES: ReadonlySet<string> = new Set(["open", "domain_allowlist"]);
 /** 초대 수락을 받는 signup_mode (Q3) */
