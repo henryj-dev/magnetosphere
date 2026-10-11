@@ -104,7 +104,8 @@ async function acceptOnce(c: Context, s: Services): Promise<Response> {
       .where(eq(t.tokenHash, await tokenHash(input.token)));
     if (!inv || inv.usedAt !== null || inv.revokedAt !== null || new Date(inv.expiresAt).getTime() <= Date.now()) throw invalid();
     if (inv.email !== null && inv.email !== input.email) throw invalid();
-    if (inv.role !== "member" && inv.role !== "admin") throw invalid();
+    // 다층 방어: 관리자 초대는 이메일 지정일 때만 받는다 (만들기가 막지만 행이 직접 들어온 경우에도, 보안 리뷰 L-3)
+    if (inv.role !== "member" && !(inv.role === "admin" && inv.email !== null)) throw invalid();
 
     // 2. 차지
     const mine = new Date();

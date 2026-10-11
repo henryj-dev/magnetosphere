@@ -10,7 +10,7 @@ import { AUTH_SCHEMA_OPTIONS } from "@magnetosphere/db/src/auth-options.ts";
 import { countSignup, decideSignup, loadSignupInputs, VERIFY_EMAIL_EXPIRES_S, type SignupInputs } from "@magnetosphere/db/src/signup.ts";
 import { currentInvite } from "./invite-context.ts";
 import { queueConfirmationMail, signupConfirmation } from "./signup-confirmation.ts";
-import { resetPasswordMessage, verifyEmailMessage } from "./mail/messages.ts";
+import { resetPasswordMessage } from "./mail/messages.ts";
 import type { MailMessage, Mailer } from "./mail/types.ts";
 import { CLIENT_IP_HEADER, ipAddressOptions, rateLimitOptions, withClientIp, type ClientIp } from "./rate-limit.ts";
 
@@ -209,6 +209,10 @@ export function authOptions(cfg: AuthConfig) {
     // D1 만 끈다. 켜면 drizzle 이 begin 을 보내 D1 이 거부하고, runWithTransaction 을 쓰는 경로(/reset-password·가입 등)가 늘 500 이다 (TC-SEC.2.a).
     // 꺼도 재설정 토큰 소비는 한 번뿐이다: sqlite 어댑터의 consumeOne 이 DELETE … RETURNING 한 문장이라 행을 지운 요청 하나만 토큰을 얻는다.
     // 대신 D1 에서 SSO 사용자 확인은 SSO_USER_RESOLUTION_REQUIRES_NATIVE_TRANSACTIONS 로 거부되고, 여러 문장 쓰기(가입의 user·account)는 원자적이지 않다.
+    // Better Auth 내부 기록은 메시지만 남긴다. 덧붙는 인자(오류 객체, DB 오류의 params 에 이메일·이름이 든다)는 버린다 (M3.T2 보안 리뷰 L-1)
+    logger: {
+      log: (level: string, message: string) => (level === "error" ? console.error : level === "warn" ? console.warn : console.info)(`[auth] ${message}`),
+    },
     database: drizzleAdapter(cfg.database.db, { provider: cfg.database.provider, schema: cfg.database.schema, transaction: cfg.database.kind !== "d1" }),
     emailAndPassword: {
       ...AUTH_SCHEMA_OPTIONS.emailAndPassword,
@@ -220,19 +224,19 @@ export function authOptions(cfg: AuthConfig) {
       // 성공한 재설정은 메일 소유와 새 비밀번호 설정을 함께 증명한다. 초대·관리자의 인증 정책은 바꾸지 않는다.
       onPasswordReset: async ({ user }) => {
         const [current] = await db.select().from(schema.user).where(eq(schema.user.id, user.id)).limit(1);
-        if (current?.role !== "member" || !["public", "legacy"].includes(current.signupOrigin) || current.deletedAt) return;
+        // invite 포함: 이메일 없는 초대를 남의 이메일로 수락한 계정도 메일 주인이 재설정으로 되찾는다 (M3.T2 보안 리뷰 H-1). 관리자·설치 계정은 자동 인증하지 않는다
+        if (current?.role !== "member" || !["public", "legacy", "invite"].includes(current.signupOrigin) || current.deletedAt) return;
         await db.update(schema.user).set({ emailVerified: true, updatedAt: new Date() }).where(eq(schema.user.id, user.id));
       },
     },
     emailVerification: {
       sendOnSignUp: true,
       expiresIn: VERIFY_EMAIL_EXPIRES_S,
-      sendVerificationEmail: async ({ user, url }) => {
-        if ((user as any).signupOrigin === "invite") {
-          // 이메일 지정 초대로 가입한 회원은 수락이 인증을 대신해 이미 인증됐다 (M3.T2, Q5). 쓸모없는 인증 메일을 보내지 않는다
-          if (user.emailVerified) return;
-          return deliver(verifyEmailMessage(user.email, url));
-        }
+      sendVerificationEmail: async ({ user }) => {
+        // 이메일 지정 초대로 가입한 회원은 수락이 인증을 대신해 이미 인증됐다 (M3.T2, Q5). 쓸모없는 인증 메일을 보내지 않는다
+        if ((user as any).signupOrigin === "invite" && user.emailVerified) return;
+        // 공개 가입과 이메일 없는 초대 가입은 같은 H1 확인 흐름(메일 링크 + 가입 비밀번호)을 탄다. core /verify-email 링크는 보내지 않는다.
+        // 이메일 없는 초대 링크를 쥔 사람이 남의 이메일로 수락해도, 메일 주인이 링크를 누르는 것만으로 그 계정이 인증되지 않는다 (M3.T2 보안 리뷰 H-1)
         queueConfirmationMail(user.id);
       },
       beforeEmailVerification: async (user) => confirmation.coreVerificationGuard(user),

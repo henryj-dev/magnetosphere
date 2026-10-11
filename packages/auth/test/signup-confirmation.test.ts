@@ -258,7 +258,10 @@ describe.each(kinds)("%s H1 auth.api", (kind) => {
     expect(await OPS.sessionsOf(h.db, h.schema, x.email)).toBe(1);
   });
 
-  it("H1.ORIGIN: legacy 미인증은 reset-only, invite·setup은 재설정으로 자동 인증하지 않는다", async () => {
+  // invite 의 의미가 바뀌었다 (M3.T2 보안 리뷰 H-1): 이메일 없는 초대는 링크를 쥔 사람이 남의 이메일로 수락할 수 있어 공개 가입과 같은 위험이다.
+  // 그래서 미인증 invite 는 core /verify-email 을 거부하고(H1 확인 흐름만), 메일 주인이 재설정으로 되찾도록 재설정이 인증한다.
+  // 예전 단언(invite 재설정 → 미인증 유지, invite-core → 200 인증)은 공격자 비밀번호 계정을 메일 클릭 한 번으로 인증해 주는 동작을 고정하고 있었다.
+  it("H1.ORIGIN: legacy·invite 미인증은 core verify 거부·재설정으로 인증, setup은 재설정으로 자동 인증하지 않는다", async () => {
     for (const origin of ["legacy", "invite", "setup"]) {
       const email = mail(`origin-${origin}`);
       const id = await OPS.addPasswordUser(h.db, h.schema, email, PASSWORD, origin === "setup" ? "admin" : "member");
@@ -271,14 +274,14 @@ describe.each(kinds)("%s H1 auth.api", (kind) => {
         expect(cfg.outbox.filter((m) => m.to === email).at(-1)!.text).not.toMatch(/https?:\/\//);
       }
       await reset(email, "origin-reset-password-123");
-      expect((await OPS.user(h.db, h.schema, email))?.emailVerified).toBe(origin === "legacy");
+      expect((await OPS.user(h.db, h.schema, email))?.emailVerified).toBe(origin === "legacy" || origin === "invite");
       expect(await OPS.sessionsOf(h.db, h.schema, email)).toBe(0);
     }
     const email = mail("invite-core");
     const id = await OPS.addPasswordUser(h.db, h.schema, email, PASSWORD, "member");
     await h.db.update((h.schema as any).user).set({ emailVerified: false, signupOrigin: "invite" }).where(eq((h.schema as any).user.id, id));
-    expect((await apiReply(api().verifyEmail({ query: { token: await signJWT({ email }, SECRET, 3600) } }))).status).toBe(200);
-    expect((await OPS.user(h.db, h.schema, email))?.emailVerified).toBe(true);
+    expect((await apiReply(api().verifyEmail({ query: { token: await signJWT({ email }, SECRET, 3600) } }))).status).toBe(401);
+    expect((await OPS.user(h.db, h.schema, email))?.emailVerified).toBe(false);
   });
 
   it("H1.ERROR: 해시가 담긴 DB 오류는 인증·변경 오류나 응답에 전달하지 않는다", async () => {

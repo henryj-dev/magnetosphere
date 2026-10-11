@@ -7,7 +7,7 @@ import { makeTestEnv, TEST_SECRET, type TestEnv } from "../helpers.ts";
 import { fakeOmni } from "../routes/env.ts";
 import { serverRig, type ServerRig } from "../signup/env.ts";
 import { signJWT } from "better-auth/crypto";
-import { ACCEPT, acceptBody, INVALID, makeInvite, prepareAccept, tcM3T2g, unknownToken } from "./accept-checks.ts";
+import { ACCEPT, acceptBody, INVALID, makeInvite, prepareAccept, sha256, tcM3T2g, unknownToken } from "./accept-checks.ts";
 
 let t: TestEnv;
 let rig: ServerRig;
@@ -52,6 +52,9 @@ describe("TC-M3.T2 초대 수락", () => {
     const replaced = await makeInvite(rig, admin, { role: "member", email: replacedEmail });
     await makeInvite(rig, admin, { role: "member", email: replacedEmail });
     const closed = await makeInvite(rig, admin, { role: "member" });
+    // 이메일 없는 관리자 초대 행 (만들기 API 는 거부하지만 행이 직접 들어온 경우, 보안 리뷰 L-3)
+    const emaillessAdmin = unknownToken();
+    await rig.h.db.insert(rig.h.schema.invites).values({ id: crypto.randomUUID(), email: null, tokenHash: sha256(emaillessAdmin), role: "admin", expiresAt: new Date(Date.now() + 86_400_000), usedAt: null, usedBy: null, createdBy: admin.id, revokedAt: null });
 
     const cases: [string, () => Promise<{ status: number; body: string }>][] = [
       ["없는 토큰", () => accept(acceptBody(unknownToken(), mail("t2b")))],
@@ -63,6 +66,7 @@ describe("TC-M3.T2 초대 수락", () => {
       ["이미 있는 이메일", () => accept(acceptBody(free.token, existing))],
       ["이미 있는 이메일(대소문자·공백)", () => accept(acceptBody(free.token, `  ${existing.toUpperCase()} `))],
       ["재초대로 대체된 링크", () => accept(acceptBody(replaced.token, replacedEmail))],
+      ["이메일 없는 관리자 초대 행", () => accept(acceptBody(emaillessAdmin, mail("t2b-admin")))],
       ["형식 틀린 토큰(짧음)", () => accept(acceptBody("abc", mail("t2b")))],
       ["형식 틀린 토큰(44자)", () => accept(acceptBody(`${free.token}A`, mail("t2b")))],
       ["형식 틀린 토큰(= 덧붙임)", () => accept(acceptBody(`${free.token.slice(0, 42)}=`, mail("t2b")))],
