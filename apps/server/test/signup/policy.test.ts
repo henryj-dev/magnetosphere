@@ -65,6 +65,37 @@ describe("TC-M2.T1 정책 판정·앞 판정", () => {
     expect(await rig.op("user", outside)).toBeNull();
   });
 
+  it("TC-M2.T1.e 정책 거부 응답은 있는 이메일·없는 이메일이 바이트 단위로 같다, open 의 있는 이메일 가짜 200 과 새 가입 200 은 모양이 같다 (Q19 의존)", async () => {
+    const existing = mail("t1e-old", "outside.test");
+    await rig.op("addPasswordUser", existing, PASSWORD, "member");
+    await rig.op("setSetting", "allowed_domains", ["example.test"]);
+    const cases: [string, () => Promise<unknown>][] = [
+      ["invite_only", () => mode("invite_only")],
+      ["closed", () => mode("closed")],
+      ["domain_allowlist 바깥 도메인", () => mode("domain_allowlist")],
+      ["메일 없음", async () => (await mode("open"), await rig.op("setMail", false))],
+    ];
+    for (const [label, set] of cases) {
+      await set();
+      const a = await attempt(rig, () => rig.signUp(body(existing)));
+      const b = await attempt(rig, () => rig.signUp(body(mail("t1e-new", "outside.test"))));
+      expect({ label, status: a.status, body: a.body, user: a.user }).toEqual({ label, status: b.status, body: b.body, user: 0 });
+      expect(a.status, label).toBe(403);
+      expect(b.user, label).toBe(0);
+    }
+    // open + 메일: 있는 이메일은 Better Auth 가짜 200, 없는 이메일은 새 가입 200. 무작위 값(id·시각)과 이메일만 다르다
+    await rig.op("setMail", true);
+    await mode("open");
+    const shape = (s: string) => {
+      const j = JSON.parse(s);
+      return { ...j, user: { ...j.user, id: "<id>", email: "<email>", createdAt: "<t>", updatedAt: "<t>" } };
+    };
+    const dup = await attempt(rig, () => rig.signUp(body(existing)));
+    const fresh = await attempt(rig, () => rig.signUp(body(mail("t1e-fresh", "outside.test"))));
+    expect([dup.status, fresh.status, dup.user, fresh.user]).toEqual([200, 200, 0, 1]);
+    expect(shape(dup.body)).toEqual(shape(fresh.body));
+  });
+
   it("TC-M2.T1.f 공개 요청은 본문·헤더로 초대 문맥을 흉내 낼 수 없다, 같은 시각 다른 요청이 runAsInvite 안에 있어도 공개 요청은 행 0", async () => {
     await mode("invite_only");
     const forged = (tag: string) =>
