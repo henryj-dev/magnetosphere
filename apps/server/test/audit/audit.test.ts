@@ -80,4 +80,22 @@ describe("M1.T3 감사 기록", () => {
     for (const r of await rows()) counts.set(r.action, (counts.get(r.action) ?? 0) + 1);
     expect(Object.fromEntries(counts)).toEqual(Object.fromEntries([...AUDIT_ACTIONS, ...PHASE2_AUDIT_ACTIONS].map((a) => [a, 1])));
   });
+
+  it("TC-M1.T3.c detail 의 name 으로 끝나는 키·이메일 꼴 문자열 값은 어느 깊이든 예외·행 0 (M1 리뷰 낮음 2)", async () => {
+    const bad: Record<string, unknown>[] = [
+      { displayName: "홍길동" },
+      { userName: "hong" },
+      { full_name: "홍길동" },
+      { nested: { lastName: "홍" } },
+      { note: "a@b.example" },
+      { by: "관리자 <Admin@Example.com>" },
+      { nested: { list: ["ok", { v: "x.y@sub.example.co.kr" }] } },
+    ];
+    for (const detail of bad) await refused(entry({ detail }), "forbidden_detail_key");
+    await refused(entry({ target: "m@example.com" }), "forbidden_detail_key");
+    expect(await rows()).toEqual([]);
+    // 대조: 명시 예외(keyName)·복수형(keyNames)·지운 회원 주소 꼴(도메인 점 없음)·@ 만 있는 값은 남는다
+    await writeAudit(h, entry({ detail: { keyName: "signup_mode", keyNames: ["a", "b"], placeholder: "deleted-u1@invalid", at: "@" } }));
+    expect(await rows()).toHaveLength(1);
+  });
 });
