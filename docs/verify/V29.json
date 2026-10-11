@@ -95,7 +95,7 @@
     "Node SQLite(libSQL 0.18): 훅을 모두 뺀 구성에서도 auth.api.signUpEmail 3건 동시 → 1건 성공·2건 SQLITE_BUSY, 10건 동시 → 10건 모두 SQLITE_BUSY (차례로 2건은 모두 성공). createClient timeout: 5000 으로도 10건 모두 실패, WAL + timeout 은 멈춘다(동기 드라이버라 기다리는 동안 이벤트 루프가 서서 앞 트랜잭션이 못 끝난다). 측정: 시험 구성 plain 의 auth.api.signUpEmail 을 Promise.all 로 (TC 로 남기지 않음 — 재현은 M2 TC-M2.T3.a (4))",
     "음성 대조 (2026-10-11, 답 파일·시험 구성을 잠시 바꿔 돌리고 되돌림): beforeHook.rowsLeft.user 1 → TC-M0.T2.a 실패, createHook403.status 400 → TC-M0.T2.b 실패, hookDataOverrides.emailVerified false → TC-M0.T2.c 실패, alsVisible.publicRequest true → TC-M0.T2.d 실패, probe.ts 에서 inviteContext.run 을 빼고 signUpEmail 만 부름 → TC-M0.T2.d 실패 (여기까지 SQLite). D1: d1Transaction.currentConfig.status 200 → TC-M0.T2.b 실패, alsVisible.createHook.workers false → TC-M0.T2.d 실패"
   ],
-  "blocking": true,
+  "blocking": false,
   "was_blocking": true,
-  "resolved_in": null
+  "resolved_in": "v5.8"
 }
