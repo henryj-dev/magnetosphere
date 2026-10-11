@@ -8,8 +8,13 @@ export const SIGNUP_MIN_MS = 400;
 
 /** fn 의 결과(던진 오류도)를 시작 시각 + ms 까지 기다린 뒤 돌려준다 */
 export async function withMinDuration<T>(ms: number, fn: () => Promise<T>): Promise<T> {
-  const until = Date.now() + ms;
-  const wait = () => new Promise<void>((r) => setTimeout(r, Math.max(0, until - Date.now())));
+  // Date.now() 는 밀리초로 잘리고 타이머는 조금 일찍 울릴 수 있어(CI 399.4ms) 고해상도 시계로 남은 시간이 0 이 될 때까지 다시 기다린다
+  const start = performance.now();
+  const wait = async () => {
+    for (let left = ms - (performance.now() - start); left > 0; left = ms - (performance.now() - start)) {
+      await new Promise<void>((r) => setTimeout(r, Math.ceil(left)));
+    }
+  };
   try {
     const out = await fn();
     await wait();
