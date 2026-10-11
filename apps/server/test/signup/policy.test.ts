@@ -115,12 +115,26 @@ describe("TC-M2.T1 정책 판정·앞 판정", () => {
       await gate;
       return api.signUpEmail({ body: body(invited) });
     });
-    const pubs = Promise.all([forged("t1f-a"), forged("t1f-b"), rig.signUp(body(mail("t1f-c")))]);
+    // 서버 앞 판정(app.ts)을 거치지 않고 Better Auth handler 에 바로 보낸 공개 요청도 본다 (signUpGate·생성 훅이 문맥을 위조·누출로 받지 않는지)
+    const bare = (tag: string) =>
+      rig.services.auth
+        .handler(
+          new Request("http://localhost:3000/api/auth/sign-up/email", {
+            method: "POST",
+            headers: { origin: "http://localhost:3000", "content-type": "application/json", "x-invite": FAKE_INVITE.inviteId },
+            body: JSON.stringify(body(mail(tag), { inviteId: FAKE_INVITE.inviteId, invite: FAKE_INVITE })),
+          }),
+        )
+        .then((r) => r.status);
+    const pubs = Promise.all([forged("t1f-a"), forged("t1f-b"), rig.signUp(body(mail("t1f-c"))), bare("t1f-bare-1"), bare("t1f-bare-2")]);
     release();
     const [pubRes] = await Promise.all([pubs, inv]);
-    expect(pubRes.map((r) => r.status)).toEqual([403, 403, 403]);
+    expect(pubRes.map((r) => (typeof r === "number" ? r : r.status))).toEqual([403, 403, 403, 403, 403]);
     expect((await userRows(rig)) - u0).toBe(1);
     expect((await rig.op("user", invited))?.role).toBe("member");
+    // 문맥 없이 handler 에 바로 보낸 위조 요청
+    const lone2 = await attempt(rig, async () => ({ status: await bare("t1f-bare-lone"), code: null, body: "" }));
+    expect({ status: lone2.status, user: lone2.user }).toEqual({ status: 403, user: 0 });
   });
 });
 
