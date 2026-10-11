@@ -801,7 +801,15 @@ export const GATES = {
     waivable: false,
     strictTests: true,
     outputs: ["apps/server/src/invites/**", "apps/server/test/invites/**"],
-    checks: [],
+    checks: [
+      // M3.T1 관리자 초대 API
+      { id: "G-M3.1", how: "test", desc: "TC-M3.T1.a 이메일 없는 관리자 초대는 만들 수 없다", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.a"', expectPassed: 1 },
+      { id: "G-M3.2", how: "test", desc: "TC-M3.T1.b 원문 토큰은 응답에만 있다", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.b"', expectPassed: 1 },
+      { id: "G-M3.3", how: "test", desc: "TC-M3.T1.c 만료 기본·최대 (Q4)", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.c"', expectPassed: 1 },
+      { id: "G-M3.4", how: "test", desc: "TC-M3.T1.d 관리자만 초대를 다룬다", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.d"', expectPassed: 1 },
+      { id: "G-M3.5", how: "test", desc: "TC-M3.T1.e 정책·메일에 따라 초대 만들기를 거부한다 (Q3·Q5)", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.e"', expectPassed: 1 },
+      { id: "G-M3.6", how: "test", desc: "TC-M3.T1.f 취소한 초대와 같은 이메일 재초대", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.f"', expectPassed: 1 },
+    ],
   },
   M4: {
     needs: ["M3"],
