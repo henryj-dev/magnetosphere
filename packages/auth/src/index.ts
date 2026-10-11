@@ -228,7 +228,11 @@ export function authOptions(cfg: AuthConfig) {
       sendOnSignUp: true,
       expiresIn: VERIFY_EMAIL_EXPIRES_S,
       sendVerificationEmail: async ({ user, url }) => {
-        if ((user as any).signupOrigin === "invite") return deliver(verifyEmailMessage(user.email, url));
+        if ((user as any).signupOrigin === "invite") {
+          // 이메일 지정 초대로 가입한 회원은 수락이 인증을 대신해 이미 인증됐다 (M3.T2, Q5). 쓸모없는 인증 메일을 보내지 않는다
+          if (user.emailVerified) return;
+          return deliver(verifyEmailMessage(user.email, url));
+        }
         queueConfirmationMail(user.id);
       },
       beforeEmailVerification: async (user) => confirmation.coreVerificationGuard(user),
