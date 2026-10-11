@@ -279,7 +279,7 @@ PR #13 7e1b5bf (Q1, 3단계 밖, main 에 있음)
 K6 ─▶ M0 ─▶ M1 ─▶ M2 ─▶ M3 ─▶ M4 ─▶ M5 ─▶ M6
 ```
 - 전부 직렬이다. 동시 진행 상한 1.
-- H1 보안 검토는 미해결이다. 승인된 가입 UX 방향은 공개 가입에서 비밀번호를 한 번 더 확인하고, 사용자가 비밀번호를 모르는 기존 미인증 계정은 이메일 비밀번호 재설정으로 이어지게 하는 것이다. 중복 계정 신고만으로 처리하면 최초 가입·인증 메일 재전송을 놓친다. 만료된 미인증 계정을 자동 삭제하는 기능은 승인되지 않아 이번 범위에서 제외한다. 구현과 회귀 시험은 별도 작업이며, 시험 이름과 통과 결과는 구현 뒤에 기록한다.
+- H1 보안 검토는 M2 에서 고쳤다. 공개 가입은 인증 링크 뒤 가입 비밀번호를 한 번 더 확인하고, 비밀번호를 모르는 기존 미인증 계정은 이메일 비밀번호 재설정으로 인증을 마친다. 시험은 TC-M2.T8.e·f·g, `H1.*`(G-M2.48 ~ G-M2.53)이다. 만료된 미인증 계정을 자동 삭제하는 기능은 승인되지 않아 이번 범위에서 제외한다 (TC-M2.T8.d 번호는 다른 용도로 다시 쓰지 않는다).
 - #13 이 main 에 있으므로 M0 은 바로 시작할 수 있다. M2 의 재현 빨강은 #13 위에서 정해진다.
 - M1 이 M0 을 기다리는 이유: 질문 Q1~Q20 의 결정이 스키마(0003)·상태 전이 표·설정 값 검사를 정한다. V29·V31 은 가입·로그인을 막는 자리(Better Auth 훅)를 정한다.
 - M3(초대)이 M2(가입 정책)를 기다리는 이유: 초대 수락은 M2 가 넓힌 정책 판정(`packages/db/src/signup.ts` `decideSignup`의 초대 줄), 초대 문맥 통로(`packages/auth/src/invite-context.ts`), 가입 응답 최소 시간(`apps/server/src/signup/timing.ts`)을 부른다. 마지막 것은 M2 `outputs`(`apps/server/src/signup/**`)라 M2 가 잠긴 동안에는 만들 수 없다. 앞의 둘은 기존 파일·패키지라 `outputs` 밖이고 순서는 M2 봉인(R1)이 지킨다.
@@ -297,7 +297,7 @@ K6 ─▶ M0 ─▶ M1 ─▶ M2 ─▶ M3 ─▶ M4 ─▶ M5 ─▶ M6
 | 4.5 역할 매핑·`sso_only` JIT | 옮김 → 5단계 | `sso_only` 판정의 로컬 가입 거부만 3단계 (Q18). 3단계 동안 SSO JIT 는 #13 생성 훅이 막는다 — 5단계가 `decideSignup`에 IdP 줄을 더해 연다 |
 | 4.4 피해자 이메일 선점 후 SSO 연결 (7장 회귀) | 옮김 → 5단계 | 계정 연결은 5단계. Q5 (가)가 남기는 연결 위험은 5단계에 넘긴다 |
 | 회원 관리·설정 화면 (6장) | 옮김 → 7단계 | 9장 7단계 "관리 화면". 3단계는 API 까지 |
-| 로그인·가입·초대 수락 화면 (6장) | 옮김 → 4단계 앞머리 (Q2 (가) 결정됨) | 9장 어느 단계에도 없다. H1 가입 UX에는 비밀번호 확인과, 비밀번호를 모르는 기존 미인증 가입자를 위한 이메일 비밀번호 재설정 경로가 필요하다. 중복 계정 신고만으로 처리하면 최초 가입·인증 메일 재전송 동작을 포착하지 못하므로 H1은 미해결이다. 실제 구현·회귀 시험은 별도 작업이며 성공 결과는 아직 없다 |
+| 로그인·가입·초대 수락 화면 (6장) | 옮김 → 4단계 앞머리 (Q2 (가) 결정됨) | 9장 어느 단계에도 없다. H1 가입 화면은 M2 의 API 를 쓴다: 인증 링크 안내(GET) 뒤 비밀번호 확인(POST `/api/auth/signup-confirmation`), 비밀번호를 모르면 이메일 비밀번호 재설정으로 보낸다 |
 | 신규 회원 기본 월 한도 $5 적용 | 함 (M2) | 2단계가 3단계로 넘김. 적용 방식은 Q16 |
 | CAPTCHA | 옮김 → 2차 (그대로) | 1장 |
 
@@ -979,6 +979,15 @@ TC-M2.T6.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-M2.16 | 타입 검사 | `pnpm -r typecheck` | 종료코드 0 |
 | G-M2.26 | TC-M2.T6.a CI 단계 잡 | grep `^\s+run: node scripts/gate\.mjs M2\b` in ci.yml | == 1 |
 | G-M2.27 | ruleset · TC-M2.T6.b | `node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere` | 종료코드 0 |
+| G-M2.40 · 41 | TC-M2.T8.a·b·c 미인증 계정 선점 (Node DB 넷 · D1, 리뷰 H1) | [L] `pnpm -C apps/server test:db -t "TC-M2.T8.[abc] " --db sqlite,mysql,mariadb,pg` · `test:workers` | 통과 = 12 · 3 |
+| G-M2.42 | 재현 빨강 TC-M2.T8.a | `node scripts/check-red.mjs --check G-M2.40 --since seal:M1` | 종료코드 0 |
+| G-M2.43 · 44 | TC-M2.T3.d 상한 뒤 거부는 rate_limit 에 쓰지 않음 (리뷰 M2) · 재현 빨강 | `pnpm -C apps/server test -t "TC-M2.T3.d"` | 통과 = 1 · 종료코드 0 |
+| G-M2.45 · 46 | TC-M2.T5.f 보내는 주소는 이메일 하나 (리뷰 L4) · 재현 빨강 | `pnpm -C apps/server test -t "TC-M2.T5.f"` | 통과 = 1 · 종료코드 0 |
+| G-M2.47 | (폐기) 미인증 계정 자동 삭제 — 승인되지 않음 | — | — |
+| G-M2.48 · 49 | TC-M2.T8.e 최초 가입 GET 은 인증하지 않음 (Node DB 넷) · 재현 빨강 | [L] `pnpm -C apps/server test:db -t "TC-M2.T8.e " --db sqlite,mysql,mariadb,pg` | 통과 = 4 · 종료코드 0 |
+| G-M2.50 · 51 | TC-M2.T8.f·g Origin·위조·재생성·reset·replay (Node DB 넷) · e·f·g 및 H1.D1 (D1) | [L] `test:db -t "TC-M2.T8.[fg] "` · `test:workers -t "TC-M2.T8.[efg] \|H1[.]D1[.]"` | 통과 = 8 · 6 |
+| G-M2.52 | H1 API·Origin·NULL 호환·메일 실패·오류 비노출·경합 (Node DB 넷) | [L] `MG_TEST_DBS=sqlite,mysql,mariadb,pg pnpm -C packages/auth test -t "H1[.]"` | 통과 = 60 |
+| G-M2.53 | TC-M2.T8.migration 0004 기존 행·세션 보존 (다섯 DB) | [L] `pnpm -C packages/db test:migrate -t "TC-M2.T8.migration" --db sqlite,mysql,mariadb,pg,d1` | 통과 = 5 |
 
 `node scripts/gate.mjs M2 --seal`
 
