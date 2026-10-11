@@ -35,8 +35,8 @@ export const session = mysqlTable("session", {
   updatedAt: datetime("updated_at", { fsp: 3 }).$onUpdate(() => new Date()).notNull(),
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
-  credentialFingerprint: varcharBin("credential_fingerprint", { length: 64 }),
   userId: varchar("user_id", { length: 36 }).notNull().references(() => user.id, { onDelete: "cascade" }),
+  credentialFingerprint: varcharBin("credential_fingerprint", { length: 64 }),
 }, (table) => [
   index("session_userId_idx").on(table.userId),
 ]);

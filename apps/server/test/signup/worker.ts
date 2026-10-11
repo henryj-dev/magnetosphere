@@ -7,6 +7,7 @@
 //   POST /__test/internal { fn, email }          internalAdapter.createUser·createOAuthUser
 //   GET  /__test/paths              auth.api 경로 목록
 //   ANY  /__test/bare/<경로>        서버 앞 판정 없이 운영 createAuth 의 handler 로 /api/auth/<경로> (TC-M2.T7.a)
+import { eq } from "drizzle-orm";
 import { betterAuth } from "better-auth";
 import { hashPassword, verifyPassword } from "better-auth/crypto";
 import { authOptions, type MailMessage, type Mailer } from "@magnetosphere/auth";
@@ -52,6 +53,15 @@ export default {
         const run = () => api.signUpEmail({ body: b.body });
         return settled(Response.json(await apiReply(b.invite ? runAsInvite(b.invite, run) : run())));
       }
+      if (url.pathname === "/__test/session-state" && req.method === "POST") {
+        const b = await req.json() as { userId: string; state: "legacy" | "oauth" | "unverified" | "deleted" };
+        const s = h.schema as any;
+        await h.db.update(s.session).set({ credentialFingerprint: null }).where(eq(s.session.userId, b.userId));
+        if (b.state === "oauth") await h.db.delete(s.account).where(eq(s.account.userId, b.userId));
+        if (b.state === "unverified") await h.db.update(s.user).set({ emailVerified: false }).where(eq(s.user.id, b.userId));
+        if (b.state === "deleted") await h.db.update(s.user).set({ deletedAt: new Date() }).where(eq(s.user.id, b.userId));
+        return Response.json({ status: true });
+      }
       if (url.pathname === "/__test/api" && req.method === "POST") {
         const b = await req.json() as { method: string; input: any };
         const input = { ...b.input, ...(b.input.headers ? { headers: new Headers(b.input.headers) } : {}) };
@@ -68,7 +78,17 @@ export default {
         let release!: () => void;
         const point = { reached: false, release: () => release(), wait: new Promise<void>((r) => { release = r; }) };
         barriers.set(b.id, point);
-        const pause = async () => { point.reached = true; await point.wait; };
+        const pause = async () => {
+          point.reached = true;
+          // 다른 요청이 barrier를 풀 때까지 살아 있는 타이머를 둔다. 순수 미해결 Promise는 workerd가 hung 요청으로 취소한다.
+          let resumed = false;
+          void point.wait.then(() => { resumed = true; });
+          const deadline = Date.now() + 20_000;
+          while (!resumed) {
+            if (Date.now() > deadline) throw new Error("D1 barrier 대기 시간 초과");
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+        };
         const options = authOptions({ database: h, baseURL: String(env.BETTER_AUTH_URL), secret: String(env.BETTER_AUTH_SECRET), mailer, clientIp: runtime.clientIp, waitUntil, onMailError: () => {}, ...signupAuthHooks(h) });
         if (b.stage === "password") (options.emailAndPassword as any).password = { hash: hashPassword, verify: async (input: any) => { const valid = await verifyPassword(input); await pause(); return valid; } };
         else {

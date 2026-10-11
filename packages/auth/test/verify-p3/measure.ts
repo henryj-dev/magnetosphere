@@ -258,6 +258,13 @@ export async function v31Paths(rig: Rig) {
   if (!link) throw new Error("인증 메일이 없다");
   const verifyRes = await client(rig.handler("sessionGuard")).get(link);
   const verifyCreatesSession = setsSessionCookie(verifyRes) || (await rig.op("sessionsOf", verify)) > 0;
+  const verifiedAfterLink = (await rig.op("user", verify))?.emailVerified;
+  const confirmRes = await client(rig.handler("sessionGuard")).post("/signup-confirmation", { token: new URL(link).searchParams.get("token"), password: PASSWORD });
+  const confirmCreatesSession = setsSessionCookie(confirmRes) || (await rig.op("sessionsOf", verify)) > 0;
+  const verifiedAfterProof = (await rig.op("user", verify))?.emailVerified;
+  const recovery = await existingMember(rig, "v31-recovery");
+  const recoveryRes = await resetPassword(rig, "sessionGuard", recovery, "recovered-horse-battery-v31");
+  const recoveryCreatesSession = setsSessionCookie(recoveryRes) || (await rig.op("sessionsOf", recovery)) > 0;
 
   // after 훅이 방금 만든 세션을 지운다
   const racer = await verifiedMember(rig, "v31-after");
@@ -268,8 +275,14 @@ export async function v31Paths(rig: Rig) {
     resetStatus: resetRes.status,
     resetCreatesSession,
     verifyStatus: verifyRes.status,
-    verifiedAfterLink: (await rig.op("user", verify))?.emailVerified,
+    verifiedAfterLink,
     verifyCreatesSession,
+    confirmStatus: confirmRes.status,
+    verifiedAfterProof,
+    confirmCreatesSession,
+    recoveryStatus: recoveryRes.status,
+    recoveryVerified: (await rig.op("user", recovery))?.emailVerified,
+    recoveryCreatesSession,
     afterHookSignIn: { status: r.status, sessionCookie: setsSessionCookie(r) },
     afterHookCanDelete: rowsAfter === 0 && sessionAfter === null,
   };

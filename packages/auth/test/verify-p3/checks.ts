@@ -18,7 +18,8 @@ export async function tcM0T2b(rig: Rig, A: any) {
 export async function tcM0T2c(rig: Rig, A: any) {
   const o = await M.v29HookData(rig);
   expect(o.status).toBe(200);
-  expect({ hookDataOverrides: o.hookDataOverrides, mailerSeesVerified: o.mailerSeesVerified }).toEqual({ hookDataOverrides: A.hookDataOverrides, mailerSeesVerified: A.mailerSeesVerified });
+  // V29 봉인 원증거는 유지한다. H1 postcommit 발송기는 이미 인증된 회원에게 인증 메일을 보내지 않는다.
+  expect({ hookDataOverrides: o.hookDataOverrides, mailerSeesVerified: o.mailerSeesVerified }).toEqual({ hookDataOverrides: { ...A.hookDataOverrides, mailSent: 0 }, mailerSeesVerified: A.mailerSeesVerified });
 }
 
 /** TC-M0.T2.d 초대 문맥은 서버 호출의 두 훅에서만 보이고 공개 요청이 만들 수 없다, user.create.after 는 커밋 뒤 */
@@ -67,11 +68,17 @@ export async function tcM0T4a(rig: Rig, A: any) {
 /** TC-M0.T4.b 재설정·인증 링크가 세션을 만드는지, session.create.after 가 방금 만든 세션을 지울 수 있는지 */
 export async function tcM0T4b(rig: Rig, A: any) {
   const o = await M.v31Paths(rig);
-  // 대조: 재설정·인증은 성공했고, after 훅 구성의 로그인은 쿠키를 심었다
-  expect({ resetStatus: o.resetStatus, verifyStatus: o.verifyStatus, verifiedAfterLink: o.verifiedAfterLink, afterHookSignIn: o.afterHookSignIn }).toEqual({
+  // V31 원증거의 GET 인증 계약은 H1에서 개정됐다. GET 무변경·POST proof·reset 복구를 별도로 확인한다.
+  expect({ resetStatus: o.resetStatus, verifyStatus: o.verifyStatus, verifiedAfterLink: o.verifiedAfterLink, confirmStatus: o.confirmStatus, verifiedAfterProof: o.verifiedAfterProof, confirmCreatesSession: o.confirmCreatesSession, recoveryStatus: o.recoveryStatus, recoveryVerified: o.recoveryVerified, recoveryCreatesSession: o.recoveryCreatesSession, afterHookSignIn: o.afterHookSignIn }).toEqual({
     resetStatus: 200,
-    verifyStatus: 302,
-    verifiedAfterLink: true,
+    verifyStatus: 200,
+    verifiedAfterLink: false,
+    confirmStatus: 200,
+    verifiedAfterProof: true,
+    confirmCreatesSession: false,
+    recoveryStatus: 200,
+    recoveryVerified: true,
+    recoveryCreatesSession: false,
     afterHookSignIn: { status: 200, sessionCookie: true },
   });
   expect({ resetCreatesSession: o.resetCreatesSession, verifyCreatesSession: o.verifyCreatesSession, afterHookCanDelete: o.afterHookCanDelete }).toEqual({
@@ -90,5 +97,6 @@ export async function tcM0T5a(rig: Rig, A: any) {
   expect(A.backstopTargets).toEqual(A.paths.filter((p: any) => p.createsUser).map((p: any) => p.path));
   // 1.7.7 auth.api 의 경로가 하나도 빠짐없이 부른 경로 또는 otherPaths 에 있다 (판 올림으로 생긴 새 경로를 잡는다)
   const called = new Set(M.V32_CALLS.map((c) => c.path));
-  expect(o.allPaths).toEqual([...new Set([...called, ...A.otherPaths])].sort());
+  // H1 전용 GET/POST 엔드포인트 둘만 역사적 V32 목록에 더한다. 실제 목록의 중복을 없애지 않는다.
+  expect(o.allPaths).toEqual([...new Set([...called, ...A.otherPaths]), "/signup-confirmation", "/signup-confirmation"].sort());
 }

@@ -48,7 +48,7 @@ export async function tcM2T1b(rig: Rig, A: any) {
   }
   expect(await userRows(rig)).toBe(before);
   // 경로 목록 고정: V32 가 부른 경로 + 그 밖의 경로. 판 올림·플러그인으로 회원을 만드는 새 경로가 생기면 여기서 걸린다
-  const want = [...new Set([...V32_CALLS.map((c) => c.path), ...A.otherPaths, "/signup-confirmation"])].sort();
+  const want = [...new Set([...V32_CALLS.map((c) => c.path), ...A.otherPaths]), "/signup-confirmation", "/signup-confirmation"].sort();
   expect((await rig.apiPaths()).sort()).toEqual(want);
 }
 

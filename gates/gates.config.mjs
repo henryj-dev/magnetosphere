@@ -776,13 +776,20 @@ export const GATES = {
       { id: "G-M2.31", how: "test", requires: ["local-services"], desc: "TC-M2.T7.b Node SQLite 겹친 쓰기가 SQLITE_BUSY 로 깨지지 않는다", cmd: 'pnpm -C packages/auth test -t "TC-M2.T7.b"', expectPassed: 1 },
       { id: "G-M2.33", how: "cmd", desc: "재현 빨강: TC-M2.T7.b 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M2.31 --since seal:M1" },
       // M2 보안 리뷰 고침 (H1·M2·L4)
-      { id: "G-M2.40", how: "test", requires: ["local-services"], desc: "TC-M2.T8.a·b·c 미인증 계정 선점으로 가로채지 못함·정상 가입·재설정이 세션을 끊고 인증 (Node DB 넷, 리뷰 H1)", cmd: 'pnpm -C apps/server test:db -t "TC-M2.T8" --db sqlite,mysql,mariadb,pg', expectPassed: 12 },
-      { id: "G-M2.41", how: "test", requires: ["local-services"], desc: "TC-M2.T8.a·b·c (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M2.T8"', expectPassed: 3 },
+      { id: "G-M2.40", how: "test", requires: ["local-services"], desc: "TC-M2.T8.a·b·c 미인증 계정 선점으로 가로채지 못함·정상 가입·재설정이 세션을 끊고 인증 (Node DB 넷, 리뷰 H1)", cmd: 'pnpm -C apps/server test:db -t "TC-M2.T8.[abc] " --db sqlite,mysql,mariadb,pg', expectPassed: 12 },
+      { id: "G-M2.41", how: "test", requires: ["local-services"], desc: "TC-M2.T8.a·b·c (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M2.T8.[abc] "', expectPassed: 3 },
       { id: "G-M2.42", how: "cmd", desc: "재현 빨강: TC-M2.T8.a 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M2.40 --since seal:M1" },
       { id: "G-M2.43", how: "test", desc: "TC-M2.T3.d 상한에 닿은 뒤의 거부는 rate_limit 에 쓰지 않는다 (리뷰 M2)", cmd: 'pnpm -C apps/server test -t "TC-M2.T3.d"', expectPassed: 1 },
       { id: "G-M2.44", how: "cmd", desc: "재현 빨강: TC-M2.T3.d 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M2.43 --since seal:M1" },
       { id: "G-M2.45", how: "test", desc: "TC-M2.T5.f 메일 설정의 보내는 주소는 이메일 형식이어야 한다 (리뷰 L4)", cmd: 'pnpm -C apps/server test -t "TC-M2.T5.f"', expectPassed: 1 },
       { id: "G-M2.46", how: "cmd", desc: "재현 빨강: TC-M2.T5.f 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M2.45 --since seal:M1" },
+      // H1 재검증: 최초·재발송 링크, proof binding, 직접 API·메일 실패·로그 비노출·검증/세션/비밀번호 변경 경합
+      { id: "G-M2.48", how: "test", requires: ["local-services"], desc: "TC-M2.T8.e 최초 가입 GET은 인증하지 않음 (Node DB 넷, H1 재검증)", cmd: 'pnpm -C apps/server test:db -t "TC-M2.T8.e " --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-M2.49", how: "cmd", desc: "재현 빨강: TC-M2.T8.e 최초 가입 GET 우회", cmd: "node scripts/check-red.mjs --check G-M2.48 --since seal:M1" },
+      { id: "G-M2.50", how: "test", requires: ["local-services"], desc: "TC-M2.T8.f·g Origin·위조·재생성·reset·replay (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-M2.T8.[fg] " --db sqlite,mysql,mariadb,pg', expectPassed: 8 },
+      { id: "G-M2.51", how: "test", requires: ["local-services"], desc: "TC-M2.T8.e·f·g 및 H1.D1 직접 API·경합 (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M2.T8.[efg] |H1[.]D1[.]"', expectPassed: 6 },
+      { id: "G-M2.52", how: "test", requires: ["local-services"], desc: "H1 API·Origin·NULL 호환·메일 실패·오류 비노출·경합 (Node DB 넷)", cmd: 'MG_TEST_DBS=sqlite,mysql,mariadb,pg pnpm -C packages/auth test -t "H1[.]"', expectPassed: 60 },
+      { id: "G-M2.53", how: "test", requires: ["local-services"], desc: "TC-M2.T8.migration 기존 행·세션 보존 0004 (다섯 DB)", cmd: 'pnpm -C packages/db test:migrate -t "TC-M2.T8.migration" --db sqlite,mysql,mariadb,pg,d1', expectPassed: 5 },
       // 타입·CI 단계 잡·필수 검사
       { id: "G-M2.16", how: "cmd", desc: "타입 검사", cmd: "pnpm -r typecheck" },
       { id: "G-M2.26", how: "grep", desc: "TC-M2.T6.a CI 단계 잡 (M2)", pattern: "^\\s+run: node scripts/gate\\.mjs M2\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },

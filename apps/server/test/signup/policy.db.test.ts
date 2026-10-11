@@ -54,7 +54,7 @@ describe.each(enabledDbs())("%s 미인증 계정 선점", (kind: DbKind) => {
     await t?.drop();
   });
 
-  it(`TC-M2.T8.a ${LABEL[kind]}: 선점 → 피해자 가입 → 피해자 인증 → 공격자 비밀번호 로그인 401·세션 0, 재설정 뒤 피해자 로그인 200 (보안 리뷰 H1)`, () => tcM2T8a(rig));
-  it(`TC-M2.T8.b ${LABEL[kind]}: 다툼 없는 정상 가입 → 인증 → 원래 비밀번호 로그인 200·재설정 메일 없음 (보안 리뷰 H1 대조)`, () => tcM2T8b(rig));
+  it(`TC-M2.T8.a ${LABEL[kind]}: 선점 → GET 무변경·피해자 비밀번호 확인 401·공격자 미인증 로그인 403·세션 0, 재설정 뒤 피해자 로그인 200 (보안 리뷰 H1)`, () => tcM2T8a(rig));
+  it(`TC-M2.T8.b ${LABEL[kind]}: 정상 가입 → GET 무변경·비밀번호 확인 POST → 원래 비밀번호 로그인 200·재설정 메일 없음 (보안 리뷰 H1 대조)`, () => tcM2T8b(rig));
   it(`TC-M2.T8.c ${LABEL[kind]}: 재설정은 다른 세션을 모두 끊고 emailVerified 를 true 로 한다 (보안 리뷰 H1)`, () => tcM2T8c(rig));
 });

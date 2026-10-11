@@ -52,6 +52,19 @@ describe.each(kinds)("%s H1 auth.api", (kind) => {
   });
   afterAll(async () => { await settle(); await h?.close(); vi.restoreAllMocks(); });
 
+  it("H1.RATE: 같은 IP의 비밀번호 확인 실패는 여섯 번째부터 429다", async () => {
+    const x = await signup("confirmation-rate");
+    const instance = createAuth({ ...cfg, clientIp: () => "192.0.2.233" });
+    const statuses: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      const response = await instance.handler(new Request(`${BASE}/api/auth/signup-confirmation`, { method: "POST", headers: { origin: BASE, "content-type": "application/json" }, body: JSON.stringify({ token: x.token, password: "wrong-password-123" }) }));
+      statuses.push(response.status);
+    }
+    expect(statuses).toEqual([401, 401, 401, 401, 401, 429]);
+    expect((await OPS.user(h.db, h.schema, x.email))?.emailVerified).toBe(false);
+    expect(await OPS.sessionsOf(h.db, h.schema, x.email)).toBe(0);
+  });
+
   it("H1.API: core verifyEmail 직접 호출·purpose/uid/expiry 위조·필드 주입은 인증하지 못한다", async () => {
     const x = await signup("api-binding");
     const core = await signJWT({ email: x.email }, SECRET, 3600);
@@ -292,7 +305,11 @@ describe.each(kinds)("%s H1 auth.api", (kind) => {
     await api().confirmSignupEmail({ body: { token: x.token, password: PASSWORD } });
     const login = await api().signInEmail({ body: { email: x.email, password: PASSWORD }, returnHeaders: true });
     const cookie = login.headers.getSetCookie().map((v: string) => v.split(";")[0]).join("; ");
-    const failed = vi.spyOn(h.db, "update").mockImplementation(() => ({ set: () => ({ where: () => ({ then: (_ok: any, fail: any) => fail(new Error(hash)), returning: () => Promise.reject(new Error(hash)) }) }) }));
+    const changeLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const failed = vi.spyOn(h.db, "update").mockImplementation(() => {
+      const error = Object.assign(new Error(hash), { query: hash, params: [hash], cause: new Error(hash) });
+      return { set: () => ({ where: () => ({ then: (_ok: any, fail: any) => fail(error), returning: () => Promise.reject(error) }) }) };
+    });
     try {
       let caught: any;
       try { await api().changePassword({ headers: new Headers({ cookie }), body: { currentPassword: PASSWORD, newPassword: "safe-new-password-123" } }); }
@@ -301,7 +318,94 @@ describe.each(kinds)("%s H1 auth.api", (kind) => {
       expect(String(caught)).not.toContain(hash);
       expect(JSON.stringify(caught)).not.toContain(hash);
       expect(caught?.cause).toBeUndefined();
-    } finally { failed.mockRestore(); }
+      const response = await auth.handler(new Request(`${BASE}/api/auth/change-password`, { method: "POST", headers: { cookie, origin: BASE, "content-type": "application/json" }, body: JSON.stringify({ currentPassword: PASSWORD, newPassword: "safe-new-password-123" }) }));
+      expect(response.status).toBe(500);
+      expect(await response.text()).not.toContain(hash);
+      expect(JSON.stringify(changeLog.mock.calls)).not.toContain(hash);
+    } finally { failed.mockRestore(); changeLog.mockRestore(); }
+  });
+
+  it("H1.NULL: 검증된 legacy·비credential 세션은 유지하고 미인증·삭제 회원의 NULL 세션은 거부한다", async () => {
+    for (const state of ["legacy", "oauth", "unverified", "deleted"]) {
+      const email = mail(`null-${state}`);
+      const id = await OPS.addPasswordUser(h.db, h.schema, email, PASSWORD, "member");
+      const login = await api().signInEmail({ body: { email, password: PASSWORD }, returnHeaders: true });
+      const headers = new Headers({ cookie: login.headers.getSetCookie().map((v: string) => v.split(";")[0]).join("; ") });
+      await h.db.update((h.schema as any).session).set({ credentialFingerprint: null }).where(eq((h.schema as any).session.userId, id));
+      if (state === "oauth") await h.db.delete((h.schema as any).account).where(eq((h.schema as any).account.userId, id));
+      if (state === "unverified") await h.db.update((h.schema as any).user).set({ emailVerified: false }).where(eq((h.schema as any).user.id, id));
+      if (state === "deleted") await h.db.update((h.schema as any).user).set({ deletedAt: new Date() }).where(eq((h.schema as any).user.id, id));
+      if (["legacy", "oauth"].includes(state)) {
+        expect(await api().getSession({ headers })).not.toBeNull();
+        expect((await apiReply(api().listUserAccounts({ headers }))).status).toBe(200);
+      } else {
+        expect((await apiReply(api().listUserAccounts({ headers }))).status).toBe(401);
+        expect(await api().getSession({ headers })).toBeNull();
+        expect(await (await auth.handler(new Request(`${BASE}/api/auth/get-session`, { headers }))).json()).toBeNull();
+        expect(await OPS.sessionsOf(h.db, h.schema, email)).toBe(0);
+      }
+    }
+  });
+
+  it("H1.CHANGE.concurrent: 같은 현재 비밀번호의 동시 변경은 하나만 성공한다", async () => {
+    const x = await signup("change-concurrent");
+    await api().confirmSignupEmail({ body: { token: x.token, password: PASSWORD } });
+    const login = await api().signInEmail({ body: { email: x.email, password: PASSWORD }, returnHeaders: true });
+    const headers = new Headers({ cookie: login.headers.getSetCookie().map((v: string) => v.split(";")[0]).join("; ") });
+    let n = 0;
+    const pause = barrier();
+    const { betterAuth } = await import("better-auth");
+    const { authOptions } = await import("../src/index.ts");
+    const { verifyPassword } = await import("better-auth/crypto");
+    const options = authOptions(cfg);
+    (options.emailAndPassword as any).password = { hash: hashPassword, verify: async (input: any) => {
+      const valid = await verifyPassword(input);
+      if (++n === 2) pause.release();
+      await pause.wait();
+      return valid;
+    } };
+    const instance = betterAuth(options);
+    const replies = await Promise.all(["one", "two"].map((tag) => apiReply((instance.api as any).changePassword({ headers, body: { currentPassword: PASSWORD, newPassword: `concurrent-${tag}-password-123`, revokeOtherSessions: false } }))));
+    expect(replies.map((r) => r.status).sort()).toEqual([200, 401]);
+    expect(await api().getSession({ headers })).not.toBeNull();
+  });
+
+  it("H1.ERROR.keep: 유지 세션 UPDATE 오류도 HTTP·로그·cause에 해시를 전달하지 않는다", async () => {
+    const x = await signup("keep-error");
+    await api().confirmSignupEmail({ body: { token: x.token, password: PASSWORD } });
+    const login = await api().signInEmail({ body: { email: x.email, password: PASSWORD }, returnHeaders: true });
+    const cookie = login.headers.getSetCookie().map((v: string) => v.split(";")[0]).join("; ");
+    const hash = (await credential(x.id)).password;
+    const originalUpdate = h.db.update.bind(h.db);
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const hashes = [hash];
+    const mock = vi.spyOn(h.db, "update").mockImplementation((table: any) => {
+      if (table !== (h.schema as any).session) return { set: (values: any) => {
+        if (typeof values.password === "string") hashes.push(values.password);
+        return originalUpdate(table).set(values);
+      } };
+      return { set: () => ({ where: () => Promise.reject(Object.assign(new Error(hashes.join(" ")), { params: hashes, cause: new Error(hashes.join(" ")) })) }) };
+    });
+    try {
+      const response = await auth.handler(new Request(`${BASE}/api/auth/change-password`, { method: "POST", headers: { cookie, origin: BASE, "content-type": "application/json" }, body: JSON.stringify({ currentPassword: PASSWORD, newPassword: "keep-error-password-123", revokeOtherSessions: false }) }));
+      expect(response.status).toBe(500);
+      const text = await response.text();
+      for (const value of hashes) {
+        expect(text.includes(value)).toBe(false);
+        expect(JSON.stringify(errors.mock.calls).includes(value)).toBe(false);
+      }
+      await originalUpdate((h.schema as any).account).set({ password: hash }).where(eq((h.schema as any).account.userId, x.id));
+      let caught: any;
+      try { await api().changePassword({ headers: new Headers({ cookie }), body: { currentPassword: PASSWORD, newPassword: "keep-api-error-password-123", revokeOtherSessions: false } }); }
+      catch (e) { caught = e; }
+      expect(caught?.statusCode).toBe(500);
+      expect(caught?.cause).toBeUndefined();
+      for (const value of hashes) {
+        expect(String(caught).includes(value)).toBe(false);
+        expect(JSON.stringify(caught).includes(value)).toBe(false);
+        expect(JSON.stringify(errors.mock.calls).includes(value)).toBe(false);
+      }
+    } finally { mock.mockRestore(); errors.mockRestore(); }
   });
 
   it("H1.SESSION: 변경된 credential의 남은 세션은 getSession과 내부 보호 API에서 삭제·거부한다", async () => {

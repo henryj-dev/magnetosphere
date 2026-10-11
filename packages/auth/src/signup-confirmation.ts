@@ -5,7 +5,7 @@ import { APIError, createAuthEndpoint, getAuthoritativeSessionFromCtx, getSessio
 import { setSessionCookie } from "better-auth/cookies";
 import { parseUserOutput } from "better-auth/db";
 import { constantTimeEqual, signJWT, verifyJWT } from "better-auth/crypto";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import type { AuthConfig, MailMessage } from "./index.ts";
 import { VERIFY_EMAIL_EXPIRES_S } from "@magnetosphere/db/src/signup.ts";
 import { verifyEmailMessage } from "./mail/messages.ts";
@@ -43,6 +43,11 @@ export function signupConfirmation(cfg: AuthConfig, deliver: (m: MailMessage) =>
     const bytes = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message)));
     return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   };
+  const activeUser = async (id: string) => {
+    const [user] = await db.select().from(u).where(eq(u.id, id)).limit(1);
+    return !!user && user.emailVerified && !user.deletedAt;
+  };
+  const validSession = async (row: any) => !!row && (row.credentialFingerprint ? matches(row.userId, row.credentialFingerprint) : activeUser(row.userId));
   const matches = async (id: string, expected: string) => {
     const { user, account } = await load(id);
     return !!user && user.emailVerified && !user.deletedAt && !!account?.password && constantTimeEqual(await fingerprint(id, account), expected);
@@ -137,6 +142,7 @@ export function signupConfirmation(cfg: AuthConfig, deliver: (m: MailMessage) =>
       if (!user?.emailVerified || user.deletedAt || !account?.password) throw staleLogin();
       const oldFingerprint = await fingerprint(user.id, account);
       if (session.session.credentialFingerprint && !constantTimeEqual(session.session.credentialFingerprint, oldFingerprint)) throw staleLogin();
+      const keptSessions = revokeOtherSessions ? [] : await db.select({ id: s.id, fingerprint: s.credentialFingerprint }).from(s).where(and(eq(s.userId, user.id), or(eq(s.credentialFingerprint, oldFingerprint), isNull(s.credentialFingerprint))));
       const password = await ctx.context.password.hash(newPassword);
       if (!(await ctx.context.password.verify({ hash: account.password, password: currentPassword }))) throw bad("INVALID_PASSWORD");
       const samePassword = provider === "mysql" ? sql`binary ${a.password} = binary ${account.password}` : eq(a.password, account.password);
@@ -165,7 +171,8 @@ export function signupConfirmation(cfg: AuthConfig, deliver: (m: MailMessage) =>
         await setSessionCookie(ctx, { session: created, user: session.user });
       } else {
         try {
-          await db.update(s).set({ credentialFingerprint: expected }).where(and(eq(s.id, session.session.id), sql`exists (select 1 from ${a} where ${a.id} = ${account.id} and ${provider === "mysql" ? sql`binary ${a.password} = binary ${password}` : eq(a.password, password)})`));
+          // 변경 전에 존재했고 옛 credential에 속한 세션만 유지한다. 늦은 로그인이나 다른 변경의 세션은 재바인딩하지 않는다.
+          if (keptSessions.length) await db.update(s).set({ credentialFingerprint: expected }).where(and(or(...keptSessions.map((row: any) => and(eq(s.id, row.id), row.fingerprint === null ? isNull(s.credentialFingerprint) : eq(s.credentialFingerprint, row.fingerprint)))), eq(s.userId, user.id), sql`exists (select 1 from ${a} where ${a.id} = ${account.id} and ${provider === "mysql" ? sql`binary ${a.password} = binary ${password}` : eq(a.password, password)})`));
         } catch {
           throw new APIError("INTERNAL_SERVER_ERROR", { code: "PASSWORD_CHANGE_FAILED", message: "비밀번호를 바꾸지 못했어요" });
         }
@@ -196,7 +203,7 @@ export function signupConfirmation(cfg: AuthConfig, deliver: (m: MailMessage) =>
       const session = ctx.context.session ?? await getSessionFromCtx(ctx);
       if (!session?.session) return;
       const [row] = await db.select().from(s).where(eq(s.token, session.session.token)).limit(1);
-      if (row && (!row.credentialFingerprint || await matches(row.userId, row.credentialFingerprint))) return;
+      if (await validSession(row)) return;
       if (row) await db.delete(s).where(eq(s.id, row.id));
       ctx.context.session = null;
       if (ctx.path === "/get-session") return ctx.json(null);
@@ -206,7 +213,7 @@ export function signupConfirmation(cfg: AuthConfig, deliver: (m: MailMessage) =>
       const result = ctx.context.returned;
       if (!result?.session?.token) return;
       const [row] = await db.select().from(s).where(eq(s.token, result.session.token)).limit(1);
-      if (row && (!row.credentialFingerprint || await matches(row.userId, row.credentialFingerprint))) return;
+      if (await validSession(row)) return;
       if (row) await db.delete(s).where(eq(s.id, row.id));
       ctx.context.session = null;
       ctx.context.responseHeaders?.delete("set-cookie");

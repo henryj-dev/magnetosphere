@@ -29,8 +29,8 @@ export const session = pgTable("session", {
   updatedAt: timestamp("updated_at").$onUpdate(() => new Date()).notNull(),
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
-  credentialFingerprint: varchar("credential_fingerprint", { length: 64 }),
   userId: varchar("user_id", { length: 36 }).notNull().references(() => user.id, { onDelete: "cascade" }),
+  credentialFingerprint: varchar("credential_fingerprint", { length: 64 }),
 }, (table) => [
   index("session_userId_idx").on(table.userId),
 ]);

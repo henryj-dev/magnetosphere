@@ -239,7 +239,7 @@ async function openInstalled(rig: HttpRig) {
 
 /**
  * TC-M2.T8.a 미인증 계정 선점으로 계정을 가로채지 못한다 (보안 리뷰 H1). 공격자가 피해자 이메일로 먼저 가입 → 피해자가 가입(가짜 200)
- * → 피해자가 인증 메일을 다시 받아 인증 → 공격자 비밀번호 로그인 401·그 계정 세션 0, 피해자에게 재설정 메일 → 재설정 뒤 피해자 로그인 200
+ * → 재발송 GET은 미인증 유지·피해자 비밀번호 확인은 401·공격자 미인증 로그인은 403·세션 0 → 메일함 주인이 재설정 뒤 로그인 200
  */
 export async function tcM2T8a(rig: HttpRig) {
   await openInstalled(rig);
@@ -265,7 +265,7 @@ export async function tcM2T8a(rig: HttpRig) {
   expect((await signIn(rig, victim, ATTACKER_PW)).status).toBe(401);
 }
 
-/** TC-M2.T8.b 다툼이 없는 정상 가입은 인증 뒤 원래 비밀번호로 로그인된다, 재설정 메일 없음 (보안 리뷰 H1 대조) */
+/** TC-M2.T8.b 정상 가입은 GET 무변경·비밀번호 확인 POST 뒤 원래 비밀번호로 로그인된다, 재설정 메일 없음 (보안 리뷰 H1 대조) */
 export async function tcM2T8b(rig: HttpRig) {
   await openInstalled(rig);
   const e = mail("t8b");

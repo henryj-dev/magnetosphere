@@ -29,8 +29,8 @@ export const session = sqliteTable("session", {
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).$onUpdate(() => new Date()).notNull(),
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
-  credentialFingerprint: text("credential_fingerprint"),
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  credentialFingerprint: text("credential_fingerprint"),
 }, (table) => [
   index("session_userId_idx").on(table.userId),
 ]);
