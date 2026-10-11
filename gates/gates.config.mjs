@@ -828,6 +828,7 @@ export const GATES = {
       // M3.T2 보안 리뷰 고침 (H-1)
       { id: "G-M3.26", how: "test", desc: "TC-M3.T2.g 이메일 없는 초대를 남의 이메일로 수락해도 가로채지 못한다 (리뷰 H-1)", cmd: 'pnpm -C apps/server test -t "TC-M3.T2.g"', expectPassed: 1 },
       { id: "G-M3.27", how: "cmd", desc: "재현 빨강: TC-M3.T2.g 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M3.26 --since seal:M2" },
+      { id: "G-M3.28", how: "test", requires: ["local-services"], desc: "TC-M3.T2.g 이메일 없는 초대로 남의 이메일을 가로채지 못한다 (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M3.T2.g"', expectPassed: 1 },
     ],
   },
   M4: {
