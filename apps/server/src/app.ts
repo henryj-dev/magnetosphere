@@ -8,6 +8,7 @@
 //   /api/me/keys   회원 키 API (routes/keys.ts). /api/admin/users/:id 는 관리자 한도·최대 개수 (routes/admin-limits.ts)
 //                  두 경로의 GET 아닌 요청은 Origin 이 BETTER_AUTH_URL 출처와 같아야 한다 (routes/guard.ts, 7장 CSRF)
 //   /api/admin/settings/{signup,mail} 가입 정책·메일 설정 API (signup/admin.ts·signup/mail.ts, M2.T5). 같은 CSRF 검사
+//   /api/admin/invites 초대 만들기·목록·취소 (invites/admin.ts, M3.T1). 같은 CSRF 검사
 //   /api/*         그 밖은 JSON 404. 모르는 API 경로가 index.html 200 이 되면 클라이언트가 오류를 성공으로 오인한다
 //   나머지         SPA 정적 파일 (apps/web 빌드). 없는 경로는 index.html (TC-S4.T3.a)
 // 모든 응답(SPA·API)에 보안 헤더를 단다 (TC-S4.T3.f). 스크립트·스타일 출처는 SPA 빌드가 <meta> CSP 로 건다
@@ -20,6 +21,7 @@ import { secureHeaders } from "hono/secure-headers";
 import type { Mailer } from "@magnetosphere/auth";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
+import { inviteAdminRoutes } from "./invites/admin.ts";
 import type { ClientFor } from "./limits/daily.ts";
 import { adminLimitRoutes } from "./routes/admin-limits.ts";
 import { sameOrigin } from "./routes/guard.ts";
@@ -134,6 +136,7 @@ export function createApp(deps: AppDeps) {
   app.route("/api/me/keys", keyRoutes(deps.services));
   app.route("/api/admin/settings/signup", signupSettingsRoutes(deps.services));
   app.route("/api/admin/settings/mail", mailSettingsRoutes(deps.services));
+  app.route("/api/admin/invites", inviteAdminRoutes(deps.services));
   app.route("/api/admin", adminLimitRoutes(deps.services));
   app.all("/api/*", (c) => c.json({ error: "not_found" }, 404));
   app.get("*", deps.assets);
