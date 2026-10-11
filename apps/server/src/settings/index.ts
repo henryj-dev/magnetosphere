@@ -1,7 +1,8 @@
 // 설정 저장소 하나 (3단계 실행판 M1.T1, 계획서 4.2·5.9). 가입 정책 설정 여섯 키의 읽기·값 검사·정책 검사와
 // app_settings 쓰기(upsert 한 문장)를 여기 둔다. 3단계 코드(가입 판정·설정 API·초대)는 이것만 쓴다.
-//   - 읽기(readSettings): 행이 없거나 저장된 값이 검사에 맞지 않으면 시드 기본값(DEFAULT_SETTINGS, allowed_domains 는 [])을 쓴다.
-//     손으로 고친 행 하나가 가입 판정을 TypeError 로 500 내게 하지 않는다 (TC-M1.T1.c).
+//   - 읽기(readSettings): 행이 없으면 시드 기본값(DEFAULT_SETTINGS, allowed_domains 는 [])을 쓴다 (TC-M1.T1.c).
+//     행이 있는데 값이 깨졌으면(검사에 맞지 않음·JSON 아님) 경고를 남기고 더 닫힌 값(BROKEN)으로 읽는다. 시드 값으로 읽으면
+//     운영자가 둔 closed·cap 0 이 invite_only·20 으로 열린다 (TC-M1.T1.e, M1 리뷰 낮음 1).
 //   - 쓰기(writeSetting): 키마다 zod 로 값을 검사·정규화하고, 정책 검사(메일·도메인·IdP)를 지난 값만 upsert 한다.
 //     어긋나면 SettingsError 를 던지고 아무것도 쓰지 않는다 (TC-M1.T1.a·b).
 //   - 정책 키가 아닌 값(public_base_url, mail_settings, OmniRoute 토큰 등)은 writeAppSetting 으로 같은 upsert 를 쓴다.
@@ -74,6 +75,8 @@ export const SETTING_KEYS = Object.keys(SCHEMAS) as SettingKey[];
 export type SignupSettings = { [K in SettingKey]: z.output<(typeof SCHEMAS)[K]> };
 
 const DEFAULTS: SignupSettings = { ...DEFAULT_SETTINGS, allowed_domains: [] };
+/** 행의 값이 깨졌을 때 읽는 값. 가입을 더 막는 쪽이다. 기본 한도는 #13 과 같이 시드 값 5 다 */
+const BROKEN: SignupSettings = { ...DEFAULTS, signup_mode: "closed", daily_signup_cap: 0, signup_requires_approval: true, allowed_domains: [] };
 
 export type SettingsErrorCode = "unknown_key" | "invalid_value" | "mail_required" | "domains_required" | "no_idp";
 
@@ -91,21 +94,25 @@ export class SettingsError extends Error {
 
 const isSettingKey = (key: string): key is SettingKey => Object.hasOwn(SCHEMAS, key);
 
-/** 정책 설정 여섯 키. 없거나 검사에 맞지 않는 값은 시드 기본값 */
+/** 정책 설정 여섯 키. 행이 없으면 시드 기본값, 값이 깨졌으면 경고와 함께 더 닫힌 값 */
 export async function readSettings(h: DbHandle): Promise<SignupSettings> {
   const t = h.schema.appSettings;
   const rows: { key: string; value: string }[] = await h.db.select({ key: t.key, value: t.value }).from(t).where(inArray(t.key, SETTING_KEYS));
   const out: Record<string, unknown> = { ...DEFAULTS };
   for (const r of rows) {
     if (!isSettingKey(r.key)) continue;
-    let v: unknown;
+    let p: { success: boolean; data?: unknown } = { success: false };
     try {
-      v = JSON.parse(r.value);
+      p = SCHEMAS[r.key].safeParse(JSON.parse(r.value));
     } catch {
-      continue;
+      // JSON 이 아니면 아래에서 깨진 값으로 본다
     }
-    const p = SCHEMAS[r.key].safeParse(v);
-    if (p.success) out[r.key] = p.data;
+    if (p.success) {
+      out[r.key] = p.data;
+    } else {
+      out[r.key] = BROKEN[r.key];
+      console.warn(`[settings] app_settings.${r.key} 값이 깨져 ${JSON.stringify(BROKEN[r.key])} 로 읽는다`);
+    }
   }
   return out as SignupSettings;
 }
