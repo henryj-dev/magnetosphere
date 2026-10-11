@@ -21,11 +21,18 @@ export interface MailInput {
   from: string;
 }
 
+/**
+ * 보내는 주소: 앞뒤 공백을 지운 값이 이메일 주소 하나 (254자 이하, 점이 있는 도메인). 표시 이름·여러 주소·제어 문자·공백은 받지 않는다 (TC-M2.T5.f, 리뷰 L4)
+ */
+const FROM_ADDRESS = /^[^\x00-\x20\x7f@<>()[\]\\,;:"]+@(?:[^\x00-\x20\x7f@<>()[\]\\,;:".]+\.)+[^\x00-\x20\x7f@<>()[\]\\,;:".]+$/;
+
 /** 설치(setup/index.ts)와 설정 API(signup/mail.ts)의 메일 설정 검사 */
 export function validMailInput(m: unknown): m is MailInput {
   const isText = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
   const x = m as Partial<MailInput> | null;
-  return typeof x === "object" && x !== null && x.provider === "resend" && isText(x.apiKey) && isText(x.from);
+  if (typeof x !== "object" || x === null || x.provider !== "resend" || !isText(x.apiKey) || !isText(x.from)) return false;
+  const from = x.from.trim();
+  return from.length <= 254 && FROM_ADDRESS.test(from);
 }
 
 /** 저장할 값. API 키는 APP_ENCRYPTION_KEY 로 암호화한다 (AAD MAIL_API_KEY_AAD) */
