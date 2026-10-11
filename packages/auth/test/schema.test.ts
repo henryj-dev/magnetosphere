@@ -47,7 +47,7 @@ export function diffAuthTables(options: Parameters<typeof getAuthTables>[0]): st
   return problems;
 }
 
-const options = () => authOptions({ database: { db: {}, provider: "sqlite", schema: {} }, baseURL: BASE, secret: SECRET, mailer: consoleMailer(), clientIp: () => null, waitUntil: () => {}, onMailError: () => {} });
+const options = () => authOptions({ database: { db: {}, kind: "sqlite", provider: "sqlite", schema: {} }, baseURL: BASE, secret: SECRET, mailer: consoleMailer(), clientIp: () => null, waitUntil: () => {}, onMailError: () => {} });
 
 describe("TC-S3.T1.e 구성과 스키마", () => {
   test("TC-S3.T1.e Better Auth 구성의 테이블이 공통 정의와 같다", () => {
@@ -76,7 +76,7 @@ describe("TC-S3.T1.e 구성과 스키마", () => {
 
 describe("TC-S3.T1.f 비밀 값 길이", () => {
   test("TC-S3.T1.f secret 이 32자 미만이면 시작을 거부한다", () => {
-    const base = { database: { db: {}, provider: "sqlite" as const, schema: {} }, baseURL: BASE, mailer: consoleMailer(), clientIp: () => null, waitUntil: () => {}, onMailError: () => {} };
+    const base = { database: { db: {}, kind: "sqlite" as const, provider: "sqlite" as const, schema: {} }, baseURL: BASE, mailer: consoleMailer(), clientIp: () => null, waitUntil: () => {}, onMailError: () => {} };
     for (const secret of ["", "short", "x".repeat(31)]) {
       expect(() => authOptions({ ...base, secret }), `${secret.length}자`).toThrow(/32자 이상/);
       expect(() => createAuth({ ...base, secret }), `${secret.length}자`).toThrow(/32자 이상/);

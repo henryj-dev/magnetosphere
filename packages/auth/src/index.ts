@@ -38,7 +38,7 @@ export interface AuthDatabase {
   provider: "sqlite" | "mysql" | "pg";
   schema: Record<string, unknown>;
   /** 런타임 DbHandle 의 kind. "d1" 이면 Drizzle 어댑터의 트랜잭션을 끈다 (D1 은 BEGIN 을 받지 않는다, TC-SEC.2.a) */
-  kind?: "sqlite" | "mysql" | "pg" | "d1";
+  kind: "sqlite" | "mysql" | "pg" | "d1";
 }
 
 export interface AuthConfig {
