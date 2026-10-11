@@ -1,0 +1,11 @@
+{
+  // 가입 정책 시험(M2)의 D1 시험 Worker. 배포하지 않는다. 운영과 같은 서버 앱(createApp + buildServices)을 로컬 D1 위에 올린다 (worker.ts).
+  // 마이그레이션은 시험이 wrangler d1 migrations apply --local 로 적용한다.
+  "name": "mg-server-signup-test",
+  "main": "./worker.ts",
+  "compatibility_date": "2026-07-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "mg-server-signup-test", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "../../../../packages/db/migrations/sqlite" }
+  ]
+}
