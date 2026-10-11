@@ -31,6 +31,7 @@ import { signupSettingsRoutes } from "./signup/admin.ts";
 import { publicSignupDenial } from "./signup/gate.ts";
 import { mailSettingsRoutes } from "./signup/mail.ts";
 import { withRequestMemo } from "./signup/request-memo.ts";
+import { SIGNUP_MIN_MS, withMinDuration } from "./signup/timing.ts";
 
 /** /api/* 요청 본문 상한. 인증·설치 요청은 1KB 안팎이다 */
 export const API_BODY_LIMIT = 64 * 1024;
@@ -114,14 +115,16 @@ export function createApp(deps: AppDeps) {
       await next();
     });
   });
-  // 인증 요청 하나가 요청 문맥 메모 하나다 (가입 판정 입력을 한 번만 읽는다, signup/request-memo.ts)
+  // 인증 요청 하나가 요청 문맥 메모 하나다 (가입 판정 입력을 한 번만 읽는다, signup/request-memo.ts).
+  // 가입 경로는 응답(앞 판정 거부·Better Auth 의 429·오류 포함)을 SIGNUP_MIN_MS 까지 채운다 (signup/timing.ts, TC-M2.T4.a·c)
   app.use("/api/auth/*", (c, next) =>
     withRequestMemo(async () => {
-      if (isSignUpPath(c.req.path)) {
+      if (!isSignUpPath(c.req.path)) return next();
+      return withMinDuration(SIGNUP_MIN_MS, async () => {
         const denied = await publicSignupDenial((await deps.services()).db, c.req.raw);
         if (denied) return c.json({ error: denied.error }, denied.status);
-      }
-      await next();
+        await next();
+      });
     }),
   );
   app.all("/api/auth/*", async (c) => (await deps.services()).auth.handler(c.req.raw));

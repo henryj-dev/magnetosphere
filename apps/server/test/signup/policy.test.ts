@@ -219,7 +219,9 @@ describe("TC-M2.T3 하루 가입 상한", () => {
     await rig.op("setSetting", "daily_signup_cap", 3);
     const existing = mail("t3b-old");
     await rig.op("addPasswordUser", existing, PASSWORD, "member");
-    for (let i = 0; i < 20; i++) expect((await rig.signUp(body(existing))).status).toBe(200);
+    // 가입 응답은 최소 400ms 라 묶어서 동시에 보낸다 (IP 는 요청마다 다르다)
+    const dup = await Promise.all(Array.from({ length: 20 }, () => rig.signUp(body(existing))));
+    expect(dup.map((r) => r.status)).toEqual(Array(20).fill(200));
     expect(await rig.op("signupCount")).toBe(0);
     for (let i = 0; i < 3; i++) {
       const r = await attempt(rig, () => rig.signUp(body(mail(`t3b-${i}`))));
@@ -232,12 +234,35 @@ describe("TC-M2.T3 하루 가입 상한", () => {
     await mode("open");
     await rig.op("setSetting", "daily_signup_cap", null);
     const u0 = await userRows(rig);
-    for (let i = 0; i < 100; i++) expect((await rig.signUp(body(mail(`t3c-${i}`)))).status).toBe(200);
+    for (let batch = 0; batch < 5; batch++) {
+      const rs = await Promise.all(Array.from({ length: 20 }, (_, i) => rig.signUp(body(mail(`t3c-${batch}-${i}`)))));
+      expect(rs.filter((r) => r.status !== 200).map((r) => r.body)).toEqual([]);
+    }
     expect((await userRows(rig)) - u0).toBe(100);
     await rig.op("setSetting", "daily_signup_cap", 0);
     await rig.op("newDay");
     const r = await attempt(rig, () => rig.signUp(body(mail("t3c-zero"))));
     expect({ status: r.status, code: r.code, user: r.user, mail: r.mail }).toEqual({ status: 403, code: "signup_cap", user: 0, mail: 0 });
+  });
+});
+
+describe("TC-M2.T4 가입 응답 시간", () => {
+  it("TC-M2.T4.c 같은 IP 6번째 공개 가입 → 429 (rate-limit.ts /sign-up/* 5/60s), 429·앞 판정 거부 응답도 ≥ 400ms", async () => {
+    await mode("open");
+    const ip = "203.0.113.77";
+    const timed = async (e: string, o: { ip?: string } = {}) => {
+      const t0 = performance.now();
+      const r = await rig.signUp(body(e), o);
+      return { status: r.status, ms: performance.now() - t0 };
+    };
+    const rs = [];
+    for (let i = 0; i < 6; i++) rs.push(await timed(mail(`t4c-${i}`), { ip }));
+    expect(rs.map((r) => r.status)).toEqual([200, 200, 200, 200, 200, 429]);
+    await mode("closed");
+    const closed = await timed(mail("t4c-closed"));
+    expect(closed.status).toBe(403);
+    const all = [...rs, closed];
+    expect(Math.min(...all.map((r) => r.ms)), JSON.stringify(all)).toBeGreaterThanOrEqual(400);
   });
 });
 
