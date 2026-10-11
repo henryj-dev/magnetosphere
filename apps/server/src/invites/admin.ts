@@ -24,7 +24,7 @@
 //     아무것도 쓰지 않는다. 읽은 뒤 다른 요청이 사용·취소했어도 404 이고 감사 기록이 없다. 기본 키 한 행만 잠그므로 뮤텍스를 쓰지 않는다.
 //     취소와 감사 기록 invite.revoke 는 한 트랜잭션(D1 은 batch)이다.
 //   - 목록에는 토큰·해시를 넣지 않는다. invites 에 created_at 이 없어 만료 시각 늦은 순이다.
-import { and, desc, eq, gt, isNull, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, gt, isNull, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import { Hono, type Context } from "hono";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import { updatedRows } from "@magnetosphere/runtime/lease";
@@ -100,6 +100,12 @@ async function readInvite(h: DbHandle, id: string): Promise<InviteRow | undefine
   return row;
 }
 
+/** 이메일 정규화·형식 검사 (trim → 소문자 → NFC). 형식이 틀리면 null. 초대 수락(accept.ts)도 같은 규칙으로 본문 이메일을 비교한다 */
+export function normalizeInviteEmail(v: string): string | null {
+  const e = v.trim().toLowerCase().normalize("NFC");
+  return e.length <= EMAIL_MAX && EMAIL.test(e) ? e : null;
+}
+
 type Parsed = { email: string | null; role: (typeof INVITE_ROLES)[number]; days: number } | { error: string };
 
 function parseBody(raw: unknown): Parsed {
@@ -111,9 +117,8 @@ function parseBody(raw: unknown): Parsed {
   let email: string | null = null;
   if (b.email !== undefined && b.email !== null) {
     if (typeof b.email !== "string") return { error: "invalid_email" };
-    const e = b.email.trim().toLowerCase().normalize("NFC");
-    if (e.length > EMAIL_MAX || !EMAIL.test(e)) return { error: "invalid_email" };
-    email = e;
+    email = normalizeInviteEmail(b.email);
+    if (email === null) return { error: "invalid_email" };
   }
   if (role === "admin" && email === null) return { error: "admin_invite_requires_email" };
   let days: number = INVITE_EXPIRES_DAYS.default;
@@ -181,7 +186,7 @@ async function revokeWhere(h: DbHandle, tx: any, cond: SQL | undefined, now: Dat
   return (await tx.update(t).set({ revokedAt: now }).where(cond).returning({ id: t.id })).map((r: { id: string }) => r.id);
 }
 
-type RevokeEntry = Omit<AuditEntry, "target">;
+export type RevokeEntry = Omit<AuditEntry, "target">;
 
 /** SQLite 식: UUID v4 꼴 무작위 id (D1 감사 행 id 를 auditRow 가 만드는 crypto.randomUUID() 와 같은 꼴로) */
 const SQLITE_UUID = sql.raw(
@@ -190,26 +195,30 @@ const SQLITE_UUID = sql.raw(
 );
 
 /**
- * D1 batch 용: cond 에 맞는 invites 행마다 invite.revoke 감사 한 행을 넣는 INSERT … SELECT (target = 그 행 id).
+ * D1 batch 용: cond 에 맞는 invites 행마다 감사 한 행(e.action, 취소면 invite.revoke·수락이면 invite.accept)을 넣는 INSERT … SELECT (target = 그 행 id).
  * 같은 cond 의 UPDATE 앞에 두면 batch 가 한 번에 돌아 감사 기록 = 실제로 취소한 행이 된다. 행 검사는 auditRow 그대로다.
  */
-function auditEachStatement(h: DbHandle, db: any, e: RevokeEntry, cond: SQL | undefined) {
+export function auditEachStatement(h: DbHandle, db: any, e: RevokeEntry, cond: SQL | undefined) {
   const a = h.schema.auditLog;
   const t = h.schema.invites;
   const row = auditRow({ ...e, target: null });
-  const cols = [a.id, a.actorId, a.action, a.target, a.detail, a.ip, a.createdAt];
-  const values = [
-    SQLITE_UUID,
-    sql.param(row.actorId, a.actorId),
-    sql.param(row.action, a.action),
-    sql`${t.id}`,
-    sql.param(row.detail, a.detail),
-    sql.param(row.ip, a.ip),
-    sql.param(row.createdAt, a.createdAt),
-  ];
-  return db.run(
-    sql`insert into ${a} (${sql.join(cols.map((c) => sql.identifier(c.name)), sql`, `)}) select ${sql.join(values, sql`, `)} from ${t} where ${cond}`,
-  );
+  const values: Record<string, SQLWrapper> = {
+    id: SQLITE_UUID,
+    actorId: sql.param(row.actorId, a.actorId),
+    action: sql.param(row.action, a.action),
+    target: sql`${t.id}`,
+    detail: sql.param(row.detail, a.detail),
+    ip: sql.param(row.ip, a.ip),
+    createdAt: sql.param(row.createdAt, a.createdAt),
+  };
+  // insert().select(SQL) 은 표 정의 순서의 모든 칼럼으로 INSERT 한다. 값도 그 순서로 맞춘다.
+  // db.run(sql) 원시 문장은 D1 batch 항목이 되지 못한다 (drizzle d1 session.batch 가 stmt.bind 를 부른다) — 쿼리 빌더 문장이어야 한다
+  const order = Object.keys(getTableColumns(a)).map((k) => {
+    const v = values[k];
+    if (!v) throw new Error(`audit_log 칼럼 ${k} 의 값이 없다`);
+    return v;
+  });
+  return db.insert(a).select(sql`select ${sql.join(order, sql`, `)} from ${t} where ${cond}`);
 }
 
 export function inviteAdminRoutes(services: () => Promise<Services>) {
