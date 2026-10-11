@@ -820,6 +820,11 @@ export const GATES = {
       // M3.T3 만료·취소한 초대 정리
       { id: "G-M3.14", how: "test", requires: ["local-services"], desc: "TC-M3.T3.a 30일 지난 만료·취소 초대만 지운다 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-M3.T3.a" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
       { id: "G-M3.19", how: "test", requires: ["local-services"], desc: "TC-M3.T3.a 초대 정리 (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M3.T3.a"', expectPassed: 1 },
+      // 저장소·타입·CI 단계 잡·필수 검사 (M3.T4)
+      { id: "G-M3.15", how: "grep", desc: "초대 원문 저장 칼럼 없음", pattern: "\\b(invite_token|token_raw|raw_token)\\b", in: ["packages/db/src/schema"], op: "==", limit: 0 },
+      { id: "G-M3.16", how: "cmd", desc: "타입 검사", cmd: "pnpm -r typecheck" },
+      { id: "G-M3.17", how: "grep", desc: "TC-M3.T4.a CI 단계 잡 (M3)", pattern: "^\\s+run: node scripts/gate\\.mjs M3\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
+      { id: "G-M3.18", how: "cmd", desc: "TC-M3.T4.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
       // M3.T1 보안 리뷰 고침 (M1·L1)
       { id: "G-M3.20", how: "test", desc: "TC-M3.T1.g 감사 기록은 실제 변경과 같다 — 끼어든 DELETE 404·감사 0, 재초대 revoke 는 실제 취소 행만 (리뷰 M1)", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.g"', expectPassed: 1 },
       { id: "G-M3.21", how: "cmd", desc: "재현 빨강: TC-M3.T1.g 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M3.20 --since seal:M2" },
