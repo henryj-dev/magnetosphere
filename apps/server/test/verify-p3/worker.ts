@@ -1,7 +1,7 @@
 // 3단계 확인 항목 V29~V32 의 D1 시험 Worker (M0). Node 네 DB 시험과 같은 시험 구성(packages/auth/test/verify-p3/probe.ts)을
 // 요청마다 로컬 D1 위에 올린다 (운영 Worker 처럼 요청마다 연결·인증을 새로 만든다). 진입 모듈이라 default 말고는 내보내지 않는다.
-// D1 은 대화형 트랜잭션이 없어 지금 구성(transaction: true)의 가입이 500 이다 (V29 d1Transaction). 그래서 기본은 transaction: false 로
-// 올리고, 머리글 x-probe-tx: on 일 때만 지금 구성 그대로 올린다.
+// D1 은 대화형 트랜잭션이 없어 #15 전 운영 구성(transaction: true)의 가입이 500 이었다 (V29 d1Transaction). 그래서 기본은 transaction: false 로
+// 올리고, 머리글 x-probe-tx: on 일 때만 운영 구성 그대로 올린다 (#15 뒤 D1 은 운영 구성도 transaction: false).
 //   /api/auth/*                     머리글 x-probe 의 시험 구성(없으면 plain)으로 Better Auth handler
 //   POST /__test/concurrent         { scenario, invited, publicBody } → concurrentSignUps (초대 문맥 서버 호출 + 같은 시각 공개 가입)
 //   POST /__test/db                 { op, args } → ops.ts OPS[op]

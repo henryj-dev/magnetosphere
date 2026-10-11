@@ -875,6 +875,7 @@ M0 V29 가 찾은 막는 결과 둘이다 (계획서 v5.8 3.2). 3단계 전 구�
 TC-M2.T7.a  D1 에서 Better Auth 가입이 회원을 만든다 (V29 의존, PR #15 뒤 단언만 남김)
   단언:  관리자 없는 로컬 D1, 운영 createAuth → /sign-up/email 200, user·account 각 +1, 인증 메일 1통 (Workers + D1). 재현 빨강은 PR #15 가 가졌으므로 여기서는 요구하지 않는다
   검출:  3단계가 D1 구성을 다시 만들며 transaction: true 로 되돌려 가입·초대 수락이 D1 에서 500 이 되는 것
+  현재:  PR #15 병합으로 이 단언은 이미 성립한다 (TC-M0.T2.b 가 운영 구성 D1 가입 200·user·account +1·메일 1통을 단언한다). M2 는 회귀 단언으로 남긴다
 TC-M2.T7.b  Node SQLite 에서 겹친 쓰기가 SQLITE_BUSY 로 깨지지 않는다 (V29 의존)
   단언:  운영 구성, (1) auth.api.signUpEmail 10건 동시 → 10건 성공·user +10. (2) Better Auth 트랜잭션(비밀번호 재설정 /reset-password) 과 다른 쓰기(rate_limit 을 세는 /sign-in/email, 세션을 만드는 로그인) 를 겹쳐 10쌍 → 모두 성공, 응답 500·SQLITE_BUSY 0 (SQLite)
   검출:  libSQL 이 트랜잭션마다 다른 연결을 잡아(sqlite3.js:323) 가입·재설정 트랜잭션이 겹치거나 그 사이 rate_limit·세션 쓰기가 끼면 SQLITE_BUSY 로 500 이 나, open 정책·초대가 몰린 순간 가입·로그인 대부분이 실패하는 것

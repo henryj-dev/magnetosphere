@@ -23,7 +23,7 @@ export async function startVerifyWorker(): Promise<{ rig: Rig; currentConfig: Ri
   }
   return {
     rig: workersRig(d.baseUrl, "off"),
-    // 지금 구성 그대로 (transaction: true). V29 d1Transaction 만 이것으로 잰다
+    // 운영 구성 그대로 (#15 뒤 D1 은 transaction: false, 그 전 측정은 V29 d1Transaction). TC-M0.T2.b 의 가입 한 번만 이것으로 잰다
     currentConfig: workersRig(d.baseUrl, "on"),
     async close() {
       await d?.close();
