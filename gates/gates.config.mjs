@@ -719,6 +719,11 @@ export const GATES = {
       // M1.T5 CI 단계 잡·필수 검사
       { id: "G-M1.14", how: "grep", desc: "TC-M1.T5.a CI 단계 잡 (M1)", pattern: "^\\s+run: node scripts/gate\\.mjs M1\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
       { id: "G-M1.15", how: "cmd", desc: "TC-M1.T5.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
+      // M1 리뷰 고침 (낮음 1·2): 깨진 보안 설정은 더 닫힌 값으로, 감사 detail 의 이름 꼴 키·이메일 꼴 값 거부
+      { id: "G-M1.18", how: "test", desc: "TC-M1.T1.e 깨진 보안 설정 행은 더 닫힌 값으로 읽는다 (리뷰 낮음 1)", cmd: 'pnpm -C apps/server test -t "TC-M1.T1.e"', expectPassed: 1 },
+      { id: "G-M1.19", how: "cmd", desc: "재현 빨강: TC-M1.T1.e 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M1.18 --since seal:M0" },
+      { id: "G-M1.20", how: "test", desc: "TC-M1.T3.c 감사 detail 의 이름 꼴 키·이메일 꼴 값은 어느 깊이든 거부 (리뷰 낮음 2)", cmd: 'pnpm -C apps/server test -t "TC-M1.T3.c"', expectPassed: 1 },
+      { id: "G-M1.21", how: "cmd", desc: "재현 빨강: TC-M1.T3.c 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M1.20 --since seal:M0" },
     ],
   },
   // M2 가입 정책이 M3 초대보다 먼저다. 초대 수락이 signup/**(정책 판정·초대 문맥 ALS·응답 최소 시간)를 부르기 때문이다
