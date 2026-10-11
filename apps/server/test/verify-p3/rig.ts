@@ -3,6 +3,7 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+// M0 봉인 재검이 packages/auth/test/verify-p3/ 에 의존한다 (측정·단언·시험 구성을 상대 경로로 가져온다). 그 폴더를 옮기거나 지우면 M0 봉인 커밋 재검이 깨진다.
 import type { Rig } from "../../../../packages/auth/test/verify-p3/measure.ts";
 import { startWranglerDev, wrangler, type WranglerDev } from "../wrangler-dev.mjs";
 

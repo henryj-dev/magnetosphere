@@ -10,6 +10,7 @@
 //   GET  /__test/paths              auth.api 경로 목록
 import type { AuthConfig, MailMessage } from "@magnetosphere/auth";
 import { connectWorkers, type WorkersEnv } from "@magnetosphere/runtime/workers";
+// M0 봉인 재검이 packages/auth/test/verify-p3/ 에 의존한다 (측정·단언·시험 구성을 상대 경로로 가져온다). 그 폴더를 옮기거나 지우면 M0 봉인 커밋 재검이 깨진다.
 import { OPS, type OpName } from "../../../../packages/auth/test/verify-p3/ops.ts";
 import { concurrentSignUps, probeAuth, SCENARIOS, type HookLog, type Scenario } from "../../../../packages/auth/test/verify-p3/probe.ts";
 

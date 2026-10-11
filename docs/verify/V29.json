@@ -73,7 +73,13 @@
         "mailSent": 0
       },
       "cause": "drizzleAdapter transaction: true → drizzle d1 session.transaction 이 \"begin\" 을 보내고 D1 이 거부한다 (D1_ERROR: To execute a transaction, please use the state.storage.transaction() ... instead of the SQL BEGIN TRANSACTION)",
-      "measuredWith": "transaction: false (나머지 D1 관찰은 이 구성으로 쟀다)"
+      "measuredWith": "transaction: false. D1 의 나머지 관찰은 모두 이 구성으로 쟀다 — 운영 구성(transaction: true) 그대로의 D1 관찰은 가입 500 하나뿐이다",
+      "affected": [
+        "/sign-up/email (sign-up.mjs runWithTransaction) — 측정함, 500·행 0",
+        "/reset-password (internalAdapter.consumeVerificationValue 가 runWithTransaction, internal-adapter.mjs:815) — M0 리뷰가 찾음, 500",
+        "/delete-user/callback (같은 consumeVerificationValue, update-user.mjs:375) — 지금은 deleteUser 가 꺼져 404",
+        "OAuth·SSO JIT: internalAdapter.createOAuthUser (internal-adapter.mjs:121 runWithTransaction), oauth2/link-account.mjs, @better-auth/sso runWithTransaction 4곳 (dist/index.mjs:2373·2470·3018·3960) — D1 은 SSO 가 잠겨 있다(3.2)"
+      ]
     },
     "sqliteConcurrentSignUp": {
       "concurrent": 10,
@@ -81,17 +87,17 @@
       "error": "SQLITE_BUSY: database is locked (500)",
       "dependsOnHooks": false
     },
-    "designImpact": "앞 판정(hooks.before)은 이메일 존재와 무관한 같은 403 이고 행·메일이 0 이다 → 정책 거부 사유 응답(Q19 (가))은 이 자리에 둔다. 생성 훅 403 은 가짜 200·행 0 이라 뒷받침으로만 쓰고, 400 은 숨기지 않아 이미 있는 이메일(200)과 갈리므로 공개 가입 경로의 거부 사유로 쓰지 않는다. 생성 훅 data 로 emailVerified·status·monthlyLimitUsd 를 넣을 수 있고 발송기는 그 user 를 받지만 인증 메일은 emailVerified 와 관계없이 1통 나간다 → 이메일 지정 초대(Q5 (가))는 발송기가 초대 문맥을 보고 건너뛴다. 초대 문맥 ALS 는 Node·Workers 모두 서버 호출의 hooks.before·user.create.before·after 에서 보이고 공개 요청·위조 본문·머리글에서는 없다. 막는 결과 둘(계획서 v5.8 이 반영): D1 은 지금 구성으로 가입이 늘 500 이라 3단계 가입·초대 수락이 D1 에서 돌 수 없다 → M2 가 D1 연결에서 Better Auth 트랜잭션을 끈다. Node SQLite(libSQL)는 동시 가입 트랜잭션이 훅과 관계없이 SQLITE_BUSY 로 깨진다 → M2 가 고친다 (TC-M2.T3.a (4) 가 그 재현)."
+    "designImpact": "앞 판정(hooks.before)은 이메일 존재와 무관한 같은 403 이고 행·메일이 0 이다 → 정책 거부 사유 응답(Q19 (가))은 이 자리에 둔다. 생성 훅 403 은 가짜 200·행 0 이라 뒷받침으로만 쓰고, 400 은 숨기지 않아 이미 있는 이메일(200)과 갈리므로 공개 가입 경로의 거부 사유로 쓰지 않는다. 생성 훅 data 로 emailVerified·status·monthlyLimitUsd 를 넣을 수 있고 발송기는 그 user 를 받지만 인증 메일은 emailVerified 와 관계없이 1통 나간다 → 이메일 지정 초대(Q5 (가))는 발송기가 초대 문맥을 보고 건너뛴다. 초대 문맥 ALS 는 Node·Workers 모두 서버 호출의 hooks.before·user.create.before·after 에서 보이고 공개 요청·위조 본문·머리글에서는 없다. 막는 결과 둘(계획서 v5.8 이 반영): D1 은 지금 구성(transaction: true)으로 runWithTransaction 을 쓰는 모든 경로(가입·비밀번호 재설정·OAuth/SSO JIT)가 500 이라 3단계 가입·초대 수락이 D1 에서 돌 수 없다 → 3단계 전 고침 PR 이 D1 에서 트랜잭션을 끈다. Node SQLite(libSQL)는 동시 가입 트랜잭션이 훅과 관계없이 SQLITE_BUSY 로 깨진다 → M2 가 고친다 (TC-M2.T3.a (4) 가 그 재현)."
   },
   "evidence": [
-    "실측 (2026-10-11, better-auth 1.7.7): packages/auth/test/verify-p3/v29.test.ts (TC-M0.T2.a~d × SQLite·MySQL 8.0·MariaDB 10.11·Postgres 14), apps/server/test/verify-p3/v29.workers.test.ts (Workers + 로컬 D1, wrangler 4.115.0). 다섯 DB 의 관찰이 모두 같다",
+    "실측 (2026-10-11, better-auth 1.7.7): packages/auth/test/verify-p3/v29.test.ts (TC-M0.T2.a~d × SQLite·MySQL 8.0·MariaDB 10.11·Postgres 14), apps/server/test/verify-p3/v29.workers.test.ts (Workers + 로컬 D1, wrangler 4.115.0). Node 네 DB 와 transaction: false 로 올린 D1 의 관찰이 같다. 운영 구성(transaction: true)의 D1 은 가입부터 500 이다 (d1Transaction)",
     "(가) hooks.before 가 /sign-up/email 에서 APIError(403) → 없는 이메일·있는 이메일 모두 403 PROBE_REJECT, 본문 같음, user·account·verification +0, 메일 0. 이메일을 찾기 전(sign-up.mjs:193 findUserByEmail 앞, dispatch.mjs:210 runBeforeHooks)이라서다",
     "(나) user.create.before 가 APIError(403) → 없는 이메일 200 (가짜 user, token null), 있는 이메일도 200, 모양 같음, 행 0·메일 0. sign-up.mjs:227 이 statusCode 403 && shouldReturnGenericDuplicateResponse(:155) 일 때 buildGenericDuplicateResponse 로 바꾼다",
     "(다) user.create.before 가 APIError(400) → 없는 이메일 400 PROBE_REJECT, 있는 이메일 200 (sign-up.mjs:193-202 가 훅 앞에서 가짜 200) → 응답이 갈려 계정 존재가 드러난다. 행 0",
     "(라) user.create.before 가 { data: { emailVerified: true, status: 'pending', monthlyLimitUsd: 5 } } → DB 값 그대로 (with-hooks.mjs: actualData = { ...actualData, ...result.data }, sign-up.mjs 의 emailVerified: false 를 덮음). sendVerificationEmail 의 user.emailVerified === true, 인증 메일은 그래도 1통 (sign-up.mjs:241 sendOnSignUp 은 emailVerified 를 보지 않는다)",
     "(마) inviteContext = new AsyncLocalStorage() (node:async_hooks, Workers nodejs_compat). inviteContext.run({ inviteId }, () => auth.api.signUpEmail(...)) → hooks.before·user.create.before·user.create.after 가 모두 그 inviteId 를 본다 (Node·Workers). 같은 시각의 공개 HTTP 가입(서버 호출이 hooks.before 에서 기다리는 동안 처음부터 끝까지 돈 것)은 세 자리 모두 null. 공개 요청 본문 inviteId·__invite·invite 와 머리글 x-invite·x-invite-id 에 같은 값을 넣어도 null (가입 200)",
     "user.create.after 는 가입 트랜잭션이 끝난 뒤 돈다: 트랜잭션 밖 연결로 읽으면 user 와 같은 트랜잭션에서 뒤에 넣은 credential account 가 모두 보인다 (with-hooks.mjs:34 queueAfterTransactionHook, core context/transaction.mjs runWithTransaction 은 커밋 뒤 pendingHooks 를 돈다). 그 훅이 던지면 회원 행은 이미 커밋된 채 요청이 실패한다 (같은 파일, onAfterCommitHookError 없음)",
-    "D1: 지금 구성(drizzleAdapter transaction: true, packages/auth/src/index.ts)으로 /sign-up/email → 500, 행 0. wrangler 로그 'DrizzleQueryError: Failed query: begin … D1_ERROR: To execute a transaction, please use the state.storage.transaction() …'. 설치 뒤에는 signUpGate 가 트랜잭션 전에 403 으로 막아 지금까지 드러나지 않았다 (E2E 회원은 DB 에 직접 넣는다). transaction: false (core db/adapter/factory.mjs createAsIsTransaction) 로 올리면 (가)~(마)가 Node 와 같다",
+    "D1: 지금 구성(drizzleAdapter transaction: true, packages/auth/src/index.ts)으로 /sign-up/email → 500, 행 0. 같은 원인으로 runWithTransaction 을 쓰는 다른 경로도 D1 에서 500 이다: /reset-password (consumeVerificationValue, M0 리뷰가 찾음), OAuth·SSO JIT (createOAuthUser, @better-auth/sso 4곳) (answer.d1Transaction.affected). wrangler 로그 'DrizzleQueryError: Failed query: begin … D1_ERROR: To execute a transaction, please use the state.storage.transaction() …'. 설치 뒤에는 signUpGate 가 트랜잭션 전에 403 으로 막아 지금까지 드러나지 않았다 (E2E 회원은 DB 에 직접 넣는다). transaction: false (core db/adapter/factory.mjs createAsIsTransaction) 로 올리면 (가)~(마)가 Node 와 같다",
     "Node SQLite(libSQL 0.18): 훅을 모두 뺀 구성에서도 auth.api.signUpEmail 3건 동시 → 1건 성공·2건 SQLITE_BUSY, 10건 동시 → 10건 모두 SQLITE_BUSY (차례로 2건은 모두 성공). createClient timeout: 5000 으로도 10건 모두 실패, WAL + timeout 은 멈춘다(동기 드라이버라 기다리는 동안 이벤트 루프가 서서 앞 트랜잭션이 못 끝난다). 측정: 시험 구성 plain 의 auth.api.signUpEmail 을 Promise.all 로 (TC 로 남기지 않음 — 재현은 M2 TC-M2.T3.a (4))",
     "음성 대조 (2026-10-11, 답 파일·시험 구성을 잠시 바꿔 돌리고 되돌림): beforeHook.rowsLeft.user 1 → TC-M0.T2.a 실패, createHook403.status 400 → TC-M0.T2.b 실패, hookDataOverrides.emailVerified false → TC-M0.T2.c 실패, alsVisible.publicRequest true → TC-M0.T2.d 실패, probe.ts 에서 inviteContext.run 을 빼고 signUpEmail 만 부름 → TC-M0.T2.d 실패 (여기까지 SQLite). D1: d1Transaction.currentConfig.status 200 → TC-M0.T2.b 실패, alsVisible.createHook.workers false → TC-M0.T2.d 실패"
   ],

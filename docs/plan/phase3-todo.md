@@ -22,8 +22,8 @@
 - 로그인·가입·초대 수락 화면이 없다 (`apps/web`에는 설치 화면뿐).
 
 M0 확인에서 새로 안 사실 (2026-10-11, V29~V32, 계획서 v5.8)
-- **D1 에서 Better Auth 가입이 늘 500 이다.** `packages/auth/src/index.ts`가 네 DB 모두 `drizzleAdapter(…, { transaction: true })`라 D1 에서도 Drizzle 이 `begin`을 보내고 D1 이 거부한다. 설치 뒤에는 앞 판정이 트랜잭션 전에 막아 드러나지 않았다 (E2E 회원은 DB 에 직접 넣는다). `transaction: false`로 올리면 V29 의 다섯 관찰이 Node 와 같다. M2.T7 이 고친다.
-- **Node SQLite(libSQL)는 동시 가입이 `SQLITE_BUSY`로 깨진다.** 훅을 모두 빼도 `auth.api.signUpEmail` 3건 동시 → 2건 실패, 10건 동시 → 10건 실패. libSQL `timeout`으로 풀리지 않는다. TC-M2.T3.a (4) 의 "SQLite 동시 10건 중 busy 0" 은 상한 세기 자리와 관계없이 지금 실패한다. M2.T7 이 고친다.
+- **D1 에서 Better Auth 의 트랜잭션 경로가 늘 500 이다.** `packages/auth/src/index.ts`가 네 DB 모두 `drizzleAdapter(…, { transaction: true })`라 D1 에서도 Drizzle 이 `begin`을 보내고 D1 이 거부한다. 가입, 비밀번호 재설정(`consumeVerificationValue`, M0 리뷰가 찾음), OAuth·SSO JIT(`createOAuthUser`, `@better-auth/sso` 4곳)가 모두 해당한다. 설치 뒤에는 앞 판정이 가입을 트랜잭션 전에 막아 드러나지 않았다 (E2E 회원은 DB 에 직접 넣는다). `transaction: false`로 올리면 V29 의 다섯 관찰이 Node 와 같다. **3단계 전 고침 PR 이 D1 에서만 끈다** (M2.T7 은 SQLite 절반만 남는다).
+- **Node SQLite(libSQL)는 동시 가입이 `SQLITE_BUSY`로 깨진다.** 훅을 모두 빼도 `auth.api.signUpEmail` 3건 동시 → 2건 실패, 10건 동시 → 10건 실패. libSQL `timeout`으로 풀리지 않는다. libSQL 클라이언트는 연결 풀을 두고 트랜잭션마다 연결을 따로 잡는다 (`@libsql/client` `sqlite3.js:323` `transaction()`). 그래서 가입 말고도 Better Auth 트랜잭션(재설정 등)과 다른 연결의 쓰기(`rate_limit`·세션)가 겹치면 같은 일이 날 수 있다. TC-M2.T3.a (4) 의 "SQLite 동시 10건 중 busy 0" 은 상한 세기 자리와 관계없이 지금 실패한다. M2.T7 이 고친다.
 - `user.create.after`가 던지면 회원 행은 이미 커밋된 채 요청이 실패한다 (core `runWithTransaction`, `onAfterCommitHookError` 없음). M2.T3 의 세기 실패는 던지지 않고 경고만 남긴다 (이미 그렇게 적혀 있다).
 - 인증 메일은 생성 훅이 `emailVerified: true`를 넣어도 나간다 (V29 (라)). 이메일 지정 초대(Q5)는 발송기가 초대 문맥을 보고 건너뛴다 (M3.T2).
 - V32: 이메일 변경·회원 삭제 경로는 기본으로 닫혀 있다. M2.T1 이 `disabledPaths`에 더할 경로는 없고, 닫힌 채인지를 TC-M2.T1.d 가 고정한다.
@@ -453,7 +453,7 @@ TC-M0.T5.a  회원 변경·생성 경로의 기본 상태가 V32 와 같다 (V32
 【작업】
 1. `(사용자/메인 세션)` 맨 위 질문 Q2~Q10·Q12~Q20 을 고른다. (실제: 2026-10-11 사용자가 모두 추천안으로 정했다. Q1·Q11 은 그 전에 결정됨.)
 2. 고른 결과와 V29~V32 결과를 계획서에 반영한다 (4.2·4.4·4.5·4.6·5.9·6장·7장·9장). 상태 줄을 `v5.8`로, 변경 이력 맨 위에 `- v5.8: …` 한 줄(3단계 Q1~Q20 을 모두 언급). 함께 고칠 낡은 문장: 5.9 "사용량 데이터는 OmniRoute에 있으므로 우리 DB에 두지 않는다" (v5.7 의 `usage_daily`와 어긋남). 이 문서의 `- 결정: 미정` 줄은 이미 0개다 (2026-10-11). 모두 추천안이라 `(Q<n> 의존)` TC 단언은 고칠 것이 없다. 커밋.
-   (실제: 위에 더해 3.2(D1 `transaction: false`, SQLite 동시 가입)·8장(확인 29~32)을 고쳤다. V29 의 막는 결과 둘은 이 문서에 M2.T7 을 더해 반영했다. V32 결과로 M2.T1 의 `disabledPaths` 줄과 TC-M2.T1.d 단언을 고쳤다. 2단계의 막았던 확인 파일(V12·V15·V18·V19·V20)도 `resolved_in`을 v5.8 로 올렸다 — G-K0.15 가 현재 버전과 같기를 요구한다 (2단계 v5.7 때와 같은 처리).)
+   (실제: 위에 더해 3.2(D1 `transaction: false`, SQLite 동시 가입)·8장(확인 29~32)을 고쳤다. V29 의 막는 결과 둘은 이 문서에 M2.T7 을 더해 반영했다. V32 결과로 M2.T1 의 `disabledPaths` 줄과 TC-M2.T1.d 단언을 고쳤다. 2단계의 막았던 확인 파일(V12·V15·V18·V19·V20)도 `resolved_in`을 v5.8 로 올렸다 — G-K0.15 가 현재 버전과 같기를 요구한다 (2단계 v5.7 때와 같은 처리). M0 리뷰 뒤 D1 트랜잭션 절반은 3단계 전 고침 PR 로 넘기고 M2.T7 을 SQLite 절반으로 줄였다.)
 
 【테스트】
 ```
@@ -692,7 +692,7 @@ TC-M1.T5.b  ruleset 필수 검사가 이 잡을 포함한다
   - 첫 관리자는 한도가 없다. `runSetup`이 Better Auth 를 거치지 않고 user 행을 넣어(`monthly_limit_usd` NULL) 생성 훅의 기본값 복사를 지나지 않는다. 운영자 본인이라 의도로 보고 바꾸지 않는다. 운영 문서에 적는다 (M6.T3).
   - SSO JIT 는 3단계 동안 막혀 있다. #13 의 생성 훅이 관리자가 있으면 초대 문맥 밖의 모든 회원 생성을 거부하기 때문이다. 이것은 의도다. 5단계는 `decideSignup`에 IdP 줄(`via: "sso"`, `sso_provider_settings.jit_enabled`·도메인)을 더해 연다. TC-M2.T1.b 의 "다른 생성 경로 거부"가 그때 바뀐다.
   - 가입 경로가 설정을 두 번 읽는다. `app.ts`와 `signUpGate`가 각각 `hasAdmin`·`signup_mode`를 select 하고, 생성 훅이 한 번 더 읽는다. M2.T1 은 요청 하나 안에서만 판정 입력을 한 번 읽어 두고 쓴다 (요청 문맥 메모). 인스턴스 캐시는 쓰지 않는다 — 정책을 닫아도 다른 인스턴스가 가입을 받게 된다 (TC-M2.T5.a).
-- **D1 트랜잭션·SQLite 동시 가입 (V29)**: M2.T7 이 먼저 고친다. D1 은 Better Auth 를 `transaction: false`로 올리고(계획서 v5.8 3.2), Node SQLite 는 동시 가입 트랜잭션이 `SQLITE_BUSY`로 깨지지 않게 한다. 이것 없이는 D1 의 정책·초대 시험(G-M2.12·17·18·29)과 TC-M2.T3.a (4) 가 정책 코드와 관계없이 실패한다. D1 은 가입의 user·account 삽입이 한 트랜잭션이 아니므로 거부는 삽입 전 자리(앞 판정·`user.create.before`)에서만 한다.
+- **D1 트랜잭션·SQLite 동시 쓰기 (V29)**: D1 의 `transaction: false`는 3단계 전 고침 PR 이 한다 (계획서 v5.8 3.2). 그것 없이는 D1 의 정책·초대 시험(G-M2.12·17·18·29)이 정책 코드와 관계없이 실패한다. Node SQLite 의 `SQLITE_BUSY`는 M2.T7 이 먼저 고친다 (TC-M2.T3.a (4) 의 전제). D1 은 가입의 user·account 삽입이 한 트랜잭션이 아니므로 거부는 삽입 전 자리(앞 판정·`user.create.before`)에서만 한다.
 - **초대 문맥 통로**: `packages/auth/src/invite-context.ts`의 `AsyncLocalStorage`다. 생성 훅이 `packages/auth` 안에 있어서 통로도 그 패키지에 둔다. `runAsInvite({ inviteId, role, email, verified }, fn)` 안에서 부른 `auth.api.signUpEmail`만 두 자리(`signUpGate`·생성 훅)가 초대 가입으로 본다. 요청 본문·헤더는 쓰지 않는다. 공개 요청은 이 값을 넣을 길이 없다 (V29 TC-M0.T2.d). 초대 단계(M3)는 이 함수를 부르기만 한다.
 
 ### ☐ M2.T1 — 정책 판정·앞 판정·뒷받침 훅·초대 문맥 🛡 보안 리뷰 (V29·Q1·Q3·Q15·Q19 의존)
@@ -855,32 +855,34 @@ TC-M2.T5.c  메일 API 키는 암호화되어 저장되고 응답·감사 기록
 【통과】
 - [ ] G-M2.23 ~ G-M2.25 통과
 
-### ☐ M2.T7 — D1 Better Auth 트랜잭션과 Node SQLite 동시 가입 (V29 의존)
-선행 없음 (M2.T1 보다 먼저) · 산출 `packages/auth/src/index.ts`, Node SQLite 연결을 만드는 자리(`packages/runtime/src/node.ts` 등), 시험은 `packages/auth/test/signup-policy/**`·`apps/server/test/signup/**` · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-M2.T7.a`, `Red: TC-M2.T7.b`
+### ☐ M2.T7 — Node SQLite 동시 쓰기 (V29 의존). D1 트랜잭션은 결정됨 — 3단계 전 고침 PR
+선행 없음 (M2.T1 보다 먼저) · 산출 Node SQLite 연결을 만드는 자리(`packages/runtime/src/node.ts` 등)와 그 시험(`packages/auth/test/signup-policy/**`·`apps/server/test/signup/**`) · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-M2.T7.b`
 
 M0 V29 가 찾은 막는 결과 둘이다 (계획서 v5.8 3.2). 3단계 전 구성에서도 결함이지만 설치 뒤 공개 가입이 닫혀 있어 드러나지 않았다.
+- **D1 절반 — 결정됨, 고침 PR**: D1 에서 Better Auth 를 `transaction: false`로 올리는 일은 3단계 전 고침 PR 이 main 에 넣는다 (가입·재설정·OAuth/SSO JIT 500). 그 PR 의 회귀 시험이 덮는다. 이 작업은 `packages/auth/src/index.ts`의 트랜잭션 설정을 다시 바꾸지 않는다. 3단계가 기대는 D1 단언(가입 200·행 +1)은 TC-M2.T7.a 로 남긴다.
+- **SQLite 절반 — 이 작업**: libSQL 클라이언트는 트랜잭션마다 풀에서 연결을 따로 잡는다 (`@libsql/client` `sqlite3.js:323` `transaction()`). 동기 드라이버라 한 프로세스 안의 겹친 트랜잭션·쓰기는 잠금을 기다리는 동안 앞 트랜잭션이 끝나지 못해 `SQLITE_BUSY`가 된다 (V29: `timeout`으로 안 풀림, WAL + `timeout`은 멈춤, 차례로 돌리면 모두 성공).
 
 【작업】
-1. 재현 시험 둘을 넣는다. 꼬리줄 `Red: TC-M2.T7.a`, `Red: TC-M2.T7.b`. 커밋.
-   - D1: 설치 전(관리자 없음) 로컬 D1 에서 운영 구성(`createAuth`)으로 `/sign-up/email` → user·account 각 +1 을 단언한다. 지금은 500·행 0 이라 빨강이다.
-   - Node SQLite: 운영 구성으로 `auth.api.signUpEmail` 10건 동시(다른 이메일) → 10건 모두 성공·user +10 을 단언한다. 지금은 `SQLITE_BUSY`로 빨강이다.
-2. 고친다. 커밋.
-   - D1 연결에서 Better Auth 를 `transaction: false`로 올린다. `AuthDatabase`가 D1 인지 알 수 있게 한다 (런타임 `DbHandle.kind`가 `"d1"`이다). Node 네 DB 는 `true` 그대로 (V26).
-   - Node SQLite 동시 가입: 방법은 이 작업이 정한다 (V29: libSQL `timeout`은 풀지 못하고, WAL + `timeout`은 멈춘다. 차례로 돌리면 모두 성공한다). 다른 DB(MySQL·MariaDB·Postgres)의 동시성은 바꾸지 않는다.
+1. 재현 시험을 넣는다. 꼬리줄 `Red: TC-M2.T7.b`. 커밋.
+2. 고친다. 커밋. 방법은 이 작업에서 정한다. 후보:
+   - Node SQLite 의 쓰기 트랜잭션을 프로세스 안 큐 하나로 차례로 돌린다 (트랜잭션 밖 쓰기도 같은 큐).
+   - 연결을 하나로 묶는다 (libSQL 풀 크기 1, 트랜잭션 동안 다른 쿼리는 기다림).
+   - 요청 단위로 Better Auth 쓰기를 직렬화한다.
+   - 어느 것이든 MySQL·MariaDB·Postgres 의 동시성은 바꾸지 않는다. Docker + SQLite 는 인스턴스 하나라 프로세스 안 직렬화로 충분하다.
 
 【테스트】
 ```
-TC-M2.T7.a  D1 에서 Better Auth 가입이 회원을 만든다 (V29 의존)
-  단언:  관리자 없는 로컬 D1, 운영 createAuth → /sign-up/email 200, user·account 각 +1, 인증 메일 1통. 생성 훅이 거부하면 행 0 (Workers + D1)
-  검출:  drizzleAdapter transaction: true 를 D1 에도 써서 Drizzle 의 "begin" 을 D1 이 거부해(D1_ERROR) 가입·초대 수락이 D1 에서 늘 500 인 것
-TC-M2.T7.b  Node SQLite 에서 동시 가입이 SQLITE_BUSY 로 깨지지 않는다 (V29 의존)
-  단언:  운영 구성, auth.api.signUpEmail 10건 동시 → 10건 성공, user +10, 응답 500 0 (SQLite)
-  검출:  libSQL 연결에서 Better Auth 가입 트랜잭션 둘이 겹치면 SQLITE_BUSY 로 500 이 나 open 정책·초대가 몰린 순간 가입 대부분이 실패하는 것
+TC-M2.T7.a  D1 에서 Better Auth 가입이 회원을 만든다 (V29 의존, 고침 PR 뒤 단언만 남김)
+  단언:  관리자 없는 로컬 D1, 운영 createAuth → /sign-up/email 200, user·account 각 +1, 인증 메일 1통 (Workers + D1). 재현 빨강은 고침 PR 이 가졌으므로 여기서는 요구하지 않는다
+  검출:  3단계가 D1 구성을 다시 만들며 transaction: true 로 되돌려 가입·초대 수락이 D1 에서 500 이 되는 것
+TC-M2.T7.b  Node SQLite 에서 겹친 쓰기가 SQLITE_BUSY 로 깨지지 않는다 (V29 의존)
+  단언:  운영 구성, (1) auth.api.signUpEmail 10건 동시 → 10건 성공·user +10. (2) Better Auth 트랜잭션(비밀번호 재설정 /reset-password) 과 다른 쓰기(rate_limit 을 세는 /sign-in/email, 세션을 만드는 로그인) 를 겹쳐 10쌍 → 모두 성공, 응답 500·SQLITE_BUSY 0 (SQLite)
+  검출:  libSQL 이 트랜잭션마다 다른 연결을 잡아(sqlite3.js:323) 가입·재설정 트랜잭션이 겹치거나 그 사이 rate_limit·세션 쓰기가 끼면 SQLITE_BUSY 로 500 이 나, open 정책·초대가 몰린 순간 가입·로그인 대부분이 실패하는 것
 ```
 
 【통과】
 - [ ] G-M2.30 · G-M2.31 통과
-- [ ] G-M2.32 · G-M2.33 통과 (Red 커밋에서 TC-M2.T7.a·b 실패)
+- [ ] G-M2.33 통과 (Red 커밋에서 TC-M2.T7.b 실패)
 
 ### ☐ M2.T6 — M2 CI 잡과 봉인
 선행 M2.T1 ~ M2.T5 · M2.T7 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
@@ -925,9 +927,9 @@ TC-M2.T6.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-M2.21 | 재현 빨강 TC-M2.T1.a | `node scripts/check-red.mjs --check G-M2.1 --since seal:M1` | 종료코드 0 |
 | G-M2.22 | 재현 빨강 TC-M2.T4.a | `node scripts/check-red.mjs --check G-M2.13 --since seal:M1` | 종료코드 0 |
 | G-M2.23 ~ 25 | TC-M2.T5.a ~ c | `pnpm -C apps/server test -t "TC-M2.T5.<x>"` | 각 통과 = 1 |
-| G-M2.30 | TC-M2.T7.a D1 가입 (V29) | [L] `pnpm -C apps/server test:workers -t "TC-M2.T7.a"` | 통과 = 1 |
-| G-M2.31 | TC-M2.T7.b SQLite 동시 가입 (V29) | [L] `pnpm -C packages/auth test -t "TC-M2.T7.b"` | 통과 = 1 |
-| G-M2.32 | 재현 빨강 TC-M2.T7.a | `node scripts/check-red.mjs --check G-M2.30 --since seal:M1` | 종료코드 0 |
+| G-M2.30 | TC-M2.T7.a D1 가입 (V29, 고침 PR 뒤 단언) | [L] `pnpm -C apps/server test:workers -t "TC-M2.T7.a"` | 통과 = 1 |
+| G-M2.31 | TC-M2.T7.b SQLite 겹친 쓰기 (V29) | [L] `pnpm -C packages/auth test -t "TC-M2.T7.b"` | 통과 = 1 |
+| G-M2.32 | (폐기) 재현 빨강 TC-M2.T7.a — D1 고침은 3단계 전 고침 PR | — | — |
 | G-M2.33 | 재현 빨강 TC-M2.T7.b | `node scripts/check-red.mjs --check G-M2.31 --since seal:M1` | 종료코드 0 |
 | G-M2.16 | 타입 검사 | `pnpm -r typecheck` | 종료코드 0 |
 | G-M2.26 | TC-M2.T6.a CI 단계 잡 | grep `^\s+run: node scripts/gate\.mjs M2\b` in ci.yml | == 1 |
@@ -1460,6 +1462,8 @@ TC-M5.T4.b  ruleset 필수 검사가 이 잡을 포함한다
 **브랜치** `p3/m6`.
 **outputs** 없음. 새로 만드는 검사기·픽스처(`scripts/check-user-writes.mjs`, `test/check-user-writes.test.mjs`, `test/fixtures/user-writes/**`)는 모두 새 경로지만, 잠긴 단계의 `outputs`에 넣으면 앞 단계가 막히므로 넣지 않는다 (K6 과 같음).
 
+백로그 (M0 리뷰): 계획서 버전을 올릴 때마다 앞 단계의 막았던 확인 파일(`was_blocking: true`) `resolved_in`을 손으로 현재 버전으로 올려야 한다 (`check-verify resolved` 가 현재 버전과 같기를 요구, M0 에서 V12·V15·V18·V19·V20 을 v5.8 로). M6 에서 검사 방식(예: "현재 버전 이하")을 다시 본다.
+
 ### ☐ M6.T1 — 임시 코드·꺼진 테스트 회수
 선행 없음 · 산출 없음 (검사만) · 되돌리기 해당 없음
 
@@ -1622,7 +1626,7 @@ TC-M6.T4.c  ruleset 필수 검사가 이 잡을 포함한다
 | TC | 기대는 확인 결과·결정 | 결과가 다르면 |
 |---|---|---|
 | TC-M0.T2.a ~ d, TC-M2.T1.a·b·e·f, TC-M3.T2.c·e | V29 앞 판정·뒷받침 훅의 응답과 행, 훅 데이터 덮어쓰기, ALS | 판정 자리 이동, 초대 수락을 `internalAdapter`로 |
-| TC-M2.T7.a·b, TC-M2.T3.a (4) | V29 D1 `transaction: true` 가입 500, Node SQLite 동시 가입 `SQLITE_BUSY` | D1 트랜잭션·SQLite 동시성 고침의 단언 |
+| TC-M2.T7.a·b, TC-M2.T3.a (4) | V29 D1 `transaction: true` 가입 500 (고침 PR 이 고침), Node SQLite 겹친 쓰기 `SQLITE_BUSY` | D1 단언·SQLite 동시성 고침의 단언 |
 | TC-M0.T3.a·b, TC-M4.T3.a·b·d | V30 세션 행 삭제 즉시성, 비밀번호 변경·재설정 기본 동작 | 계획서 4.5 에 지연을 적거나 쿠키 캐시를 끔 |
 | TC-M0.T4.a·b, TC-M4.T3.a·c·e·g | V31 로그인 거부 훅, 재설정·인증 링크 자동 로그인, after 훅 | 로그인 차단 자리를 `hooks.before` 경로별로, 경쟁은 두 번째 지우기 |
 | TC-M0.T5.a, TC-M2.T1.b·d | V32 기본으로 열린 회원 변경·생성 경로 | `disabledPaths` 목록, 뒷받침 대상 |
