@@ -11,6 +11,7 @@ import { hashPassword } from "better-auth/crypto";
 import { findUserByEmail, normalizeEmail } from "@magnetosphere/db/src/users.ts";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
+import { writeAppSetting } from "../settings/index.ts";
 import { MAIL_API_KEY_AAD, MAIL_SETTINGS_KEY } from "./mail.ts";
 import type { OmniRouteStatus } from "./omniroute.ts";
 
@@ -50,11 +51,12 @@ async function readSetting(h: DbHandle, key: string): Promise<unknown> {
   return row ? JSON.parse(row.value) : undefined;
 }
 
-/** app_settings 값 바꾸기. 방언마다 다른 upsert 대신 지우고 넣는다 (설치 때 한 번 쓰는 값들이다) */
+/**
+ * app_settings 값 바꾸기. 설정 저장소의 upsert 한 문장을 쓴다 (M1.T1). 지우고 넣기는 동시 쓰기에서 넣기끼리 기본 키가
+ * 부딪혀 500 이 나고, 넣기가 실패하면 public_base_url 행이 사라진다 (TC-M1.T1.d)
+ */
 export async function writeSetting(h: DbHandle, key: string, value: unknown, updatedBy: string | null): Promise<void> {
-  const t = h.schema.appSettings;
-  await h.db.delete(t).where(eq(t.key, key));
-  await h.db.insert(t).values({ key, value: JSON.stringify(value), updatedAt: new Date(), updatedBy });
+  await writeAppSetting(h, key, value, updatedBy, new Date());
 }
 
 /**
