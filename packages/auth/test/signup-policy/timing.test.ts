@@ -1,9 +1,10 @@
 // TC-M2.T4.a 가입 응답 시간이 있는 계정·없는 계정에서 같다 (M2.T4, S7 에서 찾은 노출 — CI 에서 새 가입의 DB 쓰기만큼 108ms 차이).
 // 서버 앱 전체(app.ts → Better Auth)로 open 정책 공개 가입을 보낸다. 메일 지연은 없다 (메일 몫은 mail-timing.test.ts TC-S3.T2.e).
 // 서버 Rig 는 apps/server/test/signup/env.ts 다 (packages/auth 는 서버에 기대지 않으므로 상대 경로로 가져온다).
+// SQLite·Postgres 두 DB 에서 돈다 (G-M2.13 통과 수 2). 기준은 DB 마다 같다.
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { serverRig, type ServerRig } from "../../../../apps/server/test/signup/env.ts";
-import { createTestDb, type TestDb } from "../../../runtime/test/dbs.ts";
+import { createTestDb, LABEL, type DbKind, type TestDb } from "../../../runtime/test/dbs.ts";
 import { body, mail } from "./rig.ts";
 
 const ROUNDS = 7;
@@ -13,12 +14,12 @@ const GAP_MS = 30;
 const MIN_MS = 400;
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
 
-describe("TC-M2.T4.a 가입 응답 시간", () => {
+describe.each(["sqlite", "pg"] as DbKind[])("TC-M2.T4.a 가입 응답 시간 (%s)", (kind) => {
   let t: TestDb;
   let rig: ServerRig;
   beforeAll(async () => {
-    t = await createTestDb("sqlite");
-    rig = await serverRig("SQLite", { url: t.url });
+    t = await createTestDb(kind);
+    rig = await serverRig(LABEL[kind], { url: t.url });
     await rig.op("addAdmin");
     await rig.op("setMail", true);
     await rig.op("setSetting", "signup_mode", "open");
@@ -50,7 +51,7 @@ describe("TC-M2.T4.a 가입 응답 시간", () => {
       fresh.push(await timed(mail(`t4a-new-${i}`)));
     }
     const gap = Math.abs(median(fresh) - median(known));
-    console.info(`[TC-M2.T4.a] 있는 이메일 중앙값 ${median(known).toFixed(1)}ms · 없는 이메일 ${median(fresh).toFixed(1)}ms · 차이 ${gap.toFixed(1)}ms · 가장 짧은 응답 ${Math.min(...known, ...fresh).toFixed(1)}ms`);
+    console.info(`[TC-M2.T4.a ${LABEL[kind]}] 있는 이메일 중앙값 ${median(known).toFixed(1)}ms · 없는 이메일 ${median(fresh).toFixed(1)}ms · 차이 ${gap.toFixed(1)}ms · 가장 짧은 응답 ${Math.min(...known, ...fresh).toFixed(1)}ms`);
     expect(Math.min(...known, ...fresh)).toBeGreaterThanOrEqual(MIN_MS);
     expect(gap).toBeLessThan(GAP_MS);
   });
