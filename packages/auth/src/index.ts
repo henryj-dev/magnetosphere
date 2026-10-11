@@ -167,6 +167,22 @@ function userCreated(cfg: AuthConfig) {
   };
 }
 
+/** 가입 응답에 남기는 회원 필드. Better Auth 의 핵심 필드뿐이다 */
+const SIGN_UP_USER_FIELDS = ["id", "name", "email", "emailVerified", "image", "createdAt", "updatedAt"] as const;
+
+/**
+ * 가입 응답을 핵심 필드로 줄인다 (hooks.after, M2.T1 TC-M2.T1.e). 이미 있는 이메일에는 Better Auth 가 스키마 기본값으로 만든 가짜 user 를 돌려준다
+ * (requireEmailVerification). 그 가짜는 status active·monthly_limit_usd NULL 인데 새 가입은 생성 훅이 넣은 pending·기본 한도라, 응답의 권한 필드만 보고도
+ * 계정 존재가 드러난다. 그래서 두 응답 모두 핵심 필드만 남긴다. 권한 필드는 로그인 뒤 세션·회원 API 로 본다.
+ */
+function trimSignUpResponse(ctx: { path: string; json: (v: unknown) => unknown; context: { returned?: unknown } }) {
+  if (ctx.path !== SIGN_UP_PATH) return;
+  const r = ctx.context.returned as { token?: unknown; user?: Record<string, unknown> } | null | undefined;
+  if (!r || typeof r !== "object" || r instanceof Error || !r.user || typeof r.user !== "object") return;
+  const user = Object.fromEntries(SIGN_UP_USER_FIELDS.map((k) => [k, r.user![k] ?? null]));
+  return ctx.json({ token: r.token ?? null, user });
+}
+
 /**
  * Better Auth 옵션. 스키마 비교(TC-S3.T1.e)와 SSO 경로 검사(check-sso-paths.mjs)가 이 함수의 결과를 쓴다.
  * 서버는 이것으로 betterAuth() 를 직접 만들지 않고 createAuth 를 쓴다 (직접 만들면 handler 가 감싸지지 않는다).
@@ -207,6 +223,7 @@ export function authOptions(cfg: AuthConfig) {
         await signUpGate(cfg)(ctx);
         return normalizeEmailBody(ctx);
       }),
+      after: createAuthMiddleware(async (ctx) => trimSignUpResponse(ctx as any)),
     },
     databaseHooks: { user: { create: { before: userCreateGuard(cfg), after: userCreated(cfg) } } },
     advanced: {
