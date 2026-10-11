@@ -696,7 +696,30 @@ export const GATES = {
       "apps/server/src/members/**", "apps/server/test/members/**",
       "apps/server/src/audit/**", "apps/server/test/audit/**",
     ],
-    checks: [],
+    checks: [
+      // M1.T1 설정 저장소 하나 (settings/). 값 검사·정책 검사·기본값은 SQLite, 동시 쓰기는 다섯 DB
+      { id: "G-M1.1", how: "test", desc: "TC-M1.T1.a 잘못된 설정 값은 저장하지 않는다 (Q14·Q16)", cmd: 'pnpm -C apps/server test -t "TC-M1.T1.a"', expectPassed: 1 },
+      { id: "G-M1.2", how: "test", desc: "TC-M1.T1.b 메일·도메인·IdP 가 없으면 그 정책을 저장하지 않는다 (Q15·Q18)", cmd: 'pnpm -C apps/server test -t "TC-M1.T1.b"', expectPassed: 1 },
+      { id: "G-M1.3", how: "test", desc: "TC-M1.T1.c 읽기는 시드 기본값을 채운다", cmd: 'pnpm -C apps/server test -t "TC-M1.T1.c"', expectPassed: 1 },
+      { id: "G-M1.4", how: "test", requires: ["local-services"], desc: "TC-M1.T1.d 설정 쓰기는 한 문장이라 동시 쓰기에 행이 사라지지 않는다 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-M1.T1.d" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-M1.17", how: "test", requires: ["local-services"], desc: "TC-M1.T1.d 동시 설정 쓰기 (D1, 시험 Worker)", cmd: 'pnpm -C apps/server test:workers -t "TC-M1.T1.d"', expectPassed: 1 },
+      { id: "G-M1.16", how: "cmd", desc: "재현 빨강: TC-M1.T1.d 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M1.4 --since seal:M0" },
+      { id: "G-M1.12", how: "grep", desc: "설치의 설정 지우고 넣기 없음 (M1.T1.2)", pattern: "delete\\(t\\)\\.where\\(eq\\(t\\.key, key\\)\\)", in: ["apps/server/src/setup"], op: "==", limit: 0 },
+      // M1.T2 회원 상태 전이 (순수 함수)
+      { id: "G-M1.5", how: "test", desc: "TC-M1.T2.a 전이 표 24칸이 Q8 결정과 같다", cmd: 'pnpm -C apps/server test -t "TC-M1.T2.a"', expectPassed: 1 },
+      { id: "G-M1.6", how: "test", desc: "TC-M1.T2.b 최초 관리자·자기 자신 보호 (Q12)", cmd: 'pnpm -C apps/server test -t "TC-M1.T2.b"', expectPassed: 1 },
+      // M1.T3 감사 기록 쓰기 하나 (audit/)
+      { id: "G-M1.7", how: "test", desc: "TC-M1.T3.a 감사 기록에 개인정보·비밀 값이 들어가지 않는다 (Q17)", cmd: 'pnpm -C apps/server test -t "TC-M1.T3.a"', expectPassed: 1 },
+      { id: "G-M1.8", how: "test", desc: "TC-M1.T3.b 모르는 action 은 쓰지 않는다 (Q17)", cmd: 'pnpm -C apps/server test -t "TC-M1.T3.b"', expectPassed: 1 },
+      // M1.T4 스키마 0003 (invites.revoked_at·used_by·(expires_at) 색인, user.deleted_at)
+      { id: "G-M1.9", how: "test", requires: ["local-services"], desc: "TC-M1.T4.a 0003 이 다섯 DB 빈 상태·기존 행 상태에 적용된다 (Q4·Q9)", cmd: 'pnpm -C packages/db test:migrate -t "TC-M1.T4.a" --db sqlite,mysql,mariadb,pg,d1', expectPassed: 5 },
+      { id: "G-M1.10", how: "test", requires: ["local-services"], desc: "TC-M1.T4.b 새 user 칼럼은 가입·회원정보 수정 본문으로 쓸 수 없다 (네 DB)", cmd: 'pnpm -C packages/auth test -t "TC-M1.T4.b"', expectPassed: 4 },
+      { id: "G-M1.11", how: "cmd", desc: "TC-M1.T4.c 생성물·드리프트", cmd: "pnpm -C packages/db gen && git diff --exit-code packages/db/src/schema/ && pnpm -C packages/db check:drift" },
+      { id: "G-M1.13", how: "cmd", desc: "타입 검사", cmd: "pnpm -r typecheck" },
+      // M1.T5 CI 단계 잡·필수 검사
+      { id: "G-M1.14", how: "grep", desc: "TC-M1.T5.a CI 단계 잡 (M1)", pattern: "^\\s+run: node scripts/gate\\.mjs M1\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
+      { id: "G-M1.15", how: "cmd", desc: "TC-M1.T5.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
+    ],
   },
   // M2 가입 정책이 M3 초대보다 먼저다. 초대 수락이 signup/**(정책 판정·초대 문맥 ALS·응답 최소 시간)를 부르기 때문이다
   M2: {
