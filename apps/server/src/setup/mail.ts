@@ -7,9 +7,38 @@ import { resendMailer } from "@magnetosphere/auth/mail";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 
-export const MAIL_SETTINGS_KEY = "mail_settings";
+// 행이 있으면 "메일 설정됨"이다 (Q15). 가입 판정(packages/db/src/signup.ts)이 같은 키를 본다
+import { MAIL_SETTINGS_KEY } from "@magnetosphere/db/src/settings.ts";
+
+export { MAIL_SETTINGS_KEY };
 /** API 키 암호문의 AAD. 다른 자리로 옮겨 붙인 암호문은 열리지 않는다 */
 export const MAIL_API_KEY_AAD = "app_settings.mail_settings.apiKey";
+
+/** 메일 설정 입력 (설치 화면·설정 API 가 같은 검사를 쓴다). 지금은 Resend 하나 */
+export interface MailInput {
+  provider: "resend";
+  apiKey: string;
+  from: string;
+}
+
+/**
+ * 보내는 주소: 앞뒤 공백을 지운 값이 이메일 주소 하나 (254자 이하, 점이 있는 도메인). 표시 이름·여러 주소·제어 문자·공백은 받지 않는다 (TC-M2.T5.f, 리뷰 L4)
+ */
+const FROM_ADDRESS = /^[^\x00-\x20\x7f@<>()[\]\\,;:"]+@(?:[^\x00-\x20\x7f@<>()[\]\\,;:".]+\.)+[^\x00-\x20\x7f@<>()[\]\\,;:".]+$/;
+
+/** 설치(setup/index.ts)와 설정 API(signup/mail.ts)의 메일 설정 검사 */
+export function validMailInput(m: unknown): m is MailInput {
+  const isText = (v: unknown): v is string => typeof v === "string" && v.trim() !== "";
+  const x = m as Partial<MailInput> | null;
+  if (typeof x !== "object" || x === null || x.provider !== "resend" || !isText(x.apiKey) || !isText(x.from)) return false;
+  const from = x.from.trim();
+  return from.length <= 254 && FROM_ADDRESS.test(from);
+}
+
+/** 저장할 값. API 키는 APP_ENCRYPTION_KEY 로 암호화한다 (AAD MAIL_API_KEY_AAD) */
+export async function storedMailSettings(m: MailInput, cipher: Cipher): Promise<StoredMailSettings> {
+  return { provider: "resend", from: m.from.trim(), apiKey: await cipher.encrypt(m.apiKey.trim(), MAIL_API_KEY_AAD) };
+}
 
 interface StoredMailSettings {
   provider: "resend";

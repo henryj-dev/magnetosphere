@@ -11,7 +11,8 @@ import { makeAuth, markVerified } from "./helpers.ts";
 
 const MAIL_DELAY_MS = 1000;
 const ROUNDS = 7;
-const LIMIT_MS = 250;
+// S7 리뷰 L1 로 250 → 150 (3단계 실행판 M2.T4, TC-M2.T4.b)
+const LIMIT_MS = 150;
 
 const slowMailer = { send: (_m: MailMessage) => new Promise<void>((r) => setTimeout(r, MAIL_DELAY_MS)) };
 const fastMailer = { send: async (_m: MailMessage) => {} };
@@ -47,7 +48,7 @@ describe("TC-S3.T2.e 메일 전송 시간", () => {
     await h?.close();
   });
 
-  test("TC-S3.T2.e /request-password-reset 메일 지연이 있는 계정·없는 계정 응답 시간 차이에 더하는 몫 < 250ms", async () => {
+  test("TC-S3.T2.e /request-password-reset 메일 지연이 있는 계정·없는 계정 응답 시간 차이에 더하는 몫 < 150ms", async () => {
     const measure = async (mailer: typeof slowMailer) => {
       const app = makeAuth(h, { mailer });
       const known = email("known");
@@ -67,7 +68,7 @@ describe("TC-S3.T2.e 메일 전송 시간", () => {
     expect(slow.gap - fast.gap).toBeLessThan(LIMIT_MS);
   });
 
-  test("TC-S3.T2.e /sign-up/email 메일 지연이 있는 계정·없는 계정 응답 시간 차이에 더하는 몫 < 250ms", async () => {
+  test("TC-S3.T2.e /sign-up/email 메일 지연이 있는 계정·없는 계정 응답 시간 차이에 더하는 몫 < 150ms", async () => {
     const measure = async (mailer: typeof slowMailer) => {
       const app = makeAuth(h, { mailer });
       const known = email("dup");

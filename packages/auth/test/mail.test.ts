@@ -39,10 +39,13 @@ describe("인증·재설정 메일 (SQLite)", () => {
     expect(lines.join("\n")).toContain(VERIFY_SUBJECT);
     const url = linkIn(lines.join("\n"));
     expect(url, "콘솔 출력에 링크 없음").toBeDefined();
-    expect(url!.startsWith(`${baseURL}/api/auth/verify-email?token=`), url).toBe(true);
+    expect(url!.startsWith(`${baseURL}/api/auth/signup-confirmation?token=`), url).toBe(true);
     expect((await c.post("/sign-in/email", { email: e, password: PASSWORD })).status, "인증 전").toBe(403);
     const v = await c.get(url!);
-    expect([200, 302]).toContain(v.status);
+    expect(v.status).toBe(200);
+    expect(Boolean((await userRow(h, e)).emailVerified)).toBe(false);
+    const confirmed = await app.handler(new Request(`${baseURL}/api/auth/signup-confirmation`, { method: "POST", headers: { origin: baseURL, "content-type": "application/json" }, body: JSON.stringify({ token: new URL(url!).searchParams.get("token"), password: PASSWORD }) }));
+    expect(confirmed.status).toBe(200);
     expect(Boolean((await userRow(h, e)).emailVerified)).toBe(true);
     expect((await c.post("/sign-in/email", { email: e, password: PASSWORD })).status).toBe(200);
   });

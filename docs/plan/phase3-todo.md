@@ -279,6 +279,7 @@ PR #13 7e1b5bf (Q1, 3단계 밖, main 에 있음)
 K6 ─▶ M0 ─▶ M1 ─▶ M2 ─▶ M3 ─▶ M4 ─▶ M5 ─▶ M6
 ```
 - 전부 직렬이다. 동시 진행 상한 1.
+- H1 보안 검토는 M2 에서 고쳤다. 공개 가입은 인증 링크 뒤 가입 비밀번호를 한 번 더 확인하고, 비밀번호를 모르는 기존 미인증 계정은 이메일 비밀번호 재설정으로 인증을 마친다. 시험은 TC-M2.T8.e·f·g, `H1.*`(G-M2.48 ~ G-M2.53)이다. 만료된 미인증 계정을 자동 삭제하는 기능은 승인되지 않아 이번 범위에서 제외한다 (TC-M2.T8.d 번호는 다른 용도로 다시 쓰지 않는다).
 - #13 이 main 에 있으므로 M0 은 바로 시작할 수 있다. M2 의 재현 빨강은 #13 위에서 정해진다.
 - M1 이 M0 을 기다리는 이유: 질문 Q1~Q20 의 결정이 스키마(0003)·상태 전이 표·설정 값 검사를 정한다. V29·V31 은 가입·로그인을 막는 자리(Better Auth 훅)를 정한다.
 - M3(초대)이 M2(가입 정책)를 기다리는 이유: 초대 수락은 M2 가 넓힌 정책 판정(`packages/db/src/signup.ts` `decideSignup`의 초대 줄), 초대 문맥 통로(`packages/auth/src/invite-context.ts`), 가입 응답 최소 시간(`apps/server/src/signup/timing.ts`)을 부른다. 마지막 것은 M2 `outputs`(`apps/server/src/signup/**`)라 M2 가 잠긴 동안에는 만들 수 없다. 앞의 둘은 기존 파일·패키지라 `outputs` 밖이고 순서는 M2 봉인(R1)이 지킨다.
@@ -296,7 +297,7 @@ K6 ─▶ M0 ─▶ M1 ─▶ M2 ─▶ M3 ─▶ M4 ─▶ M5 ─▶ M6
 | 4.5 역할 매핑·`sso_only` JIT | 옮김 → 5단계 | `sso_only` 판정의 로컬 가입 거부만 3단계 (Q18). 3단계 동안 SSO JIT 는 #13 생성 훅이 막는다 — 5단계가 `decideSignup`에 IdP 줄을 더해 연다 |
 | 4.4 피해자 이메일 선점 후 SSO 연결 (7장 회귀) | 옮김 → 5단계 | 계정 연결은 5단계. Q5 (가)가 남기는 연결 위험은 5단계에 넘긴다 |
 | 회원 관리·설정 화면 (6장) | 옮김 → 7단계 | 9장 7단계 "관리 화면". 3단계는 API 까지 |
-| 로그인·가입·초대 수락 화면 (6장) | 옮김 → 4단계 앞머리 (Q2 (가) 결정됨) | 9장 어느 단계에도 없다 |
+| 로그인·가입·초대 수락 화면 (6장) | 옮김 → 4단계 앞머리 (Q2 (가) 결정됨) | 9장 어느 단계에도 없다. H1 가입 화면은 M2 의 API 를 쓴다: 인증 링크 안내(GET) 뒤 비밀번호 확인(POST `/api/auth/signup-confirmation`), 비밀번호를 모르면 이메일 비밀번호 재설정으로 보낸다 |
 | 신규 회원 기본 월 한도 $5 적용 | 함 (M2) | 2단계가 3단계로 넘김. 적용 방식은 Q16 |
 | CAPTCHA | 옮김 → 2차 (그대로) | 1장 |
 
@@ -711,8 +712,9 @@ TC-M1.T5.b  ruleset 필수 검사가 이 잡을 포함한다
   - 가입 경로가 설정을 두 번 읽는다. `app.ts`와 `signUpGate`가 각각 `hasAdmin`·`signup_mode`를 select 하고, 생성 훅이 한 번 더 읽는다. M2.T1 은 요청 하나 안에서만 판정 입력을 한 번 읽어 두고 쓴다 (요청 문맥 메모). 인스턴스 캐시는 쓰지 않는다 — 정책을 닫아도 다른 인스턴스가 가입을 받게 된다 (TC-M2.T5.a).
 - **D1 트랜잭션·SQLite 동시 쓰기 (V29)**: D1 의 `transaction: false`는 3단계 전 고침 PR #15 (`fix/d1-transaction`) 이 한다 (계획서 v5.8 3.2). 그것 없이는 D1 의 정책·초대 시험(G-M2.12·17·18·29)이 정책 코드와 관계없이 실패한다. Node SQLite 의 `SQLITE_BUSY`는 M2.T7 이 먼저 고친다 (TC-M2.T3.a (4) 의 전제). D1 은 가입의 user·account 삽입이 한 트랜잭션이 아니므로 거부는 삽입 전 자리(앞 판정·`user.create.before`)에서만 한다.
 - **초대 문맥 통로**: `packages/auth/src/invite-context.ts`의 `AsyncLocalStorage`다. 생성 훅이 `packages/auth` 안에 있어서 통로도 그 패키지에 둔다. `runAsInvite({ inviteId, role, email, verified }, fn)` 안에서 부른 `auth.api.signUpEmail`만 두 자리(`signUpGate`·생성 훅)가 초대 가입으로 본다. 요청 본문·헤더는 쓰지 않는다. 공개 요청은 이 값을 넣을 길이 없다 (V29 TC-M0.T2.d). 초대 단계(M3)는 이 함수를 부르기만 한다.
+- **M3 수락 경로 주의 (미구현)**: `auth.api.signUpEmail`을 외부 DB 트랜잭션 안에서 호출해 초대 차지·회원 생성·감사를 감싸면 Better Auth 내부 트랜잭션과 중첩될 수 있고, SQLite 프로세스 내 직렬화의 비동기 문맥(ALS)에서도 대기열 교착을 일으킬 수 있다. 초대 예약·수락 설계는 바깥 트랜잭션을 겹치지 않게 하고, 다섯 DB의 중복·동시 수락 회귀 시험으로 원자성과 교착 부재를 확인해야 한다. D1의 `transaction: false`/batch 제약과는 별도 문제다.
 
-### ☐ M2.T1 — 정책 판정·앞 판정·뒷받침 훅·초대 문맥 🛡 보안 리뷰 (V29·Q1·Q3·Q15·Q19 의존)
+### ☑ M2.T1 — 정책 판정·앞 판정·뒷받침 훅·초대 문맥 🛡 보안 리뷰 (V29·Q1·Q3·Q15·Q19 의존)
 선행 없음 · 산출 `packages/db/src/signup.ts`(#13 의 판정을 넓힌다), `packages/auth/src/{index,invite-context}.ts`, `apps/server/src/app.ts`, `apps/server/src/signup/request-memo.ts` · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-M2.T1.a`
 
 【작업】
@@ -729,6 +731,7 @@ TC-M1.T5.b  ruleset 필수 검사가 이 잡을 포함한다
    - 판정 입력(관리자 있음·설정·메일)은 요청 하나에 한 번만 읽는다 (#13 리뷰 메모, `request-memo.ts`).
    - 설치 전 403 `setup_required`(app.ts)는 그대로 앞에 둔다.
    - V32 결과 열린 이메일 변경·회원 삭제 경로는 없다. `user.changeEmail`·`user.deleteUser`를 켜지 않은 채인지를 TC-M2.T1.d 가 고정한다 (v5.8 4.6).
+   (실제: 판정 입력은 `loadSignupInputs`(관리자 있음·설정·메일·오늘 가입 수)가 읽고 `decideSignup`은 순수 함수다. 앞 판정 둘은 `app.ts` → `signup/gate.ts` `publicSignupDenial`과 `signUpGate`, 뒷받침은 `userCreateGuard`다. 생성 훅은 `ctx.path === "/sign-up/email"`인 공개·초대 가입만 판정하고 그 밖의 회원 생성(OAuth·SSO JIT·`internalAdapter` 직접)은 정책과 관계없이 400 `SIGNUP_CLOSED`다. 초대 문맥 통로는 패키지 진입점 내보내기 목록을 TC-S3.T3.d 가 고정해 `@magnetosphere/auth/invite-context`로 따로 낸다. 이메일 지정 초대는 판정에서도 그 이메일로만 통과한다. 요청 메모는 `signup/request-memo.ts`(ALS)이고 `AuthConfig.signupInputs`로 Better Auth 훅에 넘긴다. TC-M2.T1.e 가 찾은 노출 하나를 고쳤다: 있는 이메일의 Better Auth 가짜 user 는 스키마 기본값(`status active`·`monthlyLimitUsd null`)이고 새 가입은 생성 훅 값(pending·5)이라 응답의 권한 필드로 계정 존재가 드러났다. `hooks.after`가 `/sign-up/email` 응답 user 를 핵심 필드 일곱(id·name·email·emailVerified·image·createdAt·updatedAt)으로 줄인다 (`Red: TC-M2.T1.e` → 고침). #13 의 TC-SEC.1.a·b 는 메일 없는 설치의 open·domain_allowlist 기대를 `mail_required`로 바꿨다 (행 0 단언은 그대로).)
 
 【테스트】
 ```
@@ -759,7 +762,7 @@ TC-M2.T1.g  초대 문맥의 서버 호출은 signUpGate 를 지난다 (V29 의�
 - [ ] G-M2.1 ~ G-M2.6 · G-M2.17 · G-M2.18 · G-M2.28 · G-M2.29 통과
 - [ ] G-M2.21 통과 (Red 커밋에서 TC-M2.T1.a 실패)
 
-### ☐ M2.T2 — 허용 도메인·승인 대기·기본값 (Q6·Q14·Q16 의존)
+### ☑ M2.T2 — 허용 도메인·승인 대기·기본값 (Q6·Q14·Q16 의존)
 선행 M2.T1 · 산출 `packages/db/src/signup.ts` · 되돌리기 커밋 1개
 
 【작업】
@@ -770,6 +773,7 @@ TC-M2.T1.g  초대 문맥의 서버 호출은 signUpGate 를 지난다 (V29 의�
    - 이 값들은 `user.create.before`가 돌려주는 `data`로 넣는다. 같은 트랜잭션이고, `input: false` 칼럼이라 본문으로는 못 바꾼다 (V29 TC-M0.T2.c).
    - 감사 기록 `member.signup`.
    - 설정을 읽는 곳을 하나로 합친다 (M1 리뷰). `packages/db/src/signup.ts`의 `readSetting`·`defaultMonthlyLimit`가 설정 저장소(M1 `readSettings`, 깨진 값은 닫힌 값)와 같은 규칙으로 읽고, 이메일 도메인은 M1 `normalizeDomain`으로 바꾼다. 서버 코드에 기대지 않게 하려면 읽기·정규화를 `packages/db`로 옮기고 서버 `settings/`가 그것을 부른다.
+   (실제: 값 검사·읽기·`normalizeDomain`을 `packages/db/src/settings.ts`로 옮기고(`zod` 의존 추가) 서버 `settings/`가 다시 내보낸다. 이메일 도메인은 `emailDomain`이 `@` 정확히 하나·따옴표·공백·제어 문자 없음·NFKC 로 바뀌지 않는 꼴만 받아 `normalizeDomain`으로 바꾼다. 끝 점·전각·동형 문자·`"a@x"@도메인`·`@` 둘은 `domain_not_allowed`다 (TC-M2.T2.b). 회원 값은 생성 훅 data 로 넣는다: 공개 가입 `role member`·승인 켬이면 `pending`·`emailVerified false`, 초대는 초대의 역할·`active`·초대의 인증 값, 둘 다 `monthlyLimitUsd = default_limit_usd`·`maxKeys NULL`. 감사 기록 `member.signup`은 `user.create.after`에서 서버가 넘긴 `onUserCreated`가 남긴다 (detail 은 via·inviteId, IP 는 withClientIp 머리글).)
 
 【테스트】
 ```
@@ -790,7 +794,7 @@ TC-M2.T2.d  domain_allowlist 인데 허용 도메인이 비면 공개 가입은 
 【통과】
 - [ ] G-M2.7 ~ G-M2.9 · G-M2.34 · G-M2.35 통과
 
-### ☐ M2.T3 — 하루 가입 상한 (Q13 의존)
+### ☑ M2.T3 — 하루 가입 상한 (Q13 의존)
 선행 M2.T1 · 산출 `packages/db/src/signup.ts`(상한 세기) · 되돌리기 커밋 1개
 
 【작업】
@@ -805,6 +809,7 @@ TC-M2.T2.d  domain_allowlist 인데 허용 도메인이 비면 공개 가입은 
    - Q13 (나)면 앞 판정에서 곧바로 `consume` 한다.
    - 넘으면 앞 판정이 403 `signup_cap`을 낸다. 그날 처음 넘을 때 `alert.signup_cap` 1행을 쓴다 (`keys/alerts.ts` `alertOnce`와 같은 하루 한 번).
    - 초대 수락은 세지 않는다.
+   (실제: 칸은 `rate_limit` `signup-day|<UTC 날짜>`(지난 날 칸은 셀 때 지운다), 세기는 `countSignup`(상한 없이 센다 — 센 값 == 실제 공개 가입 수). 알림은 앞 판정이 `signup_cap`으로 거부할 때 `rate_limit` `signup-cap-alert|<날짜>` 칸을 넣은 요청만 `alert.signup_cap`을 쓴다 (여러 인스턴스에서도 1행). 상한 3 에서 인스턴스 둘이 동시에 10건이면 앞 판정을 같이 지난 만큼 넘친다. TC 는 넘친 수를 고정하지 않고 센 값 == 생긴 공개 가입 수 ≥ 3·그 뒤 403 만 단언한다. D1 은 가입의 user·account 삽입이 한 트랜잭션이 아니라 (3) account 실패에서 user 행이 남을 수 있다 — 센 값 0 만 같은 기준으로 본다.)
 
 【테스트】
 ```
@@ -822,7 +827,7 @@ TC-M2.T3.c  상한 null 과 0 (Q13 의존)
 【통과】
 - [ ] G-M2.10 ~ G-M2.12 · G-M2.19 통과
 
-### ☐ M2.T4 — 가입 응답 시간으로 계정 존재를 드러내지 않는다 (백로그 둘)
+### ☑ M2.T4 — 가입 응답 시간으로 계정 존재를 드러내지 않는다 (백로그 둘)
 선행 M2.T1 · 산출 `apps/server/src/signup/timing.ts`, `packages/auth/test/mail-timing.test.ts`, `packages/auth/test/signup-policy/**` · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-M2.T4.a`
 
 【작업】
@@ -833,6 +838,7 @@ TC-M2.T3.c  상한 null 과 0 (Q13 의존)
    - `withMinDuration(ms, fn)`: `/sign-up/email` 응답(앞 판정 거부 포함)을 시작 시각 + `SIGNUP_MIN_MS`(400ms)까지 기다린 뒤 돌려준다. Node 는 `setTimeout`이고, Workers 도 요청 안에서 기다린다. M3 의 초대 수락도 이 함수를 부른다.
    - 400ms 의 근거: CI 러너의 가입 DB 쓰기(약 110ms) + 비밀번호 해시 + 여유.
    - TC-S3.T2.e 의 상한을 250ms → 150ms 로 낮춘다 (S7 리뷰 L1).
+   (실제: Red 커밋에서 가장 짧은 응답 49ms(이 컴퓨터는 중앙값 차이 2ms). 고친 뒤 세 번: 중앙값 차이 0.2·0.2·0.4ms, 가장 짧은 응답 401.2·401.0·400.0ms. G-M2.14 의 `-t "TC-S3.T2.e"`는 mail-timing.test.ts 의 세 테스트를 골라 통과 수가 3 이다. 서버 시험의 대량 가입은 최소 시간 때문에 묶어서 동시에 보낸다.)
 
 【테스트】
 ```
@@ -851,7 +857,7 @@ TC-M2.T4.c  최소 시간 기다림이 요청 수 제한을 우회하지 않는�
 - [ ] G-M2.13 ~ G-M2.15 · G-M2.20 통과
 - [ ] G-M2.22 통과 (Red 커밋에서 TC-M2.T4.a 실패)
 
-### ☐ M2.T5 — 정책·메일 설정 API (Q15·Q20 의존)
+### ☑ M2.T5 — 정책·메일 설정 API (Q15·Q20 의존)
 선행 M2.T1 · 산출 `apps/server/src/signup/{admin,mail}.ts` · 되돌리기 커밋 1개
 
 【작업】
@@ -861,6 +867,7 @@ TC-M2.T4.c  최소 시간 기다림이 요청 수 제한을 우회하지 않는�
    - Q20 (가): `POST /api/admin/settings/mail/test`. 관리자 자신에게 보내고, 관리자당 1시간 5회다.
    - 설정 쓰기와 감사 기록 `settings.update`를 한 트랜잭션(D1 은 batch)으로 묶는다 (M1 리뷰). M1 `writeSetting`이 db(tx) 인자를 받거나 실행하지 않은 문장을 돌려주게 넓혀 M1 `auditStatement`와 같이 보낸다.
    - 오래된 값 덮어쓰기를 막는다 (M1 리뷰). PATCH 는 바꾸는 키만 쓰고(키 단위), 요청에 그 키의 읽은 `updatedAt`을 실어 `updated_at`이 그대로일 때만 쓰는 조건부 UPDATE 로 한다. 0행이면 409 `stale_setting`.
+   (실제: 본문은 `{ <필드>…, updatedAt: { <바꾸는 필드>: <GET 의 updatedAt, 행이 없었으면 null> } }`. 행이 없던 키는 "없을 때만 넣기"로 쓴다. 새 `updated_at`은 읽은 값 + 1ms 이상이다. `checkSettings`가 바꾼 뒤 상태로 정책 검사를 한 번에 하고, `commitSettings`가 Node 네 DB 는 트랜잭션(0행이면 던져 되돌림), D1 은 batch 하나로 보낸다. D1 은 조건부 쓰기 뒤에 `changes() = 1`이 아니면 `value`를 NULL 로 바꾸는 지킴 문장을 넣어 NOT NULL 제약으로 batch 전체를 되돌리고 409 로 바꾼다. 메일 PUT 은 `commitAppSetting`(upsert + 감사). 감사 detail 은 `{ section, changes: { <키>: { from, to } } }`, 허용 도메인은 `fromCount`·`toCount`, 메일은 provider 만. 테스트 메일은 `Services.mailer`(인증 메일과 같은 어댑터)로 보낸다.)
 
 【테스트】
 ```
@@ -884,12 +891,13 @@ TC-M2.T5.e  오래된 값으로 덮어쓰지 않는다 (M1 리뷰, 다섯 DB)
 【통과】
 - [ ] G-M2.23 ~ G-M2.25 · G-M2.36 ~ G-M2.39 통과
 
-### ☐ M2.T7 — Node SQLite 동시 쓰기 (V29 의존). D1 트랜잭션은 결정됨 — 3단계 전 고침 PR #15 (`fix/d1-transaction`)
+### ☑ M2.T7 — Node SQLite 동시 쓰기 (V29 의존). D1 트랜잭션은 결정됨 — 3단계 전 고침 PR #15 (`fix/d1-transaction`)
 선행 없음 (M2.T1 보다 먼저) · 산출 Node SQLite 연결을 만드는 자리(`packages/runtime/src/node.ts` 등)와 그 시험(`packages/auth/test/signup-policy/**`·`apps/server/test/signup/**`) · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-M2.T7.b`
 
 M0 V29 가 찾은 막는 결과 둘이다 (계획서 v5.8 3.2). 3단계 전 구성에서도 결함이지만 설치 뒤 공개 가입이 닫혀 있어 드러나지 않았다.
 - **D1 절반 — 결정됨, PR #15**: D1 에서 Better Auth 를 `transaction: false`로 올리는 일은 3단계 전 고침 PR #15 (`fix/d1-transaction`) 이 main 에 넣는다 (가입·재설정·OAuth/SSO JIT 500). 그 PR 의 회귀 시험이 덮는다. 이 작업은 `packages/auth/src/index.ts`의 트랜잭션 설정을 다시 바꾸지 않는다. 3단계가 기대는 D1 단언(가입 200·행 +1)은 TC-M2.T7.a 로 남긴다.
 - **SQLite 절반 — 이 작업**: libSQL 클라이언트는 트랜잭션마다 풀에서 연결을 따로 잡는다 (`@libsql/client` `sqlite3.js:323` `transaction()`). 동기 드라이버라 한 프로세스 안의 겹친 트랜잭션·쓰기는 잠금을 기다리는 동안 앞 트랜잭션이 끝나지 못해 `SQLITE_BUSY`가 된다 (V29: `timeout`으로 안 풀림, WAL + `timeout`은 멈춤, 차례로 돌리면 모두 성공).
+  - 적용 범위: 프로세스 안에서 SQLite 파일 하나를 공유하는 단일 Node 프로세스에만 직렬화가 적용된다. 여러 프로세스가 같은 SQLite 파일을 공유하는 구성의 쓰기는 조정되지 않으며 지원하지 않는다.
 
 【작업】
 1. 재현 시험을 넣는다. 꼬리줄 `Red: TC-M2.T7.b`. 커밋.
@@ -898,6 +906,7 @@ M0 V29 가 찾은 막는 결과 둘이다 (계획서 v5.8 3.2). 3단계 전 구�
    - 연결을 하나로 묶는다 (libSQL 풀 크기 1, 트랜잭션 동안 다른 쿼리는 기다림).
    - 요청 단위로 Better Auth 쓰기를 직렬화한다.
    - 어느 것이든 MySQL·MariaDB·Postgres 의 동시성은 바꾸지 않는다. Docker + SQLite 는 인스턴스 하나라 프로세스 안 직렬화로 충분하다.
+   (실제: 첫 후보. `connectNode`의 SQLite 연결에서 `db.transaction`은 파일(`DATABASE_URL`)마다 하나인 차례를 쥔 동안만 돌고, 트랜잭션 밖 쓰기 문장(`execute`·`batch`·`executeMultiple`·`migrate`, 읽기 select·pragma·explain 제외)도 같은 차례를 기다린다. 트랜잭션 안의 흐름(훅의 바깥 연결 읽기)은 ALS 로 알아보고 다시 기다리지 않는다. 풀 크기 1 은 고르지 않았다: libSQL `ConnectionPool.acquire`가 열린 트랜잭션이 연결을 모두 쥐면 다른 호출을 기다리지 않고 `TRANSACTION_ACTIVE`로 거부해, 가입 트랜잭션 안 훅의 바깥 연결 읽기가 실패한다 (소스로 확인, 실행하지 않음). Red 커밋에서 동시 가입 10건 중 10건 BUSY, 그 뒤 차례로 한 가입도 커밋에서 BUSY. 고친 뒤 세 번 모두 10건 성공·재설정·로그인 10쌍 500 0.)
 
 【테스트】
 ```
@@ -914,7 +923,7 @@ TC-M2.T7.b  Node SQLite 에서 겹친 쓰기가 SQLITE_BUSY 로 깨지지 않는
 - [ ] G-M2.30 · G-M2.31 통과
 - [ ] G-M2.33 통과 (Red 커밋에서 TC-M2.T7.b 실패)
 
-### ☐ M2.T6 — M2 CI 잡과 봉인
+### ◐ M2.T6 — M2 CI 잡과 봉인
 선행 M2.T1 ~ M2.T5 · M2.T7 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
 
 【작업】
@@ -950,8 +959,8 @@ TC-M2.T6.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-M2.10 | TC-M2.T3.a 상한 차례·동시 (Node DB 넷) | [L] `pnpm -C apps/server test:db -t "TC-M2.T3.a" --db sqlite,mysql,mariadb,pg` | 통과 = 4, 차례 증가 == 3, 동시는 센 값 == 실제 행 |
 | G-M2.12 | TC-M2.T3.a 상한 차례·동시 (D1) | [L] `pnpm -C apps/server test:workers -t "TC-M2.T3.a"` | 통과 = 1, 같은 기준 |
 | G-M2.11 · 19 | TC-M2.T3.b · c | `pnpm -C apps/server test -t "TC-M2.T3.<x>"` | 각 통과 = 1 |
-| G-M2.13 | TC-M2.T4.a 가입 응답 시간 | [L] `pnpm -C packages/auth test -t "TC-M2.T4.a"` | 통과 = 1, 차이 < 30ms |
-| G-M2.14 | TC-M2.T4.b 메일 몫 150ms | [L] `pnpm -C packages/auth test -t "TC-S3.T2.e"` | 통과 = 1 |
+| G-M2.13 | TC-M2.T4.a 가입 응답 시간 (SQLite·Postgres) | [L] `pnpm -C packages/auth test -t "TC-M2.T4.a"` | 통과 = 2, DB마다 차이 < 30ms·응답 ≥ 400ms |
+| G-M2.14 | TC-M2.T4.b 메일 몫 150ms | [L] `pnpm -C packages/auth test -t "TC-S3.T2.e"` | 통과 = 3 (이 이름의 테스트 셋: 재설정·가입 메일 몫, 전송 실패) |
 | G-M2.15 | TC-M2.T4.c | `pnpm -C apps/server test -t "TC-M2.T4.c"` | 통과 = 1 |
 | G-M2.20 | 메일 몫 상한 상수 | grep `LIMIT_MS = 150` in `packages/auth/test/mail-timing.test.ts` | == 1 |
 | G-M2.21 | 재현 빨강 TC-M2.T1.a | `node scripts/check-red.mjs --check G-M2.1 --since seal:M1` | 종료코드 0 |
@@ -970,6 +979,15 @@ TC-M2.T6.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-M2.16 | 타입 검사 | `pnpm -r typecheck` | 종료코드 0 |
 | G-M2.26 | TC-M2.T6.a CI 단계 잡 | grep `^\s+run: node scripts/gate\.mjs M2\b` in ci.yml | == 1 |
 | G-M2.27 | ruleset · TC-M2.T6.b | `node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere` | 종료코드 0 |
+| G-M2.40 · 41 | TC-M2.T8.a·b·c 미인증 계정 선점 (Node DB 넷 · D1, 리뷰 H1) | [L] `pnpm -C apps/server test:db -t "TC-M2.T8.[abc] " --db sqlite,mysql,mariadb,pg` · `test:workers` | 통과 = 12 · 3 |
+| G-M2.42 | 재현 빨강 TC-M2.T8.a | `node scripts/check-red.mjs --check G-M2.40 --since seal:M1` | 종료코드 0 |
+| G-M2.43 · 44 | TC-M2.T3.d 상한 뒤 거부는 rate_limit 에 쓰지 않음 (리뷰 M2) · 재현 빨강 | `pnpm -C apps/server test -t "TC-M2.T3.d"` | 통과 = 1 · 종료코드 0 |
+| G-M2.45 · 46 | TC-M2.T5.f 보내는 주소는 이메일 하나 (리뷰 L4) · 재현 빨강 | `pnpm -C apps/server test -t "TC-M2.T5.f"` | 통과 = 1 · 종료코드 0 |
+| G-M2.47 | (폐기) 미인증 계정 자동 삭제 — 승인되지 않음 | — | — |
+| G-M2.48 · 49 | TC-M2.T8.e 최초 가입 GET 은 인증하지 않음 (Node DB 넷) · 재현 빨강 | [L] `pnpm -C apps/server test:db -t "TC-M2.T8.e " --db sqlite,mysql,mariadb,pg` | 통과 = 4 · 종료코드 0 |
+| G-M2.50 · 51 | TC-M2.T8.f·g Origin·위조·재생성·reset·replay (Node DB 넷) · e·f·g 및 H1.D1 (D1) | [L] `test:db -t "TC-M2.T8.[fg] "` · `test:workers -t "TC-M2.T8.[efg] \|H1[.]D1[.]"` | 통과 = 8 · 6 |
+| G-M2.52 | H1 API·Origin·NULL 호환·메일 실패·오류 비노출·경합 (Node DB 넷) | [L] `MG_TEST_DBS=sqlite,mysql,mariadb,pg pnpm -C packages/auth test -t "H1[.]"` | 통과 = 60 |
+| G-M2.53 | TC-M2.T8.migration 0004 기존 행·세션 보존 (다섯 DB) | [L] `pnpm -C packages/db test:migrate -t "TC-M2.T8.migration" --db sqlite,mysql,mariadb,pg,d1` | 통과 = 5 |
 
 `node scripts/gate.mjs M2 --seal`
 

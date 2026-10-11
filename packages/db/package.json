@@ -17,7 +17,8 @@
     "better-auth": "1.7.7",
     "drizzle-orm": "0.45.4",
     "mysql2": "3.24.5",
-    "postgres": "3.4.9"
+    "postgres": "3.4.9",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@better-auth/drizzle-adapter": "1.7.7",

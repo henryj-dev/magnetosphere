@@ -6,6 +6,7 @@ import { createCipher } from "@magnetosphere/runtime/crypto";
 import type { Runtime } from "@magnetosphere/runtime/types";
 import type { Services } from "./app.ts";
 import { assertSetupTokenStrength } from "./setup/index.ts";
+import { signupAuthHooks } from "./signup/gate.ts";
 import { settingsMailer } from "./setup/mail.ts";
 import { readOmniRouteToken } from "./setup/omniroute.ts";
 
@@ -36,6 +37,8 @@ export interface ServiceOptions {
   fallbackMailer?: Mailer;
   /** 응답 뒤에도 살려 둘 작업 (Workers 는 ctx.waitUntil) */
   waitUntil: (p: Promise<unknown>) => void;
+  /** 메일 설정과 관계없이 늘 이 어댑터로 보낸다 (시험이 보낸 메일을 센다). 운영은 비운다 */
+  mailer?: Mailer;
 }
 
 export async function buildServices(rt: Runtime, opts: ServiceOptions): Promise<Services> {
@@ -43,15 +46,18 @@ export async function buildServices(rt: Runtime, opts: ServiceOptions): Promise<
   // 키가 없거나 32바이트가 아니면 여기서 시작을 거부한다 (TC-S4.T2.c)
   const cipher = await createCipher(requireSecret(rt, "APP_ENCRYPTION_KEY"));
   const baseURL = requireSecret(rt, "BETTER_AUTH_URL");
+  const mailer = opts.mailer ?? settingsMailer(async () => db, async () => cipher, opts.fallbackMailer ?? fallbackMailer());
   const auth = createAuth({
     database: db,
     baseURL,
     secret: requireSecret(rt, "BETTER_AUTH_SECRET"),
     trustedOrigins: [new URL(baseURL).origin],
-    mailer: settingsMailer(async () => db, async () => cipher, opts.fallbackMailer ?? fallbackMailer()),
+    mailer,
     clientIp: rt.clientIp,
     waitUntil: opts.waitUntil,
     onMailError: (e, info) => console.error(`[mail] ${info.to} 에게 "${info.subject}" 를 보내지 못했다`, e),
+    // 가입 판정 입력은 요청 하나에서 한 번만 읽고, 가입 뒤 감사 기록 member.signup 을 남긴다 (signup/gate.ts)
+    ...signupAuthHooks(db),
   });
   // OmniRoute 연결은 선택이다. 없으면 설치 때 토큰 붙여 넣기로 간다 (setup/omniroute.ts)
   const omniroute = { baseUrl: rt.secret("OMNIROUTE_URL") || null, initialPassword: rt.secret("OMNIROUTE_INITIAL_PASSWORD") || null };
@@ -65,5 +71,5 @@ export async function buildServices(rt: Runtime, opts: ServiceOptions): Promise<
     if (!baseUrl || !token) return null;
     return (o?: { timeoutMs?: number }) => createClient({ baseUrl, credential: { token }, timeoutMs: o?.timeoutMs });
   };
-  return { db, auth, cipher, omniroute, setupToken, clientIp: rt.clientIp, appOrigin: new URL(baseURL).origin, keysClient };
+  return { db, auth, cipher, omniroute, setupToken, clientIp: rt.clientIp, appOrigin: new URL(baseURL).origin, keysClient, mailer };
 }

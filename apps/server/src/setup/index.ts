@@ -12,7 +12,7 @@ import { findUserByEmail, normalizeEmail } from "@magnetosphere/db/src/users.ts"
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import { writeAppSetting } from "../settings/index.ts";
-import { MAIL_API_KEY_AAD, MAIL_SETTINGS_KEY } from "./mail.ts";
+import { MAIL_SETTINGS_KEY, storedMailSettings, validMailInput } from "./mail.ts";
 import type { OmniRouteStatus } from "./omniroute.ts";
 
 export const SETUP_TOKEN_KEY = "setup_token_hash";
@@ -196,7 +196,7 @@ function invalid(input: Partial<SetupInput>): string | null {
   } catch {
     return "publicBaseUrl";
   }
-  if (input.mail !== undefined && (input.mail?.provider !== "resend" || !isText(input.mail.apiKey) || !isText(input.mail.from))) return "mail";
+  if (input.mail !== undefined && !validMailInput(input.mail)) return "mail";
   return null;
 }
 
@@ -238,6 +238,7 @@ export async function runSetup(
       emailVerified: true,
       role: "admin",
       isBootstrapAdmin: true,
+      signupOrigin: "setup",
       createdAt: now,
       updatedAt: now,
     });
@@ -262,8 +263,7 @@ export async function runSetup(
 
   await writeSetting(h, PUBLIC_BASE_URL_KEY, v.publicBaseUrl.trim(), userId);
   if (v.mail) {
-    const c = await cipher();
-    await writeSetting(h, MAIL_SETTINGS_KEY, { provider: "resend", from: v.mail.from.trim(), apiKey: await c.encrypt(v.mail.apiKey.trim(), MAIL_API_KEY_AAD) }, userId);
+    await writeSetting(h, MAIL_SETTINGS_KEY, await storedMailSettings(v.mail, await cipher()), userId);
   }
   // OmniRoute 부트스트랩 (계획서 4.7 3번). 관리자를 만든 뒤라 실패해도 관리자는 남는다 (TC-S5.T3.c)
   const omniroute = bootstrapOmniRoute ? await bootstrapOmniRoute(userId) : "manual_required";
