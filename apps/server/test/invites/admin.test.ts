@@ -17,7 +17,7 @@ beforeEach(async () => {
   e = await openRoutes();
   printed = [];
   for (const m of ["log", "info", "warn", "error", "debug"] as const) {
-    vi.spyOn(console, m).mockImplementation((...a: unknown[]) => void printed.push(a.map(String).join(" ")));
+    vi.spyOn(console, m).mockImplementation((...a: unknown[]) => void printed.push(a.map((x) => (x instanceof Error ? `${x.message}\n${(x as any).cause?.message ?? ""}` : String(x))).join(" ")));
   }
   await setRaw("public_base_url", BASE);
   await setRaw("mail_settings", { provider: "resend", from: "noreply@example.com", apiKey: "enc" });
@@ -91,9 +91,22 @@ describe("TC-M3.T1 관리자 초대 API", () => {
     const no = await create(admin, { role: "admin" });
     expect({ status: no.status, error: no.json?.error }).toEqual({ status: 400, error: "admin_invite_requires_email" });
     expect(await invites()).toHaveLength(0);
-    const blank = await create(admin, { role: "admin", email: "   " });
-    expect(blank.status).toBe(400);
+    // 공백뿐인 문자열은 "없음"이 아니라 잘못된 이메일이다 (역할과 무관)
+    for (const role of ["admin", "member"]) {
+      const blank = await create(admin, { role, email: "   " });
+      expect({ role, status: blank.status, error: blank.json?.error }).toEqual({ role, status: 400, error: "invalid_email" });
+    }
+    // 제어문자·공백·특수문자가 든 주소는 400 invalid_email
+    for (const email of ["a\u0000b@x.com", "a\u007f@x.com", "a b@x.com", "a\n@x.com", "<a@x.com>", "a,b@x.com", "a;b@x.com", "a:b@x.com", 'a"b@x.com', "a[b]@x.com", "a\\b@x.com", "a(b)@x.com", "a@@x.com", "a@x", `${"a".repeat(250)}@x.com`]) {
+      const r = await create(admin, { role: "member", email });
+      expect({ email, status: r.status, error: r.json?.error }).toEqual({ email, status: 400, error: "invalid_email" });
+    }
     expect(await invites()).toHaveLength(0);
+    // NFC 로 정규화해 저장한다 (분해형 é → 합성형)
+    const nfc = await create(admin, { role: "member", email: "José@x.com" });
+    expect(nfc.status, nfc.text).toBe(201);
+    expect(nfc.json.invite.email).toBe("josé@x.com");
+    await e.h.db.delete(e.h.schema.invites);
     const ok = await create(admin, { role: "admin", email: " A@x.com " });
     expect(ok.status, ok.text).toBe(201);
     const rows = await invites();
@@ -148,6 +161,7 @@ describe("TC-M3.T1 관리자 초대 API", () => {
     // 목록에는 토큰도 해시도 없다
     const list = await call(e, "GET", "/api/admin/invites", { user: admin });
     expect(list.status).toBe(200);
+    expect(list.headers.get("cache-control")).toBe("no-store");
     expect(list.text).not.toContain(tok);
     expect(list.text).not.toContain(row.tokenHash);
     expect(list.json.invites).toHaveLength(1);
@@ -193,6 +207,7 @@ describe("TC-M3.T1 관리자 초대 API", () => {
     const ok = await create(admin, b);
     expect(ok.status, ok.text).toBe(201);
     const id = ok.json.invite.id;
+    expect((await call(e, "DELETE", `/api/admin/invites/${id}`)).status).toBe(401);
     expect((await call(e, "DELETE", `/api/admin/invites/${id}`, { user: member })).status).toBe(403);
     expect((await call(e, "DELETE", `/api/admin/invites/${id}`, { user: suspended })).status).toBe(403);
     expect((await call(e, "DELETE", `/api/admin/invites/${id}`, { user: admin, origin: "https://evil.example" })).status).toBe(403);
@@ -221,6 +236,11 @@ describe("TC-M3.T1 관리자 초대 API", () => {
     await setRaw("mail_settings", undefined);
     const no = await create(admin, { role: "member" });
     expect({ status: no.status, error: no.json?.error }).toEqual({ status: 409, error: "mail_required" });
+    const nul = await create(admin, { role: "member", email: null });
+    expect({ status: nul.status, error: nul.json?.error }).toEqual({ status: 409, error: "mail_required" });
+    // 공백뿐인 email 은 "없음"으로 보지 않는다 → 400 invalid_email (mail_required 아님)
+    const blank = await create(admin, { role: "member", email: "  " });
+    expect({ status: blank.status, error: blank.json?.error }).toEqual({ status: 400, error: "invalid_email" });
     expect(await invites()).toHaveLength(0);
     const yes = await create(admin, { role: "member", email: "e@example.com" });
     expect(yes.status, yes.text).toBe(201);
@@ -310,11 +330,106 @@ describe("TC-M3.T1 관리자 초대 API", () => {
         expect(re.status, `${label} ${re.text}`).toBe(201);
         expect((await inviteById(a)).revokedAt, `${label} 사용한 A 는 취소되지 않는다`).toBeNull();
         expect((await inviteById(b)).revokedAt, `${label} 끼어든 B 는 취소된다`).not.toBeNull();
-        const added = (await revokes()).filter((x) => !before.includes(x));
+        const added = (await revokes()).filter((x: string) => !before.includes(x));
         expect({ label, revoked: added }).toEqual({ label, revoked: [b] });
       } finally {
         await app.close();
       }
     }
+  });
+
+  it("TC-M3.T1.h 같은 이메일 동시 재초대 → 살아 있는 초대 1개 (승자는 (expires_at, id) 가 큰 쪽, 진 쪽은 409 invite_conflict·링크 없음) (Node SQLite·D1 경로)", async () => {
+    const admin = await addUser(e.h, { role: "admin" });
+    const liveOf = async (email: string) => (await invites()).filter((r: any) => r.email === email && r.usedAt === null && r.revokedAt === null && ms(r.expiresAt) > Date.now());
+    const supersededTargets = async () =>
+      (await audits("invite.revoke")).filter((a: any) => JSON.parse(a.detail).reason === "superseded").map((a: any) => a.target as string).sort();
+    for (const [label, d1] of VARIANTS) {
+      const { app, queue } = await interleaved(d1);
+      try {
+        // 내 트랜잭션이 커밋된 뒤, 정리 전에 서로의 취소를 못 본 동시 요청의 초대가 생긴다 (첫 번째 호출 = 만들기, 두 번째 = 정리)
+        // 더 큰 형제(만료 30일) → 나는 진다
+        const big = `h-big-${d1}@example.com`;
+        let sib = "";
+        queue.push(undefined, async () => void (sib = await rawInvite({ email: big, createdBy: admin, expiresAt: new Date(Date.now() + 30 * DAY) })));
+        const lose = await call(app, "POST", "/api/admin/invites", { user: admin, body: { role: "member", email: big } });
+        expect({ label, status: lose.status, error: lose.json?.error, link: lose.json?.link }).toEqual({ label, status: 409, error: "invite_conflict", link: undefined });
+        expect(lose.text).not.toContain("/invite#");
+        expect((await liveOf(big)).map((r: any) => r.id), label).toEqual([sib]);
+        // 더 작은 형제(만료 1일) → 내가 이기고 형제를 취소한다
+        const small = `h-small-${d1}@example.com`;
+        let low = "";
+        const before = await supersededTargets();
+        queue.push(undefined, async () => void (low = await rawInvite({ email: small, createdBy: admin, expiresAt: new Date(Date.now() + DAY) })));
+        const win = await call(app, "POST", "/api/admin/invites", { user: admin, body: { role: "member", email: small } });
+        expect(win.status, `${label} ${win.text}`).toBe(201);
+        expect((await liveOf(small)).map((r: any) => r.id), label).toEqual([win.json.invite.id]);
+        expect((await inviteById(low)).revokedAt, label).not.toBeNull();
+        const added = (await supersededTargets()).filter((x: string) => !before.includes(x));
+        expect(added.includes(low), label).toBe(true);
+        // 진 요청의 자기 행은 취소됐고 superseded 감사가 있다. 이긴 형제(sib)에는 취소 기록이 없다
+        const loser = (await invites()).filter((r: any) => r.email === big && r.id !== sib);
+        expect(loser.map((r: any) => r.revokedAt !== null), label).toEqual([true]);
+        const targets = await supersededTargets();
+        expect([targets.includes(loser[0].id), targets.includes(sib)], label).toEqual([true, false]);
+      } finally {
+        await app.close();
+      }
+    }
+    // 실제로 겹친 요청 여럿: 살아 있는 초대는 정확히 1개이고 그것은 201 을 받은 것 중 하나다
+    const email = "h-many@example.com";
+    const rs = await Promise.all(Array.from({ length: 6 }, (_, i) => create(admin, { role: "member", email, expiresInDays: 1 + (i % 3) })));
+    expect(rs.every((r) => r.status === 201 || (r.status === 409 && r.json?.error === "invite_conflict" && r.json?.link === undefined)), rs.map((r) => r.text).join("\n")).toBe(true);
+    const live = await liveOf(email);
+    expect(live).toHaveLength(1);
+    expect(rs.filter((r) => r.status === 201).map((r) => r.json.invite.id)).toContain(live[0].id);
+  });
+});
+
+describe("초대 API 주변 (M3.T1 보안 리뷰 L4·L6)", () => {
+  it("L4 DB 쿼리 오류는 쿼리 문과 원인 메시지만 기록하고 params(이메일·token_hash)는 남기지 않는다", async () => {
+    const { createApp } = await import("../../src/app.ts");
+    const params = ["leak@example.com", "deadbeefcafebabe-token-hash"];
+    const err = Object.assign(new Error(`Failed query: insert into "invites" values (?, ?)\nparams: ${params.join(",")}`), {
+      query: 'insert into "invites" values (?, ?)',
+      params,
+      cause: new Error("UNIQUE constraint failed: invites.token_hash"),
+    });
+    const app = createApp({
+      services: async () => {
+        throw err;
+      },
+      assets: async (c) => c.text("spa"),
+      setupTokenFromSecret: false,
+      log: () => {},
+    });
+    const res = await app.request("http://localhost:3000/api/admin/invites");
+    expect(res.status).toBe(500);
+    const out = printed.join("\n");
+    expect(out).toContain('insert into "invites" values (?, ?)');
+    expect(out).toContain("UNIQUE constraint failed: invites.token_hash");
+    for (const p of params) expect(out).not.toContain(p);
+  });
+
+  it("L6 public_base_url 은 http(s)·사용자 정보·쿼리·조각 없음만 받고 origin + pathname(끝 슬래시 뗌)을 쓴다", async () => {
+    const { readPublicBaseUrl } = await import("../../src/invites/base-url.ts");
+    const cases: [unknown, string | null][] = [
+      ["https://llm.example.com/", "https://llm.example.com"],
+      ["https://LLM.example.com/base/", "https://llm.example.com/base"],
+      [" http://llm.example.com:8080 ", "http://llm.example.com:8080"],
+      ["https://user:pw@llm.example.com", null],
+      ["https://user@llm.example.com", null],
+      ["https://llm.example.com/?x=1", null],
+      ["https://llm.example.com/#frag", null],
+      ["javascript:alert(1)", null],
+      ["ftp://llm.example.com", null],
+      ["not a url", null],
+      [42, null],
+    ];
+    for (const [value, want] of cases) {
+      await setRaw("public_base_url", value);
+      expect({ value, got: await readPublicBaseUrl(e.h) }).toEqual({ value, got: want });
+    }
+    await setRaw("public_base_url", undefined);
+    expect(await readPublicBaseUrl(e.h)).toBeNull();
   });
 });

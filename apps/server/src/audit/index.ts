@@ -87,8 +87,8 @@ function checkDetail(v: unknown, path: string): void {
   }
 }
 
-/** 검사한 audit_log 행 */
-function auditRow(e: AuditEntry) {
+/** 검사한 audit_log 행. 조건부 INSERT ... SELECT 를 직접 만드는 곳(invites/admin.ts, D1)도 이 검사를 지난 행을 쓴다 */
+export function auditRow(e: AuditEntry) {
   if (!ACTIONS.has(e.action)) throw new AuditError("unknown_action", `모르는 감사 action: ${JSON.stringify(e.action)}`);
   const detail = e.detail ?? null;
   if (detail !== null && (typeof detail !== "object" || Array.isArray(detail))) throw new AuditError("invalid_detail", "감사 기록 detail 은 JSON 객체다");

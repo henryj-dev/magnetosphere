@@ -141,6 +141,13 @@ export function createApp(deps: AppDeps) {
   app.all("/api/*", (c) => c.json({ error: "not_found" }, 404));
   app.get("*", deps.assets);
   app.onError((e, c) => {
+    // drizzle 쿼리 오류(DrizzleQueryError)는 메시지·params 에 이메일·token_hash 같은 값이 들어 있다. 쿼리 문과 원인 메시지만 남긴다.
+    // 패키지 사본마다 클래스가 달라 instanceof 대신 모양(query 문자열·params 배열)으로 가린다
+    const q = e as { query?: unknown; params?: unknown; cause?: { message?: unknown } };
+    if (typeof q.query === "string" && Array.isArray(q.params)) {
+      console.error(`[server] 처리하지 못한 DB 오류: ${q.query} (원인: ${String(q.cause?.message ?? "알 수 없음")})`);
+      return c.json({ error: "internal_error" }, 500);
+    }
     console.error("[server] 처리하지 못한 오류", e);
     return c.json({ error: "internal_error" }, 500);
   });
