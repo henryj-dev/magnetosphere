@@ -273,6 +273,8 @@ describe("초대 API 주변 (M3.T1 보안 리뷰 L4·L6, 후속 LOW-2)", () => {
     const causes: [string, string][] = [
       ["UNIQUE constraint failed: invites.token_hash", "UNIQUE constraint failed: invites.token_hash"],
       ["Duplicate entry 'leak@example.com' for key 'invites.email'", "Duplicate entry '?' for key '?'"],
+      // 값 안의 작은따옴표 (o'brien) 로 일부가 새지 않는다
+      ["Duplicate entry 'o'brien@x.com-leak@example.com' for key 'invites.email'", "Duplicate entry '?' for key '?'"],
       ['duplicate key value violates unique constraint "deadbeefcafebabe-token-hash"', 'duplicate key value violates unique constraint "?"'],
     ];
     for (const [cause, logged] of causes) {
@@ -296,6 +298,7 @@ describe("초대 API 주변 (M3.T1 보안 리뷰 L4·L6, 후속 LOW-2)", () => {
       expect(out).toContain('insert into "invites" values (?, ?)');
       expect(out).toContain(logged);
       for (const p of params) expect(out).not.toContain(p);
+      expect(out).not.toContain("brien");
     }
   });
 

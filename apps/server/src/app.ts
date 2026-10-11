@@ -147,6 +147,8 @@ export function createApp(deps: AppDeps) {
     const q = e as { query?: unknown; params?: unknown; cause?: { message?: unknown } };
     if (typeof q.query === "string" && Array.isArray(q.params)) {
       const cause = String(q.cause?.message ?? "알 수 없음")
+        // MySQL ER_DUP_ENTRY 는 값 안에 작은따옴표가 들어 있을 수 있어(o'brien@…) 꼴 전체를 가린다
+        .replace(/Duplicate entry '[\s\S]*' for key '[\s\S]*'/g, "Duplicate entry '?' for key '?'")
         .replace(/'(?:[^'\\]|\\.)*'/g, "'?'")
         .replace(/"(?:[^"\\]|\\.)*"/g, '"?"');
       console.error(`[server] 처리하지 못한 DB 오류: ${q.query} (원인: ${cause})`);

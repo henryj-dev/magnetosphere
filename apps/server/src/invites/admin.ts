@@ -16,7 +16,8 @@
 //   - 초대 만들기는 직렬화한다. 같은 email 의 동시 요청이 서로의 취소를 못 보면 살아 있는 초대가 둘 남고, invites.email 에 인덱스가 없어
 //     email 조건 잠금은 MySQL·MariaDB 에서 표 전체를 잠가 교착이 난다. 그래서 job_leases 의 고정 행(INVITE_MUTEX)을 뮤텍스로 쓴다:
 //     행은 트랜잭션 밖에서 먼저 만들어 두고(INSERT IGNORE / ON CONFLICT DO NOTHING, 자동 커밋 — 트랜잭션 안에서 넣으면 MySQL 이 공유 잠금을
-//     배타 잠금으로 올리다 교착한다), Node 쓰기 트랜잭션의 첫 문장으로 SELECT … FOR UPDATE 한다 (pg·mysql·mariadb).
+//     배타 잠금으로 올리다 교착한다), Node 쓰기 트랜잭션(READ COMMITTED 명시)의 첫 잠금으로 SELECT … FOR UPDATE 한다 (pg·mysql·mariadb).
+//     pg 는 그 앞에 SET LOCAL lock_timeout 5s 를 둔다 (넘으면 500).
 //     SQLite 는 프로세스 안 쓰기 차례와 쓰기 잠금 하나로, D1 은 batch 가 한 번에 돌아 이미 직렬이다.
 //     직렬이므로 모든 성공은 201 이다. 먼저 커밋된 201 의 링크는 뒤 요청이 취소한다 (차례로 재초대한 것과 같다).
 //   - DELETE 는 미사용·미취소 초대만 취소한다(만료한 초대도 취소할 수 있다). 없는 id·이미 취소·이미 사용한 초대는 404 not_found 이고
@@ -147,9 +148,19 @@ async function ensureInviteMutex(h: DbHandle): Promise<void> {
   else await h.db.insert(t).values(row).onConflictDoNothing();
 }
 
-/** 트랜잭션의 첫 문장: 뮤텍스 행 배타 잠금. 커밋·되돌리기까지 다른 초대 만들기가 기다린다 */
+/**
+ * 뮤텍스를 잡는 트랜잭션의 격리 수준. 기본값(pg READ COMMITTED, InnoDB REPEATABLE READ)에 기대지 않고 명시한다.
+ * pg REPEATABLE READ 처럼 트랜잭션 시작 스냅숏을 보는 격리에서는 뮤텍스를 기다리는 동안 커밋된 앞 초대를 못 봐 살아 있는 초대가 둘 남는다.
+ * drizzle 은 pg 에서 SET TRANSACTION, mysql2 에서 BEGIN 앞 SET TRANSACTION ISOLATION LEVEL 로 보낸다.
+ */
+export const INVITE_TX = { isolationLevel: "read committed" } as const;
+/** pg 뮤텍스 대기 상한. 넘으면 lock_timeout 오류로 500 이다. MySQL·MariaDB 는 innodb_lock_wait_timeout(기본 50초)을 쓴다 */
+export const INVITE_PG_LOCK_TIMEOUT = "5s";
+
+/** 트랜잭션의 첫 잠금: 뮤텍스 행 배타 잠금. 커밋·되돌리기까지 다른 초대 만들기가 기다린다. pg 는 그 앞에 대기 상한을 둔다 */
 async function lockInviteMutex(h: DbHandle, tx: any): Promise<void> {
   const t = h.schema.jobLeases;
+  if (h.provider === "pg") await tx.execute(sql.raw(`set local lock_timeout = '${INVITE_PG_LOCK_TIMEOUT}'`));
   const got = await tx.select({ name: t.name }).from(t).where(eq(t.name, INVITE_MUTEX.name)).for("update");
   if (got.length !== 1) throw new Error("초대 뮤텍스 행이 없다");
 }
@@ -175,7 +186,7 @@ type RevokeEntry = Omit<AuditEntry, "target">;
 /** SQLite 식: UUID v4 꼴 무작위 id (D1 감사 행 id 를 auditRow 가 만드는 crypto.randomUUID() 와 같은 꼴로) */
 const SQLITE_UUID = sql.raw(
   "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || " +
-    "substr('89ab', 1 + (abs(random()) % 4), 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))",
+    "substr('89ab', 1 + (random() & 3), 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))",
 );
 
 /**
@@ -264,13 +275,14 @@ export function inviteAdminRoutes(services: () => Promise<Services>) {
     } else {
       const locking = h.provider !== "sqlite";
       if (locking) await ensureInviteMutex(h);
-      await h.db.transaction(async (tx: any) => {
+      const body = async (tx: any) => {
         if (locking) await lockInviteMutex(h, tx);
         const revoked = sameEmail ? await revokeWhere(h, tx, sameEmail, now) : [];
         await tx.insert(t).values(row);
         for (const id of revoked) await auditStatement(h, { ...reinvite, target: id }, tx);
         await auditStatement(h, created, tx);
-      });
+      };
+      await (locking ? h.db.transaction(body, INVITE_TX) : h.db.transaction(body));
     }
     c.header("Cache-Control", "no-store");
     return c.json({ invite: view(row, now.getTime()), link: `${base}/invite#${token}` }, 201);
