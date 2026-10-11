@@ -538,7 +538,7 @@ TC-M0.T7.b  ruleset 필수 검사가 이 잡을 포함한다
      - `open`·`domain_allowlist`는 메일이 없으면 `mail_required`
      - `domain_allowlist`는 `allowed_domains`가 비면 `domains_required`
      - `sso_only`는 켜진 IdP 가 없으면 `no_idp` (3단계에는 늘, Q18)
-   (실제: 정책 여섯 키가 아닌 값(`public_base_url`·`mail_settings`·OmniRoute 토큰)은 같은 upsert 를 `writeAppSetting`으로 쓰고, 정책 키는 그 길로 받지 않는다. `domain_allowlist`인 동안 `allowed_domains`를 비우는 쓰기도 `domains_required`다. 읽기는 행이 없거나 값이 검사에 맞지 않으면 시드 값이다. 오류는 `SettingsError`의 `code`(`invalid_value`·`mail_required`·`domains_required`·`no_idp`·`unknown_key`).)
+   (실제: 정책 여섯 키가 아닌 값(`public_base_url`·`mail_settings`·OmniRoute 토큰)은 같은 upsert 를 `writeAppSetting`으로 쓰고, 정책 키는 그 길로 받지 않는다. `domain_allowlist`인 동안 `allowed_domains`를 비우는 쓰기도 `domains_required`다. 읽기는 행이 없으면 시드 값, 값이 깨졌으면 경고 로그와 함께 더 닫힌 값(`closed`·cap 0·승인 true·도메인 [], 기본 한도는 #13 과 같이 5)이다 (M1 리뷰 낮음 1, TC-M1.T1.e). 오류는 `SettingsError`의 `code`(`invalid_value`·`mail_required`·`domains_required`·`no_idp`·`unknown_key`, 검사 없는 쓰기로 온 정책 키는 `policy_key`).)
 2. 설치(`setup/index.ts`)의 `writeSetting`(지우고 넣기, 원자적이지 않음)을 이 upsert 로 바꾼다. 재현 커밋 `Red: TC-M1.T1.d` → 고침.
    (실제: Red 커밋에서 다섯 DB 모두 설치 쓰기 20건 중 16~19건이 기본 키 충돌로 실패했다. 설정 저장소 upsert 는 그때도 초록이었다. D1 은 시험 Worker `apps/server/test/settings/concurrent-worker.ts`.)
 
@@ -556,11 +556,15 @@ TC-M1.T1.c  읽기는 시드 기본값을 채운다
 TC-M1.T1.d  설정 쓰기는 한 문장이라 동시 쓰기에 행이 사라지지 않는다 (다섯 DB)
   단언:  같은 키에 writeSetting 20건 동시 → 그 키 행 정확히 1, 값은 20개 중 하나 (sqlite·mysql·mariadb·pg, D1)
   검출:  setup/index.ts writeSetting 의 delete → insert 사이에 다른 쓰기가 끼어 기본 키 충돌 500 이 나거나, 지운 뒤 넣기가 실패해 public_base_url 행이 사라지는 것
+TC-M1.T1.e  깨진 보안 설정 행은 더 닫힌 값으로 읽는다 (M1 리뷰 낮음 1)
+  단언:  signup_mode 깨진 JSON · daily_signup_cap -5 · signup_requires_approval "no" · allowed_domains "a.com" · default_limit_usd null → closed · 0 · true · [] · 5, 키마다 console.warn. 맞는 값은 경고 없이 그대로
+  검출:  깨진 행을 시드 값으로 읽어 운영자가 둔 closed·cap 0 이 invite_only·20 으로 열리는 것
 ```
 
 【통과】
 - [ ] G-M1.1 ~ G-M1.4 · G-M1.17 통과
 - [ ] G-M1.16 통과 (Red 커밋에서 TC-M1.T1.d 실패)
+- [ ] G-M1.18 · G-M1.19 통과 (Red 커밋에서 TC-M1.T1.e 실패, M1 리뷰)
 
 ### ☑ M1.T2 — 회원 상태 전이 (순수 함수) (Q8·Q12 의존)
 선행 없음 · 산출 `apps/server/src/members/transition.ts`, `apps/server/test/members/**` · 되돌리기 커밋 1개
@@ -593,7 +597,7 @@ TC-M1.T2.b  최초 관리자·자기 자신 보호 (Q12 의존)
    - `action`은 허용 목록과 2단계 이름만 받는다. 허용 목록(Q17): `member.signup`, `member.approve`, `member.reject`, `member.suspend`, `member.unsuspend`, `member.role`, `member.delete`, `invite.create`, `invite.revoke`, `invite.accept`, `settings.update`, `alert.signup_cap`.
    - `detail`은 JSON 객체다. 키 이름이 `email`, `name`, `password`, `token`, `*_hash` 이면 던진다.
    - 트랜잭션·D1 batch 안에서 쓸 수 있게 문장을 돌려주는 `auditStatement`도 둔다.
-   (실제: 2단계 이름은 `PHASE2_AUDIT_ACTIONS` 9개다. 금지 키는 대소문자·`_`·`-`를 지우고 `name`이거나 `email`·`password`·`token`·`hash`·`secret`·`apikey`로 끝나는 키다 (`newEmail`·`tokenHash`). `auditStatement(h, entry, db = h.db)`는 문을 만들 때 검사한다.)
+   (실제: 2단계 이름은 `PHASE2_AUDIT_ACTIONS` 9개다. 금지 키는 대소문자·`_`·`-`를 지우고 `name`·`email`·`password`·`token`·`hash`·`secret`·`apikey`로 끝나는 키다 (`displayName`·`newEmail`·`tokenHash`, 명시 예외 `keyName`). 문자열 값이 이메일 꼴이어도 어느 깊이든 막고 `target`도 본다 (M1 리뷰 낮음 2, TC-M1.T3.c). `auditStatement(h, entry, db = h.db)`는 문을 만들 때 검사한다.)
 
 【테스트】
 ```
@@ -603,10 +607,14 @@ TC-M1.T3.a  감사 기록에 개인정보·비밀 값이 들어가지 않는다 
 TC-M1.T3.b  모르는 action 은 쓰지 않는다 (Q17 의존)
   단언:  action "member.Suspend" · "x" → 예외, 허용 목록 12개 → 각 1행
   검출:  철자가 틀린 action 으로 기록돼 7단계 감사 화면의 거르기에서 정지 기록이 빠지는 것
+TC-M1.T3.c  이름 꼴 키·이메일 꼴 값도 쓰지 않는다 (M1 리뷰 낮음 2)
+  단언:  detail { displayName } · { user_name } · { nested: { lastName } } · { note: "a@b.example" } · 배열 안 이메일 꼴 값 · target "m@example.com" → 예외·행 0. { keyName, keyNames, "deleted-u1@invalid" } → 1행
+  검출:  name 과 정확히 같은 키만 막아 displayName 이나 값에 든 이메일이 감사 기록에 남아, 탈퇴로 지운 개인정보(Q9)가 그대로 읽히는 것
 ```
 
 【통과】
 - [ ] G-M1.7 · G-M1.8 통과
+- [ ] G-M1.20 · G-M1.21 통과 (Red 커밋에서 TC-M1.T3.c 실패, M1 리뷰)
 
 ### ☑ M1.T4 — 스키마 0003 (Q4·Q9 의존)
 선행 없음 · 산출 `packages/db/src/schema/**`, `packages/db/migrations/{sqlite,mysql,pg}/0003_*` · 되돌리기 커밋 1개
@@ -669,6 +677,10 @@ TC-M1.T5.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-M1.14 | TC-M1.T5.a CI 단계 잡 | grep `^\s+run: node scripts/gate\.mjs M1\b` in ci.yml | == 1 |
 | G-M1.15 | ruleset · TC-M1.T5.b | `node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere` | 종료코드 0 |
 | G-M1.16 | 재현 빨강 TC-M1.T1.d | `node scripts/check-red.mjs --check G-M1.4 --since seal:M0` | 종료코드 0 |
+| G-M1.18 | TC-M1.T1.e 깨진 보안 설정은 닫힌 값 (M1 리뷰) | `pnpm -C apps/server test -t "TC-M1.T1.e"` | 통과 = 1 |
+| G-M1.19 | 재현 빨강 TC-M1.T1.e | `node scripts/check-red.mjs --check G-M1.18 --since seal:M0` | 종료코드 0 |
+| G-M1.20 | TC-M1.T3.c 이름 꼴 키·이메일 꼴 값 거부 (M1 리뷰) | `pnpm -C apps/server test -t "TC-M1.T3.c"` | 통과 = 1 |
+| G-M1.21 | 재현 빨강 TC-M1.T3.c | `node scripts/check-red.mjs --check G-M1.20 --since seal:M0` | 종료코드 0 |
 
 `node scripts/gate.mjs M1 --seal`
 
@@ -757,6 +769,7 @@ TC-M2.T1.g  초대 문맥의 서버 호출은 signUpGate 를 지난다 (V29 의�
    - 기본 월 한도 복사는 #13 이 이미 한다 (`userCreateGuard` → `defaultMonthlyLimit`). 이 작업은 초대 문맥에서도 같은 값이 들어가는지와 Q16 남은 결정(null)을 맞춘다.
    - 이 값들은 `user.create.before`가 돌려주는 `data`로 넣는다. 같은 트랜잭션이고, `input: false` 칼럼이라 본문으로는 못 바꾼다 (V29 TC-M0.T2.c).
    - 감사 기록 `member.signup`.
+   - 설정을 읽는 곳을 하나로 합친다 (M1 리뷰). `packages/db/src/signup.ts`의 `readSetting`·`defaultMonthlyLimit`가 설정 저장소(M1 `readSettings`, 깨진 값은 닫힌 값)와 같은 규칙으로 읽고, 이메일 도메인은 M1 `normalizeDomain`으로 바꾼다. 서버 코드에 기대지 않게 하려면 읽기·정규화를 `packages/db`로 옮기고 서버 `settings/`가 그것을 부른다.
 
 【테스트】
 ```
@@ -769,10 +782,13 @@ TC-M2.T2.b  허용 도메인은 정확히 일치한다 (Q14·Q19 의존)
 TC-M2.T2.c  새 회원에게 기본 월 한도가 걸린다 (Q16 의존)
   단언:  default_limit_usd 5 → 공개·초대 새 회원 monthly_limit_usd 5, max_keys NULL. 설정을 7 로 바꾼 뒤 → 기존 회원 5 그대로, 새 회원 7. 설정 API 로 null → 400 (Q16 (가)), 행 없음 → 시드 5 (#13 TC-SEC.1.c 와 같음)
   검출:  초대 문맥의 data 가 #13 훅의 기본값 복사를 덮어 초대 회원만 monthly_limit_usd NULL = 무제한이 되는 것, 설정 API 가 null 을 저장해 #13 의 대체(5)와 운영자 의도(무제한)가 어긋나는 것
+TC-M2.T2.d  domain_allowlist 인데 허용 도메인이 비면 공개 가입은 모두 거부된다 (M1 리뷰, 다섯 DB)
+  단언:  app_settings 에 signup_mode domain_allowlist·allowed_domains [] 를 직접 넣음(설정 API 는 이 상태를 만들지 않지만 M1 쓰기 경쟁으로 남을 수 있다) + 메일 있음 → 공개 가입 403 domain_not_allowed·행 증가 0 (Node DB 넷, D1 은 G-M2.35)
+  검출:  빈 허용 목록을 "제한 없음"으로 읽어 M1 의 정책 검사 경쟁(writeSetting 검사와 쓰기가 한 문장이 아님)이 fail-open 이 되는 것. M1 의 경쟁 분석이 이 단언에 기댄다
 ```
 
 【통과】
-- [ ] G-M2.7 ~ G-M2.9 통과
+- [ ] G-M2.7 ~ G-M2.9 · G-M2.34 · G-M2.35 통과
 
 ### ☐ M2.T3 — 하루 가입 상한 (Q13 의존)
 선행 M2.T1 · 산출 `packages/db/src/signup.ts`(상한 세기) · 되돌리기 커밋 1개
@@ -843,6 +859,8 @@ TC-M2.T4.c  최소 시간 기다림이 요청 수 제한을 우회하지 않는�
    - `GET /api/admin/settings/signup`, `PATCH /api/admin/settings/signup {signupMode?, allowedDomains?, signupRequiresApproval?, dailySignupCap?, defaultLimitUsd?, defaultMaxKeys?}`. 값 검사는 M1.T1 이 한다. 응답에 `mailConfigured`를 넣는다.
    - Q20 (가): `PUT /api/admin/settings/mail {provider:"resend", from, apiKey}`. 설치(`setup/index.ts`)와 같은 검사·같은 AAD(`app_settings.mail_settings.apiKey`)로 암호화한다.
    - Q20 (가): `POST /api/admin/settings/mail/test`. 관리자 자신에게 보내고, 관리자당 1시간 5회다.
+   - 설정 쓰기와 감사 기록 `settings.update`를 한 트랜잭션(D1 은 batch)으로 묶는다 (M1 리뷰). M1 `writeSetting`이 db(tx) 인자를 받거나 실행하지 않은 문장을 돌려주게 넓혀 M1 `auditStatement`와 같이 보낸다.
+   - 오래된 값 덮어쓰기를 막는다 (M1 리뷰). PATCH 는 바꾸는 키만 쓰고(키 단위), 요청에 그 키의 읽은 `updatedAt`을 실어 `updated_at`이 그대로일 때만 쓰는 조건부 UPDATE 로 한다. 0행이면 409 `stale_setting`.
 
 【테스트】
 ```
@@ -855,10 +873,16 @@ TC-M2.T5.b  메일 없는 설치에서 open 으로 못 바꾸고, 메일을 설�
 TC-M2.T5.c  메일 API 키는 암호화되어 저장되고 응답·감사 기록에 없다 (Q20 의존)
   단언:  PUT mail apiKey "re_x…" → DB mail_settings.apiKey 가 평문과 다름, 복호화 == 원문, GET 응답·audit_log 에 "re_x" 0건
   검출:  설치 경로와 다른 AAD·평문으로 저장해 settingsMailer 가 복호화에 실패하거나 키가 DB 에 평문으로 남는 것
+TC-M2.T5.d  설정 쓰기와 감사 기록은 같이 남거나 같이 남지 않는다 (M1 리뷰, 다섯 DB)
+  단언:  감사 기록 문장이 실패하게 만든 PATCH(예: 금지 detail) → 500·설정 행 그대로·audit 0. 정상 PATCH → 설정 행과 audit settings.update 1행 (sqlite·mysql·mariadb·pg, D1 batch)
+  검출:  설정을 쓴 뒤 감사 쓰기가 실패해 정책은 바뀌었는데 누가 바꿨는지 기록이 없는 것
+TC-M2.T5.e  오래된 값으로 덮어쓰지 않는다 (M1 리뷰, 다섯 DB)
+  단언:  두 관리자가 같은 updatedAt 을 읽고 dailySignupCap 을 각각 PATCH → 하나 200, 다른 하나 409 stale_setting, 최종 값 == 200 쪽 값, audit 1행. 다른 키를 동시에 PATCH 하면 둘 다 200 (키 단위)
+  검출:  읽은 값 전체를 다시 써서 다른 관리자가 방금 닫은 정책(closed)을 옛 화면의 open 으로 되돌리는 것
 ```
 
 【통과】
-- [ ] G-M2.23 ~ G-M2.25 통과
+- [ ] G-M2.23 ~ G-M2.25 · G-M2.36 ~ G-M2.39 통과
 
 ### ☐ M2.T7 — Node SQLite 동시 쓰기 (V29 의존). D1 트랜잭션은 결정됨 — 3단계 전 고침 PR #15 (`fix/d1-transaction`)
 선행 없음 (M2.T1 보다 먼저) · 산출 Node SQLite 연결을 만드는 자리(`packages/runtime/src/node.ts` 등)와 그 시험(`packages/auth/test/signup-policy/**`·`apps/server/test/signup/**`) · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-M2.T7.b`
@@ -937,6 +961,12 @@ TC-M2.T6.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-M2.31 | TC-M2.T7.b SQLite 겹친 쓰기 (V29) | [L] `pnpm -C packages/auth test -t "TC-M2.T7.b"` | 통과 = 1 |
 | G-M2.32 | (폐기) 재현 빨강 TC-M2.T7.a — D1 고침은 3단계 전 고침 PR #15 (`fix/d1-transaction`) | — | — |
 | G-M2.33 | 재현 빨강 TC-M2.T7.b | `node scripts/check-red.mjs --check G-M2.31 --since seal:M1` | 종료코드 0 |
+| G-M2.34 | TC-M2.T2.d domain_allowlist + 빈 도메인 → 403 (Node DB 넷, M1 리뷰) | [L] `pnpm -C packages/auth test -t "TC-M2.T2.d"` | 통과 = 4 |
+| G-M2.35 | TC-M2.T2.d (D1) | [L] `pnpm -C apps/server test:workers -t "TC-M2.T2.d"` | 통과 = 1 |
+| G-M2.36 | TC-M2.T5.d 설정 쓰기·감사 기록 함께 (Node DB 넷, M1 리뷰) | [L] `pnpm -C apps/server test:db -t "TC-M2.T5.d" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
+| G-M2.37 | TC-M2.T5.d (D1 batch) | [L] `pnpm -C apps/server test:workers -t "TC-M2.T5.d"` | 통과 = 1 |
+| G-M2.38 | TC-M2.T5.e 오래된 값 덮어쓰기 409 (Node DB 넷, M1 리뷰) | [L] `pnpm -C apps/server test:db -t "TC-M2.T5.e" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
+| G-M2.39 | TC-M2.T5.e (D1) | [L] `pnpm -C apps/server test:workers -t "TC-M2.T5.e"` | 통과 = 1 |
 | G-M2.16 | 타입 검사 | `pnpm -r typecheck` | 종료코드 0 |
 | G-M2.26 | TC-M2.T6.a CI 단계 잡 | grep `^\s+run: node scripts/gate\.mjs M2\b` in ci.yml | == 1 |
 | G-M2.27 | ruleset · TC-M2.T6.b | `node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere` | 종료코드 0 |
@@ -1469,6 +1499,10 @@ TC-M5.T4.b  ruleset 필수 검사가 이 잡을 포함한다
 **outputs** 없음. 새로 만드는 검사기·픽스처(`scripts/check-user-writes.mjs`, `test/check-user-writes.test.mjs`, `test/fixtures/user-writes/**`)는 모두 새 경로지만, 잠긴 단계의 `outputs`에 넣으면 앞 단계가 막히므로 넣지 않는다 (K6 과 같음).
 
 백로그 (M0 리뷰): 계획서 버전을 올릴 때마다 앞 단계의 막았던 확인 파일(`was_blocking: true`) `resolved_in`을 손으로 현재 버전으로 올려야 한다 (`check-verify resolved` 가 현재 버전과 같기를 요구, M0 에서 V12·V15·V18·V19·V20 을 v5.8 로). M6 에서 검사 방식(예: "현재 버전 이하")을 다시 본다.
+
+백로그 (M1 리뷰):
+- 2단계 audit 직접 INSERT 자리를 writeAudit 로 옮길 때 detail 키 재확인 (`admin-limits.ts`·`limits/*`·`keys/alerts.ts`·`queue/index.ts`, M1 `audit/` 의 금지 키·이메일 꼴 값 규칙에 걸리는지).
+- 5단계 SSO JIT 매핑이 role·status 등 권한 칼럼을 채울 수 없는지 시험.
 
 ### ☐ M6.T1 — 임시 코드·꺼진 테스트 회수
 선행 없음 · 산출 없음 (검사만) · 되돌리기 해당 없음
