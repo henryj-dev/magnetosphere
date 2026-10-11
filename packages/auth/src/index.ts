@@ -70,6 +70,17 @@ export interface AuthConfig {
   onUserCreated?: (e: { userId: string; via: "public" | "invite"; inviteId: string | null; ip: string | null }) => Promise<void>;
 }
 
+/** 기록에 붙일 오류 꼬리: 인자 가운데 Error 마다 "(이름:code)". message·stack·params·cause 는 넣지 않는다 */
+function errorTags(args: unknown[]): string {
+  const tags = args
+    .filter((a): a is Error => a instanceof Error)
+    .map((e) => {
+      const code = (e as { code?: unknown }).code;
+      return `(${e.name}${typeof code === "string" ? `:${code}` : ""})`;
+    });
+  return tags.length ? ` ${tags.join(" ")}` : "";
+}
+
 /** 가입·로그인 요청의 이메일을 다듬는다. Better Auth 도 소문자로 바꾸지만 앞뒤 공백까지 우리가 먼저 정리한다 (V26). */
 const EMAIL_PATHS = new Set(["/sign-up/email", "/sign-in/email"]);
 function normalizeEmailBody(ctx: { path: string; body?: any }) {
@@ -209,9 +220,11 @@ export function authOptions(cfg: AuthConfig) {
     // D1 만 끈다. 켜면 drizzle 이 begin 을 보내 D1 이 거부하고, runWithTransaction 을 쓰는 경로(/reset-password·가입 등)가 늘 500 이다 (TC-SEC.2.a).
     // 꺼도 재설정 토큰 소비는 한 번뿐이다: sqlite 어댑터의 consumeOne 이 DELETE … RETURNING 한 문장이라 행을 지운 요청 하나만 토큰을 얻는다.
     // 대신 D1 에서 SSO 사용자 확인은 SSO_USER_RESOLUTION_REQUIRES_NATIVE_TRANSACTIONS 로 거부되고, 여러 문장 쓰기(가입의 user·account)는 원자적이지 않다.
-    // Better Auth 내부 기록은 메시지만 남긴다. 덧붙는 인자(오류 객체, DB 오류의 params 에 이메일·이름이 든다)는 버린다 (M3.T2 보안 리뷰 L-1)
+    // Better Auth 내부 기록은 메시지와, 덧붙은 오류의 이름·문자열 code 만 남긴다 (M3.T2 보안 리뷰 L-1).
+    // 오류의 message·stack·params·cause 에는 이메일·이름·해시가 들 수 있어 버린다. 이름·code 는 500 의 원인을 가리기에 충분하다
     logger: {
-      log: (level: string, message: string) => (level === "error" ? console.error : level === "warn" ? console.warn : console.info)(`[auth] ${message}`),
+      log: (level: string, message: string, ...args: unknown[]) =>
+        (level === "error" ? console.error : level === "warn" ? console.warn : console.info)(`[auth] ${message}${errorTags(args)}`),
     },
     database: drizzleAdapter(cfg.database.db, { provider: cfg.database.provider, schema: cfg.database.schema, transaction: cfg.database.kind !== "d1" }),
     emailAndPassword: {
