@@ -783,7 +783,6 @@ export const GATES = {
       { id: "G-M2.44", how: "cmd", desc: "재현 빨강: TC-M2.T3.d 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M2.43 --since seal:M1" },
       { id: "G-M2.45", how: "test", desc: "TC-M2.T5.f 메일 설정의 보내는 주소는 이메일 형식이어야 한다 (리뷰 L4)", cmd: 'pnpm -C apps/server test -t "TC-M2.T5.f"', expectPassed: 1 },
       { id: "G-M2.46", how: "cmd", desc: "재현 빨강: TC-M2.T5.f 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M2.45 --since seal:M1" },
-      { id: "G-M2.47", how: "test", desc: "TC-M2.T8.d 인증 링크가 끝난 미인증 공개 가입 회원은 주기 작업이 지운다, 초대·관리자·키 있는 회원은 남긴다 (리뷰 H1)", cmd: 'pnpm -C apps/server test -t "TC-M2.T8.d"', expectPassed: 1 },
       // 타입·CI 단계 잡·필수 검사
       { id: "G-M2.16", how: "cmd", desc: "타입 검사", cmd: "pnpm -r typecheck" },
       { id: "G-M2.26", how: "grep", desc: "TC-M2.T6.a CI 단계 잡 (M2)", pattern: "^\\s+run: node scripts/gate\\.mjs M2\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },

@@ -27,6 +27,7 @@ export const RATE_LIMIT_RULES = {
   "/reset-password": { window: 300, max: 5 },
   "/reset-password/*": { window: 300, max: 10 },
   "/send-verification-email": { window: 300, max: 3 },
+  "/signup-confirmation": { window: 300, max: 5 },
 } as const;
 
 /** Better Auth 옵션 조각 */

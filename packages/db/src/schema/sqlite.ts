@@ -17,6 +17,7 @@ export const user = sqliteTable("user", {
   maxKeys: integer("max_keys"),
   isBootstrapAdmin: integer("is_bootstrap_admin", { mode: "boolean" }).default(false).notNull(),
   deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
+  signupOrigin: text("signup_origin").default("legacy").notNull(),
 });
 
 // 로그인 세션
@@ -28,6 +29,7 @@ export const session = sqliteTable("session", {
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).$onUpdate(() => new Date()).notNull(),
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
+  credentialFingerprint: text("credential_fingerprint"),
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
 }, (table) => [
   index("session_userId_idx").on(table.userId),

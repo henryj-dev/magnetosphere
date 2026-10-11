@@ -8,6 +8,7 @@
 //   GET  /__test/paths              auth.api 경로 목록
 //   ANY  /__test/bare/<경로>        서버 앞 판정 없이 운영 createAuth 의 handler 로 /api/auth/<경로> (TC-M2.T7.a)
 import { betterAuth } from "better-auth";
+import { hashPassword, verifyPassword } from "better-auth/crypto";
 import { authOptions, type MailMessage, type Mailer } from "@magnetosphere/auth";
 import { runAsInvite, type InviteGrant } from "@magnetosphere/auth/invite-context";
 import { createWorkersRuntime, type WorkersEnv } from "@magnetosphere/runtime/workers";
@@ -18,6 +19,7 @@ import { signupAuthHooks } from "../../src/signup/gate.ts";
 
 const outbox: MailMessage[] = [];
 const mailer: Mailer = { send: async (m) => void outbox.push(m) };
+const barriers = new Map<string, { reached: boolean; release: () => void; wait: Promise<void> }>();
 const randomIp = () => `198.18.${Math.floor(Math.random() * 256)}.${Math.floor(Math.random() * 254) + 1}`;
 
 interface Ctx {
@@ -49,6 +51,34 @@ export default {
         const b = (await req.json()) as { body: Record<string, unknown>; invite?: InviteGrant };
         const run = () => api.signUpEmail({ body: b.body });
         return settled(Response.json(await apiReply(b.invite ? runAsInvite(b.invite, run) : run())));
+      }
+      if (url.pathname === "/__test/api" && req.method === "POST") {
+        const b = await req.json() as { method: string; input: any };
+        const input = { ...b.input, ...(b.input.headers ? { headers: new Headers(b.input.headers) } : {}) };
+        return settled(Response.json(await apiReply(api[b.method](input))));
+      }
+      if (url.pathname === "/__test/barrier") {
+        const id = url.searchParams.get("id")!;
+        const point = barriers.get(id);
+        if (req.method === "DELETE") point?.release();
+        return Response.json({ reached: point?.reached ?? false });
+      }
+      if (url.pathname === "/__test/race" && req.method === "POST") {
+        const b = await req.json() as { id: string; path: string; body: any; cookie?: string; stage: "password" | "insert" };
+        let release!: () => void;
+        const point = { reached: false, release: () => release(), wait: new Promise<void>((r) => { release = r; }) };
+        barriers.set(b.id, point);
+        const pause = async () => { point.reached = true; await point.wait; };
+        const options = authOptions({ database: h, baseURL: String(env.BETTER_AUTH_URL), secret: String(env.BETTER_AUTH_SECRET), mailer, clientIp: runtime.clientIp, waitUntil, onMailError: () => {}, ...signupAuthHooks(h) });
+        if (b.stage === "password") (options.emailAndPassword as any).password = { hash: hashPassword, verify: async (input: any) => { const valid = await verifyPassword(input); await pause(); return valid; } };
+        else {
+          const before = options.databaseHooks.session.create.before;
+          options.databaseHooks.session.create.before = async (session: any, context: any) => { const checked = await before(session, context); await pause(); return checked; };
+        }
+        const auth = betterAuth(options);
+        const headers = { origin: String(env.BETTER_AUTH_URL), "content-type": "application/json", ...(b.cookie ? { cookie: b.cookie } : {}) };
+        try { return settled(await auth.handler(new Request(`${env.BETTER_AUTH_URL}/api/auth${b.path}`, { method: "POST", headers, body: JSON.stringify(b.body) }))); }
+        finally { barriers.delete(b.id); }
       }
       if (url.pathname === "/__test/internal" && req.method === "POST") {
         const b = (await req.json()) as { fn: "createUser" | "createOAuthUser"; email: string };

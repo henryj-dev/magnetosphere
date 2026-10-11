@@ -23,6 +23,7 @@ export const user = mysqlTable("user", {
   maxKeys: int("max_keys"),
   isBootstrapAdmin: boolean("is_bootstrap_admin").default(false).notNull(),
   deletedAt: datetime("deleted_at", { fsp: 3 }),
+  signupOrigin: varcharBin("signup_origin", { length: 16 }).default("legacy").notNull(),
 });
 
 // 로그인 세션
@@ -34,6 +35,7 @@ export const session = mysqlTable("session", {
   updatedAt: datetime("updated_at", { fsp: 3 }).$onUpdate(() => new Date()).notNull(),
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
+  credentialFingerprint: varcharBin("credential_fingerprint", { length: 64 }),
   userId: varchar("user_id", { length: 36 }).notNull().references(() => user.id, { onDelete: "cascade" }),
 }, (table) => [
   index("session_userId_idx").on(table.userId),

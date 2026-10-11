@@ -238,6 +238,7 @@ export async function runSetup(
       emailVerified: true,
       role: "admin",
       isBootstrapAdmin: true,
+      signupOrigin: "setup",
       createdAt: now,
       updatedAt: now,
     });

@@ -1,0 +1,2 @@
+ALTER TABLE `session` ADD `credential_fingerprint` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin;--> statement-breakpoint
+ALTER TABLE `user` ADD `signup_origin` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin DEFAULT 'legacy' NOT NULL;

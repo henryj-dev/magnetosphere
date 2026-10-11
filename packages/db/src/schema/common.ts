@@ -69,6 +69,11 @@ export const USER_ADDITIONAL_FIELDS = {
   isBootstrapAdmin: { type: "boolean", required: false, defaultValue: false, input: false },
   // 기본값이 없어 가입 본문에 넣으면 400 FIELD_NOT_ALLOWED, 회원정보 수정도 400 이다 (TC-M1.T4.b)
   deletedAt: { type: "date", required: false, input: false },
+  signupOrigin: { type: "string", required: false, defaultValue: "legacy", input: false, returned: false },
+} as const;
+
+export const SESSION_ADDITIONAL_FIELDS = {
+  credentialFingerprint: { type: "string", required: false, input: false, returned: false },
 } as const;
 
 export const TABLES: Record<string, Table> = {
@@ -91,6 +96,7 @@ export const TABLES: Record<string, Table> = {
       maxKeys: { name: "max_keys", kind: "integer", doc: "NULL 이면 설정 기본값" },
       isBootstrapAdmin: { name: "is_bootstrap_admin", kind: "boolean", notNull: true, default: false },
       deletedAt: { name: "deleted_at", kind: "timestamp", doc: "삭제(탈퇴) 시각. 개인정보를 지운 행이다 (Q9). NULL 이면 삭제되지 않음" },
+      signupOrigin: { name: "signup_origin", kind: "string", length: 16, exact: true, notNull: true, default: "legacy", doc: "서버 전용 가입 출처: public | invite | setup | legacy. 기존 미인증 행은 추정하지 않는다" },
     },
   },
   session: {
@@ -105,6 +111,7 @@ export const TABLES: Record<string, Table> = {
       updatedAt: { name: "updated_at", kind: "timestamp", notNull: true, onUpdateNow: true },
       ipAddress: { name: "ip_address", kind: "text" },
       userAgent: { name: "user_agent", kind: "text" },
+      credentialFingerprint: { name: "credential_fingerprint", kind: "string", length: 64, exact: true, doc: "서버 전용 credential HMAC. 비밀번호 변경 전 세션은 조회 때도 거부. NULL 은 기존·비비밀번호 세션" },
       userId: { name: "user_id", kind: "id", notNull: true, references: { table: "user", column: "id", onDelete: "cascade" } },
     },
     indexes: [{ name: "session_userId_idx", columns: ["userId"] }],

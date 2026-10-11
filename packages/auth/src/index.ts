@@ -9,7 +9,7 @@ import { APIError, createAuthMiddleware } from "better-auth/api";
 import { AUTH_SCHEMA_OPTIONS } from "@magnetosphere/db/src/auth-options.ts";
 import { countSignup, decideSignup, loadSignupInputs, VERIFY_EMAIL_EXPIRES_S, type SignupInputs } from "@magnetosphere/db/src/signup.ts";
 import { currentInvite } from "./invite-context.ts";
-import { lockOutPassword, markDispute, takeDispute } from "./signup-dispute.ts";
+import { queueConfirmationMail, signupConfirmation } from "./signup-confirmation.ts";
 import { resetPasswordMessage, verifyEmailMessage } from "./mail/messages.ts";
 import type { MailMessage, Mailer } from "./mail/types.ts";
 import { CLIENT_IP_HEADER, ipAddressOptions, rateLimitOptions, withClientIp, type ClientIp } from "./rate-limit.ts";
@@ -140,11 +140,11 @@ function userCreateGuard(cfg: AuthConfig) {
   const inputs = inputsOf(cfg);
   return async (user: Record<string, unknown>, ctx?: { path?: string } | null) => {
     const i = await inputs();
-    if (!i.adminExists) return { data: { ...user, monthlyLimitUsd: user.monthlyLimitUsd ?? i.settings.default_limit_usd } };
+    if (!i.adminExists) return { data: { ...user, signupOrigin: viaOf(ctx) ?? "legacy", monthlyLimitUsd: user.monthlyLimitUsd ?? i.settings.default_limit_usd } };
     const via = viaOf(ctx);
     const d = via ? decideSignup({ inputs: i, email: user.email, via, invite: currentInvite() }) : ({ ok: false, code: "signup_closed" } as const);
     if (!d.ok) throw new APIError("BAD_REQUEST", { code: d.code.toUpperCase(), message: d.code });
-    return { data: { ...user, ...d.data } };
+    return { data: { ...user, ...d.data, signupOrigin: via } };
   };
 }
 
@@ -192,12 +192,13 @@ function trimSignUpResponse(ctx: { path: string; json: (v: unknown) => unknown; 
  * Better Auth 옵션. 스키마 비교(TC-S3.T1.e)와 SSO 경로 검사(check-sso-paths.mjs)가 이 함수의 결과를 쓴다.
  * 서버는 이것으로 betterAuth() 를 직접 만들지 않고 createAuth 를 쓴다 (직접 만들면 handler 가 감싸지지 않는다).
  */
-export function authOptions(cfg: AuthConfig, late: { api?: { requestPasswordReset(a: { body: { email: string; redirectTo: string } }): Promise<unknown> } } = {}) {
+export function authOptions(cfg: AuthConfig) {
   // 세션·토큰 서명 키. 짧으면 추측·무차별 대입에 약하므로 시작을 거부한다 (S3 보안 리뷰 L1)
   if (typeof cfg.secret !== "string" || cfg.secret.length < MIN_SECRET_LENGTH) {
     throw new Error(`BETTER_AUTH_SECRET 은 ${MIN_SECRET_LENGTH}자 이상이어야 한다 (지금 ${cfg.secret?.length ?? 0}자)`);
   }
   const deliver = deliverer(cfg);
+  const confirmation = signupConfirmation(cfg, deliver);
   const { db, schema } = cfg.database as { db: any; schema: any };
   return {
     ...AUTH_SCHEMA_OPTIONS,
@@ -216,41 +217,52 @@ export function authOptions(cfg: AuthConfig, late: { api?: { requestPasswordRese
       sendResetPassword: async ({ user, url }) => deliver(resetPasswordMessage(user.email, url)),
       // 재설정은 그 회원의 세션을 모두 끊는다 (계획서 4.5, 실행판 M4 몫을 M2 보안 리뷰 H1 로 당겨 옴)
       revokeSessionsOnPasswordReset: true,
-      // 재설정 링크는 그 주소로 갔다 — 성공하면 메일함 주인이다. Better Auth 는 emailVerified 를 바꾸지 않으므로 여기서 true 로 (H1)
+      // 성공한 재설정은 메일 소유와 새 비밀번호 설정을 함께 증명한다. 초대·관리자의 인증 정책은 바꾸지 않는다.
       onPasswordReset: async ({ user }) => {
+        const [current] = await db.select().from(schema.user).where(eq(schema.user.id, user.id)).limit(1);
+        if (current?.role !== "member" || !["public", "legacy"].includes(current.signupOrigin) || current.deletedAt) return;
         await db.update(schema.user).set({ emailVerified: true, updatedAt: new Date() }).where(eq(schema.user.id, user.id));
-      },
-      // 인증 전 계정에 같은 이메일로 공개 가입이 다시 오면 다툼 표시 (H1, signup-dispute.ts). 백그라운드 작업이라 응답은 그대로다
-      onExistingUserSignUp: async ({ user }) => {
-        if (user.emailVerified || currentInvite()) return;
-        await markDispute(db, schema, user.id);
       },
     },
     emailVerification: {
       sendOnSignUp: true,
       expiresIn: VERIFY_EMAIL_EXPIRES_S,
-      sendVerificationEmail: async ({ user, url }) => deliver(verifyEmailMessage(user.email, url)),
-      // 다툼 표시가 있는 계정이 처음 인증되면 비밀번호를 아무도 모르는 값으로 바꾸고 세션을 지운 뒤 재설정 메일을 보낸다 (H1)
-      afterEmailVerification: async (user) => {
-        if (!(await takeDispute(db, schema, user.id))) return;
-        await lockOutPassword(db, schema, user.id);
-        if (late.api) await late.api.requestPasswordReset({ body: { email: user.email, redirectTo: "/" } });
-        else console.warn("[auth] 다툼 계정의 재설정 메일을 보낼 auth.api 가 없다 (createAuth 밖에서 만든 구성)");
+      sendVerificationEmail: async ({ user, url }) => {
+        if ((user as any).signupOrigin === "invite") return deliver(verifyEmailMessage(user.email, url));
+        queueConfirmationMail(user.id);
       },
+      beforeEmailVerification: async (user) => confirmation.coreVerificationGuard(user),
     },
     // 로그인·가입·비밀번호 재설정 요청 수 제한. 저장소는 AUTH_SCHEMA_OPTIONS 의 DB(rate_limit)
     rateLimit: rateLimitOptions(AUTH_SCHEMA_OPTIONS.rateLimit),
     // AUTH_SCHEMA_OPTIONS 는 as const 라 plugins 가 읽기 전용 튜플이다. BetterAuthOptions 는 바꿀 수 있는 배열을 받으므로 복사한다 (같은 플러그인 객체)
-    plugins: [...AUTH_SCHEMA_OPTIONS.plugins],
+    plugins: [...AUTH_SCHEMA_OPTIONS.plugins, confirmation.plugin],
     disabledPaths: SSO_DISABLED_PATHS,
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         await signUpGate(cfg)(ctx);
-        return normalizeEmailBody(ctx);
+        const normalized = normalizeEmailBody(ctx);
+        if (normalized) ctx.body = normalized.context.body;
+        await confirmation.blockCoreVerification(ctx);
+        const blocked = await confirmation.guardSession(ctx);
+        if (blocked) return blocked;
+        await confirmation.loginSnapshot(ctx);
+        const changed = await confirmation.changePassword(ctx);
+        if (changed) return changed;
+        return normalized;
       }),
-      after: createAuthMiddleware(async (ctx) => trimSignUpResponse(ctx as any)),
+      after: createAuthMiddleware(async (ctx) => {
+        await confirmation.guardSignInResponse(ctx);
+        const blocked = await confirmation.guardSessionResponse(ctx);
+        if (blocked) return blocked;
+        await confirmation.sendQueuedMail(ctx);
+        return trimSignUpResponse(ctx as any);
+      }),
     },
-    databaseHooks: { user: { create: { before: userCreateGuard(cfg), after: userCreated(cfg) } } },
+    databaseHooks: {
+      user: { create: { before: userCreateGuard(cfg), after: userCreated(cfg) } },
+      session: { create: { before: confirmation.sessionBefore, after: confirmation.sessionAfter } },
+    },
     advanced: {
       ipAddress: ipAddressOptions,
       backgroundTasks: { handler: cfg.waitUntil },
@@ -268,9 +280,6 @@ export function authOptions(cfg: AuthConfig, late: { api?: { requestPasswordRese
  * x-magnetosphere-client-ip 를 지어 넣어 요청 수 제한을 통째로 우회한다. api 는 서버 안 호출용(auth.api)이다.
  */
 export function createAuth(cfg: AuthConfig) {
-  // 다툼 계정의 재설정 메일(afterEmailVerification)이 이 인스턴스의 auth.api 를 부른다
-  const late: Parameters<typeof authOptions>[1] = {};
-  const auth = betterAuth(authOptions(cfg, late));
-  late.api = auth.api as any;
+  const auth = betterAuth(authOptions(cfg));
   return { handler: withClientIp(auth.handler, cfg.clientIp), api: auth.api };
 }

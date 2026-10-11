@@ -7,6 +7,7 @@ import { attempt, body, mail } from "../../../../packages/auth/test/signup-polic
 import { answerOf } from "../verify-p3/rig.ts";
 import { tcM2T1a, tcM2T3a, tcM2T5d, tcM2T5e, tcM2T8a, tcM2T8b, tcM2T8c } from "./checks.ts";
 import { startSignupWorker } from "./d1-rig.ts";
+import { tcM2T8e, tcM2T8f, tcM2T8g } from "./confirmation-checks.ts";
 
 let w: Awaited<ReturnType<typeof startSignupWorker>>;
 beforeAll(async () => {
@@ -36,5 +37,8 @@ describe("가입 정책 — Workers + D1", () => {
   it("TC-M2.T8.a Workers + D1: 선점 → 피해자 가입 → 피해자 인증 → 공격자 비밀번호 로그인 401·세션 0, 재설정 뒤 피해자 로그인 200 (보안 리뷰 H1)", () => tcM2T8a(w.rig));
   it("TC-M2.T8.b Workers + D1: 다툼 없는 정상 가입 → 인증 → 원래 비밀번호 로그인 200·재설정 메일 없음 (보안 리뷰 H1 대조)", () => tcM2T8b(w.rig));
   it("TC-M2.T8.c Workers + D1: 재설정은 다른 세션을 모두 끊고 emailVerified 를 true 로 한다 (보안 리뷰 H1)", () => tcM2T8c(w.rig));
+  it("TC-M2.T8.e Workers + D1: 최초·재발송 GET은 읽기 전용, 비밀번호 확인 POST만 인증한다", () => tcM2T8e(w.rig));
+  it("TC-M2.T8.f Workers + D1: Origin·위조·core GET 차단, 동시 인증은 하나만 성공", () => tcM2T8f(w.rig));
+  it("TC-M2.T8.g Workers + D1: 이메일 재생성·재설정 뒤 옛 링크 거부", () => tcM2T8g(w.rig));
   it("TC-M2.T5.e Workers + D1: 같은 updatedAt 으로 두 관리자가 같은 키 PATCH → 200 하나·409 stale_setting 하나, 다른 키는 둘 다 200 (M1 리뷰)", () => tcM2T5e(w.rig));
 });

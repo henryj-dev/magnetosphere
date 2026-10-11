@@ -213,7 +213,7 @@ async function linkTo(rig: HttpRig, to: string, re: RegExp) {
   const u = new URL(url);
   return u.pathname + u.search;
 }
-const VERIFY = /\/verify-email\?/;
+const VERIFY = /\/signup-confirmation\?/;
 const RESET = /\/reset-password\//;
 
 async function signIn(rig: HttpRig, email: string, password: string) {
@@ -250,12 +250,16 @@ export async function tcM2T8a(rig: HttpRig) {
   expect((await rig.call("POST", "/api/auth/send-verification-email", { body: { email: victim } })).status).toBe(200);
   const verify = await linkTo(rig, victim, VERIFY);
   expect(verify).not.toBeNull();
-  expect((await rig.call("GET", verify!)).status).toBeLessThan(400);
-  expect((await rig.op("user", victim))?.emailVerified).toBe(true);
+  expect((await rig.call("GET", verify!)).status).toBe(200);
+  expect((await rig.op("user", victim))?.emailVerified).toBe(false);
+  const token = new URL(verify!, "http://test").searchParams.get("token");
+  expect((await rig.call("POST", "/api/auth/signup-confirmation", { body: { token, password: VICTIM_PW } })).status).toBe(401);
   const attacker = await signIn(rig, victim, ATTACKER_PW);
-  expect(attacker.status, attacker.body).toBe(401);
+  expect(attacker.status, attacker.body).toBe(403);
   expect(await rig.op("sessionsOf", victim)).toBe(0);
-  // 피해자는 재설정 메일로 비밀번호를 정하고 로그인한다
+  // 모르는 가입 비밀번호는 메일함 주인이 재설정한다. 완료 전까지는 인증되지 않는다.
+  expect((await rig.call("POST", "/api/auth/request-password-reset", { body: { email: victim, redirectTo: "/" } })).status).toBe(200);
+  expect((await rig.op("user", victim))?.emailVerified).toBe(false);
   expect((await resetWith(rig, victim, VICTIM_PW)).status).toBe(200);
   expect((await signIn(rig, victim, VICTIM_PW)).status).toBe(200);
   expect((await signIn(rig, victim, ATTACKER_PW)).status).toBe(401);
@@ -267,7 +271,10 @@ export async function tcM2T8b(rig: HttpRig) {
   const e = mail("t8b");
   expect((await rig.signUp(body(e, { password: VICTIM_PW }))).status).toBe(200);
   const verify = await linkTo(rig, e, VERIFY);
-  expect((await rig.call("GET", verify!)).status).toBeLessThan(400);
+  expect((await rig.call("GET", verify!)).status).toBe(200);
+  expect((await rig.op("user", e))?.emailVerified).toBe(false);
+  const token = new URL(verify!, "http://test").searchParams.get("token");
+  expect((await rig.call("POST", "/api/auth/signup-confirmation", { body: { token, password: VICTIM_PW } })).status).toBe(200);
   const r = await signIn(rig, e, VICTIM_PW);
   expect(r.status, r.body).toBe(200);
   expect(await linkTo(rig, e, RESET)).toBeNull();

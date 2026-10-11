@@ -17,6 +17,7 @@ export const user = pgTable("user", {
   maxKeys: integer("max_keys"),
   isBootstrapAdmin: boolean("is_bootstrap_admin").default(false).notNull(),
   deletedAt: timestamp("deleted_at"),
+  signupOrigin: varchar("signup_origin", { length: 16 }).default("legacy").notNull(),
 });
 
 // 로그인 세션
@@ -28,6 +29,7 @@ export const session = pgTable("session", {
   updatedAt: timestamp("updated_at").$onUpdate(() => new Date()).notNull(),
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
+  credentialFingerprint: varchar("credential_fingerprint", { length: 64 }),
   userId: varchar("user_id", { length: 36 }).notNull().references(() => user.id, { onDelete: "cascade" }),
 }, (table) => [
   index("session_userId_idx").on(table.userId),
