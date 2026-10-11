@@ -139,6 +139,12 @@ export const OPS = {
     await db.delete(s.rateLimit).where(like(s.rateLimit.key, "signup-%"));
     await db.delete(s.auditLog).where(eq(s.auditLog.action, "alert.signup_cap"));
   },
+  /** 그 이메일 회원의 세션 수 */
+  async sessionsOf(db: AnyDb, s: Schema, email: string) {
+    const [u] = await db.select({ id: s.user.id }).from(s.user).where(byEmail(s, email));
+    if (!u) return 0;
+    return (await db.select({ id: s.session.id }).from(s.session).where(eq(s.session.userId, u.id))).length;
+  },
   /** 회원 행을 지운다 (account·session 도). 다음 단언의 행 수를 0 에서 다시 센다 */
   async deleteMembers(db: AnyDb, s: Schema) {
     const members = await db.select({ id: s.user.id }).from(s.user).where(eq(s.user.role, "member"));

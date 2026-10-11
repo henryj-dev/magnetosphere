@@ -204,3 +204,93 @@ export async function tcM2T5e(rig: HttpRig) {
   expect([ka.status, kb.status], `${ka.body} / ${kb.body}`).toEqual([200, 200]);
   expect(await rig.op("audits", "settings.update")).toBe(before + 3);
 }
+
+/** 메일 상자에서 이 주소로 간 마지막 링크 가운데 경로가 re 에 맞는 것의 경로+쿼리 */
+async function linkTo(rig: HttpRig, to: string, re: RegExp) {
+  const m = (await rig.outbox()).filter((x) => x.to === to.toLowerCase() && re.test(x.text)).at(-1);
+  const url = m?.text.match(/https?:\/\/\S+/g)?.find((u) => re.test(u));
+  if (!url) return null;
+  const u = new URL(url);
+  return u.pathname + u.search;
+}
+const VERIFY = /\/verify-email\?/;
+const RESET = /\/reset-password\//;
+
+async function signIn(rig: HttpRig, email: string, password: string) {
+  return rig.call("POST", "/api/auth/sign-in/email", { body: { email, password } });
+}
+
+/** 재설정 링크(/reset-password/<토큰>)로 새 비밀번호를 정한다 */
+async function resetWith(rig: HttpRig, email: string, newPassword: string) {
+  const link = await linkTo(rig, email, RESET);
+  if (!link) throw new Error(`재설정 메일이 없다: ${email}`);
+  const token = link.split("?")[0].split("/").at(-1);
+  return rig.call("POST", "/api/auth/reset-password", { body: { newPassword, token } });
+}
+
+const ATTACKER_PW = "attacker-horse-battery-1";
+const VICTIM_PW = "victim-horse-battery-22";
+
+async function openInstalled(rig: HttpRig) {
+  await installed(rig);
+  await rig.op("setSetting", "signup_mode", "open");
+  await rig.op("newDay");
+}
+
+/**
+ * TC-M2.T8.a 미인증 계정 선점으로 계정을 가로채지 못한다 (보안 리뷰 H1). 공격자가 피해자 이메일로 먼저 가입 → 피해자가 가입(가짜 200)
+ * → 피해자가 인증 메일을 다시 받아 인증 → 공격자 비밀번호 로그인 401·그 계정 세션 0, 피해자에게 재설정 메일 → 재설정 뒤 피해자 로그인 200
+ */
+export async function tcM2T8a(rig: HttpRig) {
+  await openInstalled(rig);
+  const victim = mail("t8a-victim");
+  expect((await rig.signUp(body(victim, { password: ATTACKER_PW }))).status).toBe(200);
+  const dup = await attempt(rig, () => rig.signUp(body(victim, { password: VICTIM_PW })));
+  expect({ status: dup.status, user: dup.user }).toEqual({ status: 200, user: 0 });
+  expect((await rig.call("POST", "/api/auth/send-verification-email", { body: { email: victim } })).status).toBe(200);
+  const verify = await linkTo(rig, victim, VERIFY);
+  expect(verify).not.toBeNull();
+  expect((await rig.call("GET", verify!)).status).toBeLessThan(400);
+  expect((await rig.op("user", victim))?.emailVerified).toBe(true);
+  const attacker = await signIn(rig, victim, ATTACKER_PW);
+  expect(attacker.status, attacker.body).toBe(401);
+  expect(await rig.op("sessionsOf", victim)).toBe(0);
+  // 피해자는 재설정 메일로 비밀번호를 정하고 로그인한다
+  expect((await resetWith(rig, victim, VICTIM_PW)).status).toBe(200);
+  expect((await signIn(rig, victim, VICTIM_PW)).status).toBe(200);
+  expect((await signIn(rig, victim, ATTACKER_PW)).status).toBe(401);
+}
+
+/** TC-M2.T8.b 다툼이 없는 정상 가입은 인증 뒤 원래 비밀번호로 로그인된다, 재설정 메일 없음 (보안 리뷰 H1 대조) */
+export async function tcM2T8b(rig: HttpRig) {
+  await openInstalled(rig);
+  const e = mail("t8b");
+  expect((await rig.signUp(body(e, { password: VICTIM_PW }))).status).toBe(200);
+  const verify = await linkTo(rig, e, VERIFY);
+  expect((await rig.call("GET", verify!)).status).toBeLessThan(400);
+  const r = await signIn(rig, e, VICTIM_PW);
+  expect(r.status, r.body).toBe(200);
+  expect(await linkTo(rig, e, RESET)).toBeNull();
+}
+
+/** TC-M2.T8.c 비밀번호 재설정은 그 회원의 다른 세션을 모두 끊고, 미인증 회원이면 emailVerified 를 true 로 한다 (메일함 소유 증명, 보안 리뷰 H1) */
+export async function tcM2T8c(rig: HttpRig) {
+  await openInstalled(rig);
+  // (1) 인증된 회원의 세션 둘 → 재설정 → 세션 0
+  const m = await login(rig, "member");
+  await signIn(rig, m.email, PASSWORD);
+  expect(await rig.op("sessionsOf", m.email)).toBe(2);
+  expect((await rig.call("POST", "/api/auth/request-password-reset", { body: { email: m.email, redirectTo: "/" } })).status).toBe(200);
+  expect((await resetWith(rig, m.email, "new-horse-battery-333")).status).toBe(200);
+  expect(await rig.op("sessionsOf", m.email)).toBe(0);
+  const old = await rig.call("GET", "/api/auth/get-session", { cookie: m.cookie });
+  expect(old.json?.session ?? null).toBeNull();
+  // (2) 미인증 회원 → 재설정 → emailVerified true·로그인 200
+  const e = mail("t8c-unverified");
+  expect((await rig.signUp(body(e))).status).toBe(200);
+  expect((await rig.op("user", e))?.emailVerified).toBe(false);
+  expect((await rig.call("POST", "/api/auth/request-password-reset", { body: { email: e, redirectTo: "/" } })).status).toBe(200);
+  expect((await resetWith(rig, e, "reset-horse-battery-444")).status).toBe(200);
+  expect((await rig.op("user", e))?.emailVerified).toBe(true);
+  expect((await signIn(rig, e, "reset-horse-battery-444")).status).toBe(200);
+}

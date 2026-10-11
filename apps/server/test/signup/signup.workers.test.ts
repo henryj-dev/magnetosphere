@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { tcM2T1b, tcM2T1g, tcM2T2d } from "../../../../packages/auth/test/signup-policy/checks.ts";
 import { attempt, body, mail } from "../../../../packages/auth/test/signup-policy/rig.ts";
 import { answerOf } from "../verify-p3/rig.ts";
-import { tcM2T1a, tcM2T3a, tcM2T5d, tcM2T5e } from "./checks.ts";
+import { tcM2T1a, tcM2T3a, tcM2T5d, tcM2T5e, tcM2T8a, tcM2T8b, tcM2T8c } from "./checks.ts";
 import { startSignupWorker } from "./d1-rig.ts";
 
 let w: Awaited<ReturnType<typeof startSignupWorker>>;
@@ -33,5 +33,8 @@ describe("가입 정책 — Workers + D1", () => {
   it("TC-M2.T3.a Workers + D1: 상한 3 — 차례 4건 +3·4번째 403 signup_cap·알림 1행, 동시 10건은 센 값 == 생긴 공개 가입 수, 실패한 가입은 세지 않음, 초대는 상한 뒤에도 +1 (Q13 의존)", () =>
     tcM2T3a(w.rig, w.rig, { atomicSignup: false }));
   it("TC-M2.T5.d Workers + D1: 감사 기록 문장이 실패한 PATCH → 500·설정 그대로·감사 0 (batch 하나), 정상 PATCH → 설정과 감사 1행 (M1 리뷰)", () => tcM2T5d(w.rig));
+  it("TC-M2.T8.a Workers + D1: 선점 → 피해자 가입 → 피해자 인증 → 공격자 비밀번호 로그인 401·세션 0, 재설정 뒤 피해자 로그인 200 (보안 리뷰 H1)", () => tcM2T8a(w.rig));
+  it("TC-M2.T8.b Workers + D1: 다툼 없는 정상 가입 → 인증 → 원래 비밀번호 로그인 200·재설정 메일 없음 (보안 리뷰 H1 대조)", () => tcM2T8b(w.rig));
+  it("TC-M2.T8.c Workers + D1: 재설정은 다른 세션을 모두 끊고 emailVerified 를 true 로 한다 (보안 리뷰 H1)", () => tcM2T8c(w.rig));
   it("TC-M2.T5.e Workers + D1: 같은 updatedAt 으로 두 관리자가 같은 키 PATCH → 200 하나·409 stale_setting 하나, 다른 키는 둘 다 200 (M1 리뷰)", () => tcM2T5e(w.rig));
 });
