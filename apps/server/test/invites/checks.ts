@@ -35,6 +35,7 @@ const create = (e: RouteEnv, user: string, body: unknown) => call(e, "POST", "/a
 const ms = (v: unknown) => (v instanceof Date ? v.getTime() : new Date(v as string | number).getTime());
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const inviteById = async (e: RouteEnv, id: string) => (await e.h.db.select().from(e.h.schema.invites).where(eq(e.h.schema.invites.id, id)))[0];
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const isLive = (r: any) => r.usedAt === null && r.revokedAt === null && ms(r.expiresAt) > Date.now();
 
 /**
@@ -112,60 +113,43 @@ export async function tcM3T1g(e: RouteEnv, variants: readonly Variant[]) {
       expect((await inviteById(e, b)).revokedAt, `${label} 끼어든 B 는 취소된다`).not.toBeNull();
       const added = (await revokes()).filter((x: string) => !before.includes(x));
       expect({ label, revoked: added }).toEqual({ label, revoked: [b] });
+      // 감사 행 id 는 경로와 관계없이 UUID v4 꼴이다 (D1 의 INSERT … SELECT 도 같은 꼴로 만든다)
+      const ids = (await e.h.db.select({ id: e.h.schema.auditLog.id }).from(e.h.schema.auditLog)).map((r: { id: string }) => r.id);
+      expect(ids.filter((id: string) => !UUID.test(id)), label).toEqual([]);
     } finally {
       await app.close();
     }
   }
 }
 
-/** TC-M3.T1.h 같은 이메일 동시 재초대 → 살아 있는 초대 1개 (승자는 (expires_at, id) 가 큰 쪽, 진 쪽은 409 invite_conflict·링크 없음) */
+/**
+ * TC-M3.T1.h 같은 이메일 재초대는 차례로 대체한다 (초대 쓰기 직렬화).
+ *   1. 끼어든 초대: 만들기 트랜잭션·batch 직전에 같은 이메일의 살아 있는 초대가 생겨도 새 초대가 그것을 취소한다 (201, reinvite 감사 1행).
+ *   2. 이 변형의 앱으로 같은 이메일 6개 동시: 모두 201, 살아 있는 초대 1개 = 201 하나(해시 일치), 나머지 201 은 취소, 감사 = 실제 취소.
+ */
 export async function tcM3T1h(e: RouteEnv, variants: readonly Variant[]) {
   const admin = await addUser(e.h, { role: "admin" });
   const run = randomUUID().slice(0, 8);
-  const liveOf = async (email: string) => (await invites(e)).filter((r: any) => r.email === email && isLive(r));
-  const supersededTargets = async () =>
-    (await audits(e, "invite.revoke")).filter((a: any) => JSON.parse(a.detail).reason === "superseded").map((a: any) => a.target as string).sort();
   for (const [label, d1] of variants) {
     const { app, queue } = await interleaved(e, d1);
     try {
-      // 내 트랜잭션이 커밋된 뒤, 정리 전에 서로의 취소를 못 본 동시 요청의 초대가 생긴다 (첫 번째 호출 = 만들기, 두 번째 = 정리)
-      // 더 큰 형제(만료 30일) → 나는 진다
-      const big = `h-big-${d1}-${run}@example.com`;
+      const email = `h-cut-${d1}-${run}@example.com`;
       let sib = "";
-      queue.push(undefined, async () => void (sib = await rawInvite(e, { email: big, createdBy: admin, expiresAt: new Date(Date.now() + 30 * DAY) })));
-      const lose = await call(app, "POST", "/api/admin/invites", { user: admin, body: { role: "member", email: big } });
-      expect({ label, status: lose.status, error: lose.json?.error, link: lose.json?.link }).toEqual({ label, status: 409, error: "invite_conflict", link: undefined });
-      expect(lose.text).not.toContain("/invite#");
-      expect((await liveOf(big)).map((r: any) => r.id), label).toEqual([sib]);
-      // 더 작은 형제(만료 1일) → 내가 이기고 형제를 취소한다
-      const small = `h-small-${d1}-${run}@example.com`;
-      let low = "";
-      const before = await supersededTargets();
-      queue.push(undefined, async () => void (low = await rawInvite(e, { email: small, createdBy: admin, expiresAt: new Date(Date.now() + DAY) })));
-      const win = await call(app, "POST", "/api/admin/invites", { user: admin, body: { role: "member", email: small } });
-      expect(win.status, `${label} ${win.text}`).toBe(201);
-      expect((await liveOf(small)).map((r: any) => r.id), label).toEqual([win.json.invite.id]);
-      expect((await inviteById(e, low)).revokedAt, label).not.toBeNull();
-      const added = (await supersededTargets()).filter((x: string) => !before.includes(x));
-      expect(added.includes(low), label).toBe(true);
-      // 진 요청의 자기 행은 취소됐고 superseded 감사가 있다. 이긴 형제(sib)에는 취소 기록이 없다
-      const loser = (await invites(e)).filter((r: any) => r.email === big && r.id !== sib);
-      expect(loser.map((r: any) => r.revokedAt !== null), label).toEqual([true]);
-      const targets = await supersededTargets();
-      expect([targets.includes(loser[0].id), targets.includes(sib)], label).toEqual([true, false]);
+      queue.push(async () => void (sib = await rawInvite(e, { email, createdBy: admin, expiresAt: new Date(Date.now() + 30 * DAY) })));
+      const r = await call(app, "POST", "/api/admin/invites", { user: admin, body: { role: "member", email } });
+      expect(r.status, `${label} ${r.text}`).toBe(201);
+      const live = (await invites(e)).filter((x: any) => x.email === email && isLive(x));
+      expect(live.map((x: any) => x.id), label).toEqual([r.json.invite.id]);
+      expect((await inviteById(e, sib)).revokedAt, label).not.toBeNull();
+      const rv = (await audits(e, "invite.revoke")).filter((a: any) => a.target === sib);
+      expect(rv.map((a: any) => JSON.parse(a.detail)), label).toEqual([{ reason: "reinvite", replacedBy: r.json.invite.id }]);
+      const o = await sameEmailRound(e, "same-email", 6, app);
+      expect({ label, failures: o.failures, created: o.created, live: o.live }).toEqual({ label, failures: [], created: 6, live: 1 });
     } finally {
       await app.close();
     }
   }
-  // 실제로 겹친 요청 여럿: 살아 있는 초대는 정확히 1개이고 그것은 201 을 받은 것 중 하나다
-  const email = `h-many-${run}@example.com`;
-  const rs = await Promise.all(Array.from({ length: 6 }, (_, i) => create(e, admin, { role: "member", email, expiresInDays: 1 + (i % 3) })));
-  expect(rs.every((r) => r.status === 201 || (r.status === 409 && r.json?.error === "invite_conflict" && r.json?.link === undefined)), rs.map((r) => r.text).join("\n")).toBe(true);
-  const live = await liveOf(email);
-  expect(live).toHaveLength(1);
-  expect(rs.filter((r) => r.status === 201).map((r) => r.json.invite.id)).toContain(live[0].id);
 }
-
 
 type Res = Awaited<ReturnType<typeof call>>;
 
@@ -206,20 +190,19 @@ async function capturing<T>(e: RouteEnv, fn: () => Promise<T>): Promise<{ value:
   }
 }
 
-/** 응답이 201(링크 있음)·409 invite_conflict(링크 없음) 말고 다른 것이면 실패 문장 */
+/** 응답이 201(링크 있음) 말고 다른 것이면 실패 문장 (초대 쓰기가 직렬이라 409·500 은 없어야 한다) */
 function oddResponses(rs: Res[], printed: string[]): string[] {
   const out: string[] = [];
   const prefix = `${BASE}/invite#`;
   for (const r of rs) {
     if (r.status === 201 && typeof r.json?.link === "string" && r.json.link.startsWith(prefix) && r.json.invite?.id) continue;
-    if (r.status === 409 && JSON.stringify(r.json) === JSON.stringify({ error: "invite_conflict" }) && !r.text.includes("/invite#")) continue;
     out.push(`응답 ${r.status} ${r.text.slice(0, 200)}`);
   }
   if (out.length && printed.length) out.push(`그때 기록: ${printed.join(" | ").slice(0, 2000)}`);
   return out;
 }
 
-/** 읽은 expires_at 을 그대로 매개변수로 넘겨 같은 행이 잡히는지 (MySQL datetime(3)·시간대·정밀도 왕복). settleSiblings 의 (expires_at, id) 비교가 이 왕복에 기댄다 */
+/** 읽은 expires_at 을 그대로 매개변수로 넘겨 같은 행이 잡히는지 (MySQL datetime(3)·시간대·정밀도 왕복). 만료 조건 비교가 이 왕복에 기댄다 */
 async function expiresRoundTrip(e: RouteEnv, rows: any[]): Promise<string[]> {
   const t = e.h.schema.invites;
   const out: string[] = [];
@@ -230,12 +213,15 @@ async function expiresRoundTrip(e: RouteEnv, rows: any[]): Promise<string[]> {
   return out;
 }
 
-/** 같은 이메일 n 개 동시: 살아 있는 초대 1개 = 201 하나(id·토큰 해시), 나머지 201 은 취소, 409 행도 취소, 감사 = 실제 취소 */
-async function sameEmailRound(e: RouteEnv, kind: RoundObservation["kind"], n: number): Promise<RoundObservation> {
+/**
+ * 같은 이메일 n 개 동시 (via 의 앱으로 보내고 e 의 DB 를 읽는다): 모두 201, 요청마다 행 1개, 살아 있는 초대 1개 = 201 하나(id·sha256(토큰) == token_hash),
+ * 나머지 201 은 취소됨, invite.create n 행, invite.revoke 는 취소된 행마다 정확히 1행(reason reinvite, replacedBy 는 같은 이메일의 다른 초대).
+ */
+async function sameEmailRound(e: RouteEnv, kind: RoundObservation["kind"], n: number, via: RouteEnv = e): Promise<RoundObservation> {
   const admin = await addUser(e.h, { role: "admin" });
   const email = `i-${kind}-${randomUUID().slice(0, 8)}@example.com`;
   const t0 = Date.now();
-  const { value: rs, printed } = await capturing(e, () => Promise.all(Array.from({ length: n }, (_, i) => create(e, admin, { role: "member", email, expiresInDays: 1 + (i % 3) }))));
+  const { value: rs, printed } = await capturing(via, () => Promise.all(Array.from({ length: n }, (_, i) => create(via, admin, { role: "member", email, expiresInDays: 1 + (i % 3) }))));
   const elapsed = Date.now() - t0;
   const failures = oddResponses(rs, printed);
   const ok = rs.filter((r) => r.status === 201 && r.json?.link);
@@ -254,17 +240,20 @@ async function sameEmailRound(e: RouteEnv, kind: RoundObservation["kind"], n: nu
   const byHash = ok.filter((r) => sha256(r.json.link.slice(prefix.length)) === winner.tokenHash).map((r) => r.json.invite.id);
   if (JSON.stringify(byHash) !== JSON.stringify([winner.id])) failures.push(`살아 있는 초대 해시와 맞는 201: ${JSON.stringify(byHash)} (살아 있는 id ${winner.id})`);
   const okIds = ok.map((r) => r.json.invite.id as string);
+  if (new Set(okIds).size !== n || !rows.every((r: any) => okIds.includes(r.id))) failures.push(`201 응답 id 와 행이 맞지 않음`);
   const rowById = new Map<string, any>(rows.map((r: any) => [r.id as string, r]));
   for (const id of okIds) if (id !== winner.id && rowById.get(id)?.revokedAt == null) failures.push(`201 ${id} 가 살아 있지도 취소되지도 않음`);
-  const conflictRows = rows.filter((r: any) => !okIds.includes(r.id));
-  if (conflictRows.length !== conflict.length) failures.push(`201 에 없는 행 ${conflictRows.length}개 ≠ 409 ${conflict.length}개`);
-  for (const r of conflictRows) if (r.revokedAt == null) failures.push(`409 행 ${r.id} 취소 안 됨`);
   // 감사 = 실제 변경
   const ids = new Set(rows.map((r: any) => r.id as string));
   const creates = (await audits(e, "invite.create")).filter((a: any) => ids.has(a.target)).length;
   if (creates !== n) failures.push(`invite.create ${creates}행 (요청 ${n})`);
   const revokeCount: Record<string, number> = {};
-  for (const a of await audits(e, "invite.revoke")) if (ids.has(a.target)) revokeCount[a.target] = (revokeCount[a.target] ?? 0) + 1;
+  for (const a of await audits(e, "invite.revoke")) {
+    if (!ids.has(a.target)) continue;
+    revokeCount[a.target] = (revokeCount[a.target] ?? 0) + 1;
+    const d = JSON.parse(a.detail);
+    if (d.reason !== "reinvite" || !ids.has(d.replacedBy) || d.replacedBy === a.target) failures.push(`invite.revoke ${a.target} detail ${a.detail}`);
+  }
   const want = Object.fromEntries(rows.filter((r: any) => r.id !== winner.id).map((r: any) => [r.id, 1]));
   const sortObj = (o: Record<string, number>) => JSON.stringify(Object.entries(o).sort());
   if (sortObj(revokeCount) !== sortObj(want)) failures.push(`invite.revoke ${JSON.stringify(revokeCount)} ≠ 취소된 행마다 1 ${JSON.stringify(want)}`);
@@ -304,9 +293,9 @@ async function distinctEmailsRound(e: RouteEnv, n: number): Promise<RoundObserva
  *   1. 빈 표에서 같은 이메일 2개 동시 (MySQL·MariaDB gap 잠금 교착 관찰) — 회차 전에 invites 를 비운다. 이 함수는 전용 DB 에서만 부른다
  *   2. 같은 이메일 4개·8개 동시 (Postgres 40P01·MySQL 1213 관찰)
  *   3. 서로 다른 이메일 12개 동시 (invites.email 에 인덱스가 없어 FOR UPDATE 가 다른 이메일 행까지 잠그는지 관찰)
- * 단언(회차마다): 응답은 201(링크 있음)·409 invite_conflict(링크 없음)뿐, 500 0 (교착·직렬화 실패는 500 으로 드러난다).
+ * 단언(회차마다): 응답은 모두 201(링크 있음). 500·409 0 (교착·직렬화 실패는 500 으로 드러난다).
  *   같은 이메일: 요청마다 행 1개, 살아 있는 초대 정확히 1개 = 201 하나(invite.id·sha256(토큰) == token_hash),
- *   다른 201 은 뒤에 취소됨, 409 행은 취소됨, invite.create n 행·invite.revoke 는 취소된 행마다 1행.
+ *   다른 201 은 뒤 요청이 취소함, invite.create n 행·invite.revoke 는 취소된 행마다 1행(reinvite).
  *   서로 다른 이메일: 모두 201, 이메일마다 살아 있는 초대 1개, invite.revoke 0행.
  *   모든 행: 읽은 expires_at 을 매개변수로 다시 넘기면 같은 행이 잡힌다.
  * 실패를 회차별로 모아 마지막에 한 번에 단언한다 (재현 빈도를 보고하려고).

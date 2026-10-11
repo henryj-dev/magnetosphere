@@ -52,7 +52,7 @@ describe("TC-M3.T1 관리자 초대 API", () => {
       expect({ role, status: blank.status, error: blank.json?.error }).toEqual({ role, status: 400, error: "invalid_email" });
     }
     // 제어문자·공백·특수문자가 든 주소는 400 invalid_email
-    for (const email of ["a\u0000b@x.com", "a\u007f@x.com", "a b@x.com", "a\n@x.com", "<a@x.com>", "a,b@x.com", "a;b@x.com", "a:b@x.com", 'a"b@x.com', "a[b]@x.com", "a\\b@x.com", "a(b)@x.com", "a@@x.com", "a@x", `${"a".repeat(250)}@x.com`]) {
+    for (const email of ["a\u0000b@x.com", "a\u007f@x.com", "a b@x.com", "a\n@x.com", "<a@x.com>", "a,b@x.com", "a;b@x.com", "a:b@x.com", 'a"b@x.com', "a[b]@x.com", "a\\b@x.com", "a(b)@x.com", "a@@x.com", "a@x", "a@.x.com", "a\u200b@x.com", "a\u202e@x.com", "a@x\u00ad.com", `${"a".repeat(250)}@x.com`]) {
       const r = await create(admin, { role: "member", email });
       expect({ email, status: r.status, error: r.json?.error }).toEqual({ email, status: 400, error: "invalid_email" });
     }
@@ -258,36 +258,45 @@ describe("TC-M3.T1 관리자 초대 API", () => {
 
   it("TC-M3.T1.g 감사 기록은 실제 변경과 같다: 읽은 뒤 사용·취소된 초대의 DELETE 는 404·감사 0행, 재초대 invite.revoke 는 실제로 취소된 행만 (Node SQLite·D1 경로)", () => tcM3T1g(e, NODE_AND_D1));
 
-  it("TC-M3.T1.h 같은 이메일 동시 재초대 → 살아 있는 초대 1개 (승자는 (expires_at, id) 가 큰 쪽, 진 쪽은 409 invite_conflict·링크 없음) (Node SQLite·D1 경로)", () => tcM3T1h(e, NODE_AND_D1));
+  it("TC-M3.T1.h 같은 이메일 재초대는 차례로 대체한다: 끼어든 초대도 취소, 동시 요청은 모두 201·살아 있는 초대 1개(해시가 201 링크 하나와 일치)·나머지 취소·감사 = 실제 취소 (Node SQLite·D1 경로)", () => tcM3T1h(e, NODE_AND_D1));
 
-  it("TC-M3.T1.i 실제 동시 POST(Promise.all) — 빈 표 같은 이메일 2개·같은 이메일 4·8개·서로 다른 이메일 12개, 회차 3: 500 0, 같은 이메일은 살아 있는 초대 1개 = 201 하나(해시 일치)·나머지 201 은 뒤에 취소·409 invite_conflict 링크 없음·감사 = 실제 취소, 다른 이메일은 모두 201·이메일마다 1개, expires_at 왕복 일치 (Node SQLite)", async () => {
+  it("TC-M3.T1.i 실제 동시 POST(Promise.all) — 빈 표 같은 이메일 2개·같은 이메일 4·8개·서로 다른 이메일 12개, 회차 3: 모두 201(500·409 0), 같은 이메일은 살아 있는 초대 1개 = 201 하나(해시 일치)·나머지 201 은 취소·감사 = 실제 취소, 다른 이메일은 이메일마다 1개, expires_at 왕복 일치 (Node SQLite)", async () => {
     await tcM3T1i(e);
   });
 });
 
-describe("초대 API 주변 (M3.T1 보안 리뷰 L4·L6)", () => {
+describe("초대 API 주변 (M3.T1 보안 리뷰 L4·L6, 후속 LOW-2)", () => {
   it("L4 DB 쿼리 오류는 쿼리 문과 원인 메시지만 기록하고 params(이메일·token_hash)는 남기지 않는다", async () => {
     const { createApp } = await import("../../src/app.ts");
     const params = ["leak@example.com", "deadbeefcafebabe-token-hash"];
-    const err = Object.assign(new Error(`Failed query: insert into "invites" values (?, ?)\nparams: ${params.join(",")}`), {
-      query: 'insert into "invites" values (?, ?)',
-      params,
-      cause: new Error("UNIQUE constraint failed: invites.token_hash"),
-    });
-    const app = createApp({
-      services: async () => {
-        throw err;
-      },
-      assets: async (c) => c.text("spa"),
-      setupTokenFromSecret: false,
-      log: () => {},
-    });
-    const res = await app.request("http://localhost:3000/api/admin/invites");
-    expect(res.status).toBe(500);
-    const out = printed.join("\n");
-    expect(out).toContain('insert into "invites" values (?, ?)');
-    expect(out).toContain("UNIQUE constraint failed: invites.token_hash");
-    for (const p of params) expect(out).not.toContain(p);
+    // 원인 메시지: SQLite(값 없음), MySQL ER_DUP_ENTRY(작은따옴표 안에 값), Postgres(큰따옴표 안에 이름) — 따옴표 안은 ? 로 가린다
+    const causes: [string, string][] = [
+      ["UNIQUE constraint failed: invites.token_hash", "UNIQUE constraint failed: invites.token_hash"],
+      ["Duplicate entry 'leak@example.com' for key 'invites.email'", "Duplicate entry '?' for key '?'"],
+      ['duplicate key value violates unique constraint "deadbeefcafebabe-token-hash"', 'duplicate key value violates unique constraint "?"'],
+    ];
+    for (const [cause, logged] of causes) {
+      printed.length = 0;
+      const err = Object.assign(new Error(`Failed query: insert into "invites" values (?, ?)\nparams: ${params.join(",")}`), {
+        query: 'insert into "invites" values (?, ?)',
+        params,
+        cause: new Error(cause),
+      });
+      const app = createApp({
+        services: async () => {
+          throw err;
+        },
+        assets: async (c) => c.text("spa"),
+        setupTokenFromSecret: false,
+        log: () => {},
+      });
+      const res = await app.request("http://localhost:3000/api/admin/invites");
+      expect(res.status).toBe(500);
+      const out = printed.join("\n");
+      expect(out).toContain('insert into "invites" values (?, ?)');
+      expect(out).toContain(logged);
+      for (const p of params) expect(out).not.toContain(p);
+    }
   });
 
   it("L6 public_base_url 은 http(s)·사용자 정보·쿼리·조각 없음만 받고 origin + pathname(끝 슬래시 뗌)을 쓴다", async () => {

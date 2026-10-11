@@ -1,26 +1,29 @@
 // 관리자 초대 API (3단계 실행판 M3.T1, 계획서 4.2, Q3·Q4·Q5).
-//   POST   /api/admin/invites { email?, role, expiresInDays? } → 201 { invite, link } · 409 invite_conflict   (Cache-Control: no-store)
-//   GET    /api/admin/invites                                   → 200 { invites }                         (Cache-Control: no-store)
+//   POST   /api/admin/invites { email?, role, expiresInDays? } → 201 { invite, link }   (Cache-Control: no-store)
+//   GET    /api/admin/invites                                   → 200 { invites }         (Cache-Control: no-store)
 //   DELETE /api/admin/invites/:id                               → 200 { invite } · 404 not_found
 //   - 활성 관리자만 (routes/guard.ts sessionAdmin, 역할·상태는 DB). 변경 요청의 같은 출처 검사는 app.ts 가 /api/admin/* 에 건다.
 //     요청 수 제한은 세 경로를 합쳐 관리자당 분당 30회 (넘으면 429 rate_limited).
 //   - 토큰: 32바이트 무작위 base64url. DB 에는 SHA-256 16진(token_hash)만 둔다. 원문은 201 응답의 링크
 //     <public_base_url>/invite#<토큰> 에만 한 번 나간다. 조각(#)이라 서버 접근 기록에 남지 않는다. 감사 기록·로그에는 토큰·링크·이메일을 넣지 않는다.
 //   - 규칙: role 은 member|admin. admin 이면 email 필수(400 admin_invite_requires_email, 링크가 새도 관리자 권한이 넘어가지 않게).
-//     email 은 필드 없음·null 만 "없음"이다. 문자열이면 trim → 소문자 → NFC 뒤 형식 검사(빈 문자열·제어문자·공백·<>(),;:"[]\ 는 400 invalid_email).
-//     expiresInDays 는 정수 1~30 (기본 7, 그 밖 400 invalid_expires).
+//     email 은 필드 없음·null 만 "없음"이다. 문자열이면 trim → 소문자 → NFC 뒤 형식 검사(빈 문자열·제어·서식 문자(\p{Cc}\p{Cf})·공백·
+//     <>(),;:"[]\ ·점으로 시작하는 도메인은 400 invalid_email). expiresInDays 는 정수 1~30 (기본 7, 그 밖 400 invalid_expires).
 //     정책 closed·sso_only 면 409 signup_closed, 설치 전(public_base_url 없음) 409 setup_required,
 //     메일 설정 없음(mail_settings 행 없음, 가입 판정과 같은 기준) + email 없음이면 409 mail_required.
-//   - 같은 email 의 살아 있는(미사용·미만료·미취소) 초대는 취소하고 새로 만든다. 취소·새 초대·감사 기록은 한 트랜잭션(D1 은 batch)이다.
-//     invite.revoke 는 그 트랜잭션·batch 안에서 실제로 취소한 행에만 남긴다 (Node: UPDATE … RETURNING, MySQL 은 SELECT … FOR UPDATE 뒤 UPDATE.
-//     D1: 같은 조건의 INSERT … SELECT 를 UPDATE 앞에 둔다).
-//   - 같은 email 을 동시에 만들면 서로의 취소를 못 볼 수 있다. 그래서 만든 뒤 한 번 더 정리한다: 같은 email 의 살아 있는 다른 초대 중
-//     (expires_at, id) 가 자기보다 큰 것이 있으면 자기를 취소하고 409 invite_conflict(링크 없음), 없으면 자기보다 작은 것을 취소한다
-//     (invite.revoke {reason: "superseded"}). 그 정리는 자기 행이 아직 살아 있을 때만 한다. 승자는 (expires_at, id) 가 가장 큰 것 하나다.
+//   - 새 초대는 같은 email 의 살아 있는(미사용·미만료·미취소) 초대를 대체한다: 그것들을 취소하고 새로 만든다. 취소·새 초대·감사 기록은
+//     한 트랜잭션(D1 은 batch)이다. invite.revoke {reason: "reinvite", replacedBy} 는 실제로 취소한 행에만 남는다.
+//   - 초대 만들기는 직렬화한다. 같은 email 의 동시 요청이 서로의 취소를 못 보면 살아 있는 초대가 둘 남고, invites.email 에 인덱스가 없어
+//     email 조건 잠금은 MySQL·MariaDB 에서 표 전체를 잠가 교착이 난다. 그래서 job_leases 의 고정 행(INVITE_MUTEX)을 뮤텍스로 쓴다:
+//     행은 트랜잭션 밖에서 먼저 만들어 두고(INSERT IGNORE / ON CONFLICT DO NOTHING, 자동 커밋 — 트랜잭션 안에서 넣으면 MySQL 이 공유 잠금을
+//     배타 잠금으로 올리다 교착한다), Node 쓰기 트랜잭션의 첫 문장으로 SELECT … FOR UPDATE 한다 (pg·mysql·mariadb).
+//     SQLite 는 프로세스 안 쓰기 차례와 쓰기 잠금 하나로, D1 은 batch 가 한 번에 돌아 이미 직렬이다.
+//     직렬이므로 모든 성공은 201 이다. 먼저 커밋된 201 의 링크는 뒤 요청이 취소한다 (차례로 재초대한 것과 같다).
 //   - DELETE 는 미사용·미취소 초대만 취소한다(만료한 초대도 취소할 수 있다). 없는 id·이미 취소·이미 사용한 초대는 404 not_found 이고
-//     아무것도 쓰지 않는다. 읽은 뒤 다른 요청이 사용·취소했어도 404 이고 감사 기록이 없다. 취소와 감사 기록 invite.revoke 는 한 트랜잭션(D1 은 batch)이다.
+//     아무것도 쓰지 않는다. 읽은 뒤 다른 요청이 사용·취소했어도 404 이고 감사 기록이 없다. 기본 키 한 행만 잠그므로 뮤텍스를 쓰지 않는다.
+//     취소와 감사 기록 invite.revoke 는 한 트랜잭션(D1 은 batch)이다.
 //   - 목록에는 토큰·해시를 넣지 않는다. invites 에 created_at 이 없어 만료 시각 늦은 순이다.
-import { and, desc, eq, getTableName, gt, isNull, lt, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, sql, type SQL } from "drizzle-orm";
 import { Hono, type Context } from "hono";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import { updatedRows } from "@magnetosphere/runtime/lease";
@@ -33,10 +36,16 @@ import { readPublicBaseUrl } from "./base-url.ts";
 export const INVITE_ROLES = ["member", "admin"] as const;
 export const INVITE_EXPIRES_DAYS = { default: 7, min: 1, max: 30 } as const;
 export const INVITE_ADMIN_LIMIT = { max: 30, windowMs: 60_000 } as const;
+/**
+ * 초대 쓰기 뮤텍스: job_leases 의 이 이름 행. 주기 작업 임대(acquireLease)는 만료했거나 같은 holder 일 때만 행을 가져가므로
+ * locked_until 을 먼 미래로 둬 임대로 잡히지 않게 한다. 행은 지우지 않는다 (job_leases 를 지우는 코드는 없다).
+ */
+export const INVITE_MUTEX = { name: "invite_write_mutex", holder: "invites", lockedUntil: new Date("2999-12-31T00:00:00.000Z") } as const;
 const DAY_MS = 86_400_000;
-// 이메일 각 부분에 올 수 없는 글자: 공백(유니코드 포함)·@·<>(),;:"[]\·제어문자
-const NOT_IN_EMAIL = String.raw`\s@<>(),;:"\[\]\\\x00-\x1f\x7f`;
-const EMAIL = new RegExp(`^[^${NOT_IN_EMAIL}]+@[^${NOT_IN_EMAIL}]+\\.[^${NOT_IN_EMAIL}]+$`, "u");
+// 이메일 각 부분에 올 수 없는 글자: 공백(유니코드 포함)·@·<>(),;:"[]\·제어 문자(\p{Cc})·서식 문자(\p{Cf}, 너비 없는 글자·방향 표시 등)
+const NOT_IN_EMAIL = String.raw`\s@<>(),;:"\[\]\\\p{Cc}\p{Cf}`;
+// 도메인은 점으로 시작할 수 없다
+const EMAIL = new RegExp(`^[^${NOT_IN_EMAIL}]+@(?!\\.)[^${NOT_IN_EMAIL}]+\\.[^${NOT_IN_EMAIL}]+$`, "u");
 const EMAIL_MAX = 255;
 const BODY_FIELDS = new Set(["email", "role", "expiresInDays"]);
 
@@ -125,32 +134,49 @@ async function admitted(c: Context, s: Services): Promise<Member | Response> {
   return admin;
 }
 
-/** 살아 있는(미사용·미취소·미만료) 초대 조건. t 는 invites 나 그 별칭 */
+/** 살아 있는(미사용·미취소·미만료) 초대 조건 */
 function liveOn(t: any, now: Date) {
   return and(isNull(t.usedAt), isNull(t.revokedAt), gt(t.expiresAt, now));
 }
 
-/** (expires_at, id) 가 기준보다 큰지(dir "gt")·작은지(dir "lt") */
-function ranked(t: any, dir: "gt" | "lt", expiresAt: unknown, id: string) {
-  const cmp = dir === "gt" ? gt : lt;
-  return or(cmp(t.expiresAt, expiresAt), and(eq(t.expiresAt, expiresAt), cmp(t.id, id)));
+/** 뮤텍스 행을 둔다 (트랜잭션 밖, 자동 커밋). 이미 있으면 아무것도 하지 않는다. pg·mysql·mariadb 만 쓴다 */
+async function ensureInviteMutex(h: DbHandle): Promise<void> {
+  const t = h.schema.jobLeases;
+  const row = { name: INVITE_MUTEX.name, holder: INVITE_MUTEX.holder, lockedUntil: INVITE_MUTEX.lockedUntil, fence: 0 };
+  if (h.provider === "mysql") await h.db.insert(t).ignore().values(row);
+  else await h.db.insert(t).values(row).onConflictDoNothing();
 }
 
-type RevokeEntry = Omit<AuditEntry, "target">;
+/** 트랜잭션의 첫 문장: 뮤텍스 행 배타 잠금. 커밋·되돌리기까지 다른 초대 만들기가 기다린다 */
+async function lockInviteMutex(h: DbHandle, tx: any): Promise<void> {
+  const t = h.schema.jobLeases;
+  const got = await tx.select({ name: t.name }).from(t).where(eq(t.name, INVITE_MUTEX.name)).for("update");
+  if (got.length !== 1) throw new Error("초대 뮤텍스 행이 없다");
+}
 
 /**
- * 트랜잭션 안에서 cond 에 맞는 초대를 취소하고, 실제로 취소한 id 를 돌려준다 (Node 넷).
- * MySQL 은 RETURNING 이 없어 SELECT … FOR UPDATE 로 행을 잠근 뒤 그 id 로 UPDATE 한다. 나머지는 UPDATE … RETURNING.
+ * 트랜잭션 안에서 cond 에 맞는 초대를 취소하고, 실제로 취소한 id 를 돌려준다 (Node 넷, 뮤텍스를 쥔 채로).
+ * sqlite·pg 는 UPDATE … RETURNING. MySQL 은 RETURNING 이 없어 맞는 id 를 읽고 id 마다 같은 조건으로 UPDATE 해 바뀐 것만 센다
+ * (email 조건 잠금 읽기는 인덱스가 없어 표 전체를 잠그므로 쓰지 않는다. 각 UPDATE 는 기본 키 한 행만 잠근다).
  */
 async function revokeWhere(h: DbHandle, tx: any, cond: SQL | undefined, now: Date): Promise<string[]> {
   const t = h.schema.invites;
   if (h.provider === "mysql") {
-    const ids: string[] = (await tx.select({ id: t.id }).from(t).where(cond).for("update")).map((r: { id: string }) => r.id);
-    for (const id of ids) await tx.update(t).set({ revokedAt: now }).where(and(eq(t.id, id), cond));
-    return ids;
+    const ids: string[] = (await tx.select({ id: t.id }).from(t).where(cond)).map((r: { id: string }) => r.id);
+    const out: string[] = [];
+    for (const id of ids) if ((await updatedRows(h, tx.update(t).set({ revokedAt: now }).where(and(eq(t.id, id), cond)), t.id)) === 1) out.push(id);
+    return out;
   }
   return (await tx.update(t).set({ revokedAt: now }).where(cond).returning({ id: t.id })).map((r: { id: string }) => r.id);
 }
+
+type RevokeEntry = Omit<AuditEntry, "target">;
+
+/** SQLite 식: UUID v4 꼴 무작위 id (D1 감사 행 id 를 auditRow 가 만드는 crypto.randomUUID() 와 같은 꼴로) */
+const SQLITE_UUID = sql.raw(
+  "lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' || substr(lower(hex(randomblob(2))), 2) || '-' || " +
+    "substr('89ab', 1 + (abs(random()) % 4), 1) || substr(lower(hex(randomblob(2))), 2) || '-' || lower(hex(randomblob(6)))",
+);
 
 /**
  * D1 batch 용: cond 에 맞는 invites 행마다 invite.revoke 감사 한 행을 넣는 INSERT … SELECT (target = 그 행 id).
@@ -162,7 +188,7 @@ function auditEachStatement(h: DbHandle, db: any, e: RevokeEntry, cond: SQL | un
   const row = auditRow({ ...e, target: null });
   const cols = [a.id, a.actorId, a.action, a.target, a.detail, a.ip, a.createdAt];
   const values = [
-    sql`lower(hex(randomblob(16)))`,
+    SQLITE_UUID,
     sql.param(row.actorId, a.actorId),
     sql.param(row.action, a.action),
     sql`${t.id}`,
@@ -173,55 +199,6 @@ function auditEachStatement(h: DbHandle, db: any, e: RevokeEntry, cond: SQL | un
   return db.run(
     sql`insert into ${a} (${sql.join(cols.map((c) => sql.identifier(c.name)), sql`, `)}) select ${sql.join(values, sql`, `)} from ${t} where ${cond}`,
   );
-}
-
-/**
- * 같은 email 동시 생성 정리. 자기 행이 살아 있을 때만: 더 큰 (expires_at, id) 의 살아 있는 형제가 있으면 자기를 취소하고,
- * 없으면 더 작은 형제를 취소한다. 감사 invite.revoke {reason: "superseded"} 는 실제로 취소한 행에만.
- */
-async function settleSiblings(h: DbHandle, id: string, email: string, actorId: string, ip: string | null): Promise<void> {
-  const t = h.schema.invites;
-  const now = new Date();
-  const entry = (detail: Record<string, unknown>): RevokeEntry => ({ actorId, action: "invite.revoke", detail, ip, now });
-  if (h.kind === "d1") {
-    const [self] = await h.db.select({ expiresAt: t.expiresAt }).from(t).where(eq(t.id, id));
-    if (!self) return;
-    const o = h.schema.invites;
-    // 같은 표를 서브쿼리에서 다시 읽는다 (SQLite 는 UPDATE 의 WHERE 에서 같은 표를 읽을 수 있다)
-    const other = (cond: SQL | undefined) => sql`exists (select 1 from ${sql.identifier(getTableName(o))} as ${sql.identifier("o")} where ${cond})`;
-    const oc = (name: string) => sql`${sql.identifier("o")}.${sql.identifier(name)}`;
-    const oCols = { id: oc(o.id.name), email: oc(o.email.name), expiresAt: oc(o.expiresAt.name), usedAt: oc(o.usedAt.name), revokedAt: oc(o.revokedAt.name) };
-    const enc = (v: unknown, col: any) => sql.param(v, col);
-    const oLive = sql`${oCols.usedAt} is null and ${oCols.revokedAt} is null and ${oCols.expiresAt} > ${enc(now, t.expiresAt)}`;
-    const selfLive = other(sql`${oCols.id} = ${id} and ${oLive}`);
-    const largerLive = other(
-      sql`${oCols.email} = ${email} and ${oCols.id} <> ${id} and ${oLive} and (${oCols.expiresAt} > ${enc(self.expiresAt, t.expiresAt)} or (${oCols.expiresAt} = ${enc(self.expiresAt, t.expiresAt)} and ${oCols.id} > ${id}))`,
-    );
-    const selfCond = and(eq(t.id, id), liveOn(t, now), largerLive);
-    const smallerCond = and(eq(t.email, email), ne(t.id, id), liveOn(t, now), ranked(t, "lt", self.expiresAt, id), selfLive);
-    await h.db.batch([
-      auditEachStatement(h, h.db, entry({ reason: "superseded" }), selfCond),
-      h.db.update(t).set({ revokedAt: now }).where(selfCond),
-      auditEachStatement(h, h.db, entry({ reason: "superseded", replacedBy: id }), smallerCond),
-      h.db.update(t).set({ revokedAt: now }).where(smallerCond),
-    ]);
-    return;
-  }
-  await h.db.transaction(async (tx: any) => {
-    let q = tx.select({ expiresAt: t.expiresAt, usedAt: t.usedAt, revokedAt: t.revokedAt }).from(t).where(eq(t.id, id));
-    if (h.provider !== "sqlite") q = q.for("update");
-    const [self] = await q;
-    if (!self || self.usedAt !== null || self.revokedAt !== null || new Date(self.expiresAt).getTime() <= now.getTime()) return;
-    const siblings = and(eq(t.email, email), ne(t.id, id), liveOn(t, now));
-    const [larger] = await tx.select({ id: t.id }).from(t).where(and(siblings, ranked(t, "gt", self.expiresAt, id))).limit(1);
-    if (larger) {
-      for (const x of await revokeWhere(h, tx, and(eq(t.id, id), liveOn(t, now)), now)) await auditStatement(h, { ...entry({ reason: "superseded" }), target: x }, tx);
-      return;
-    }
-    for (const x of await revokeWhere(h, tx, and(siblings, ranked(t, "lt", self.expiresAt, id)), now)) {
-      await auditStatement(h, { ...entry({ reason: "superseded", replacedBy: id }), target: x }, tx);
-    }
-  });
 }
 
 export function inviteAdminRoutes(services: () => Promise<Services>) {
@@ -285,7 +262,10 @@ export function inviteAdminRoutes(services: () => Promise<Services>) {
         auditStatement(h, created),
       ]);
     } else {
+      const locking = h.provider !== "sqlite";
+      if (locking) await ensureInviteMutex(h);
       await h.db.transaction(async (tx: any) => {
+        if (locking) await lockInviteMutex(h, tx);
         const revoked = sameEmail ? await revokeWhere(h, tx, sameEmail, now) : [];
         await tx.insert(t).values(row);
         for (const id of revoked) await auditStatement(h, { ...reinvite, target: id }, tx);
@@ -293,11 +273,6 @@ export function inviteAdminRoutes(services: () => Promise<Services>) {
       });
     }
     c.header("Cache-Control", "no-store");
-    if (p.email !== null) {
-      await settleSiblings(h, row.id, p.email, admin.id, ip);
-      const mine = await readInvite(h, row.id);
-      if (!mine || view(mine, Date.now()).status !== "active") return c.json({ error: "invite_conflict" }, 409);
-    }
     return c.json({ invite: view(row, now.getTime()), link: `${base}/invite#${token}` }, 201);
   });
 
