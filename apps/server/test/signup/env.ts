@@ -3,6 +3,7 @@
 //   - 메일: 시험 메일러가 outbox 에 모은다. "메일 설정됨"은 app_settings.mail_settings 행이 있다는 뜻이다 (Q15, OPS.setMail).
 // D1 판은 worker.ts 가 같은 Rig 를 시험 Worker 로 연다.
 import type { MailMessage, Mailer } from "@magnetosphere/auth";
+import { runAsInvite } from "@magnetosphere/auth/invite-context";
 import { connectNode } from "@magnetosphere/runtime/node";
 import type { DbHandle, Runtime } from "@magnetosphere/runtime/types";
 import { apiReply, OPS, reply, type Rig } from "../../../../packages/auth/test/signup-policy/rig.ts";
@@ -45,7 +46,7 @@ export async function serverRig(label: string, o: { h?: DbHandle; url?: string }
     while (pending.length) await Promise.all(pending.splice(0));
   };
   const mailer: Mailer = { send: async (m) => void outbox.push(m) };
-  const services = await buildServices(testRuntime(h), { waitUntil: (p) => void pending.push(p), mailer, fallbackMailer: mailer } as any);
+  const services = await buildServices(testRuntime(h), { waitUntil: (p) => void pending.push(p), mailer });
   const app = createApp({ services: async () => services, assets: async (c) => c.text("spa"), setupTokenFromSecret: false, log: () => {} });
   const api = (services.auth as any).api;
 
@@ -66,8 +67,8 @@ export async function serverRig(label: string, o: { h?: DbHandle; url?: string }
     app,
     call,
     signUp: async (b, so = {}) => reply(await call("POST", "/api/auth/sign-up/email", { body: b, ip: so.ip, headers: so.headers })),
-    apiSignUp: async (b) => {
-      const r = await apiReply(api.signUpEmail({ body: b }));
+    apiSignUp: async (b, invite) => {
+      const r = await apiReply(invite ? runAsInvite(invite, () => api.signUpEmail({ body: b })) : api.signUpEmail({ body: b }));
       await settle();
       return r;
     },

@@ -142,6 +142,9 @@ importers:
       postgres:
         specifier: 3.4.9
         version: 3.4.9
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
     devDependencies:
       '@better-auth/drizzle-adapter':
         specifier: 1.7.7

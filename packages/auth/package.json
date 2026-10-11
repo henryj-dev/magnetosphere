@@ -6,7 +6,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./mail": "./src/mail/index.ts",
-    "./mail/smtp": "./src/mail/smtp.ts"
+    "./mail/smtp": "./src/mail/smtp.ts",
+    "./invite-context": "./src/invite-context.ts"
   },
   "scripts": {
     "test": "node scripts/test.mjs",

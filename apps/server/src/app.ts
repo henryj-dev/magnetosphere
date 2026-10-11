@@ -1,9 +1,9 @@
 // Hono 앱 (계획서 3.1). Node 진입점(node.ts)과 Workers 진입점(workers.ts)이 같은 앱을 쓴다.
 //   /healthz       상태 확인
 //   /api/auth/*    packages/auth 의 감싼 handler (clientIp 를 런타임 어댑터에서 받는다, S3 보안 리뷰 M2)
-//                  관리자가 없는 동안(설치 전)은 가입을 403 setup_required 로 막는다 (TC-S4.T4.e). 설치 뒤에는 공개 가입이 닫혀 있는 동안
-//                  403 signup_closed (TC-SEC.1.a). 3단계(가입 정책·초대) 전에는 signup_mode 가 무엇이든 닫혀 있다 (packages/db/src/signup.ts).
-//                  Better Auth 안에서도 사용자 생성 훅이 같은 판정으로 막는다 (packages/auth, 다른 생성 경로까지)
+//                  관리자가 없는 동안(설치 전)은 가입을 403 setup_required 로 막는다 (TC-S4.T4.e). 설치 뒤 공개 가입은 정책 판정 decideSignup
+//                  (packages/db/src/signup.ts)이 받지 않으면 403 과 사유 코드(signup_closed·domain_not_allowed·mail_required·signup_cap, Q19)다.
+//                  Better Auth 안에서도 앞 판정(signUpGate)과 사용자 생성 훅이 같은 판정으로 막는다 (packages/auth, 다른 생성 경로까지)
 //   /api/setup     최초 설치 (setup/). /api/setup/omniroute 는 OmniRoute 토큰 상태·붙여 넣기 (관리자 세션)
 //   /api/me/keys   회원 키 API (routes/keys.ts). /api/admin/users/:id 는 관리자 한도·최대 개수 (routes/admin-limits.ts)
 //                  두 경로의 GET 아닌 요청은 Origin 이 BETTER_AUTH_URL 출처와 같아야 한다 (routes/guard.ts, 7장 CSRF)
@@ -17,16 +17,16 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
-import { publicSignupClosed } from "@magnetosphere/db/src/signup.ts";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import type { ClientFor } from "./limits/daily.ts";
 import { adminLimitRoutes } from "./routes/admin-limits.ts";
 import { sameOrigin } from "./routes/guard.ts";
 import type { KeysClient } from "./routes/issue.ts";
 import { keyRoutes } from "./routes/keys.ts";
-import { adminExists } from "./setup/index.ts";
 import type { OmniRouteConfig } from "./setup/omniroute.ts";
 import { setupRoutes } from "./setup/routes.ts";
+import { publicSignupDenial } from "./signup/gate.ts";
+import { withRequestMemo } from "./signup/request-memo.ts";
 
 /** /api/* 요청 본문 상한. 인증·설치 요청은 1KB 안팎이다 */
 export const API_BODY_LIMIT = 64 * 1024;
@@ -108,14 +108,16 @@ export function createApp(deps: AppDeps) {
       await next();
     });
   });
-  app.use("/api/auth/*", async (c, next) => {
-    if (isSignUpPath(c.req.path)) {
-      const h = (await deps.services()).db;
-      if (!(await adminExists(h))) return c.json({ error: "setup_required" }, 403);
-      if (await publicSignupClosed(h.db, h.schema)) return c.json({ error: "signup_closed" }, 403);
-    }
-    await next();
-  });
+  // 인증 요청 하나가 요청 문맥 메모 하나다 (가입 판정 입력을 한 번만 읽는다, signup/request-memo.ts)
+  app.use("/api/auth/*", (c, next) =>
+    withRequestMemo(async () => {
+      if (isSignUpPath(c.req.path)) {
+        const denied = await publicSignupDenial((await deps.services()).db, c.req.raw);
+        if (denied) return c.json({ error: denied.error }, denied.status);
+      }
+      await next();
+    }),
+  );
   app.all("/api/auth/*", async (c) => (await deps.services()).auth.handler(c.req.raw));
   app.route("/api/setup", setupRoutes(deps.services, { setupTokenFromSecret: deps.setupTokenFromSecret, log: deps.log }));
   app.use("/api/me/*", sameOrigin(deps.services));

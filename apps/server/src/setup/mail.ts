@@ -7,7 +7,10 @@ import { resendMailer } from "@magnetosphere/auth/mail";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 
-export const MAIL_SETTINGS_KEY = "mail_settings";
+// 행이 있으면 "메일 설정됨"이다 (Q15). 가입 판정(packages/db/src/signup.ts)이 같은 키를 본다
+import { MAIL_SETTINGS_KEY } from "@magnetosphere/db/src/settings.ts";
+
+export { MAIL_SETTINGS_KEY };
 /** API 키 암호문의 AAD. 다른 자리로 옮겨 붙인 암호문은 열리지 않는다 */
 export const MAIL_API_KEY_AAD = "app_settings.mail_settings.apiKey";
 

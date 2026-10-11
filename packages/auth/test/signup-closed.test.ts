@@ -53,12 +53,14 @@ describe.each(ALL_DBS)("설치 뒤 사용자 생성 차단 — %s", (kind) => {
     for (const mode of [undefined, "invite_only", "open"]) {
       await setSetting(h, "signup_mode", mode);
       // 1) HTTP 가입 (서버의 경로 검사 없이 Better Auth handler 에 바로). 새 이메일과 이미 있는 이메일이 같은 응답이다 (계정 존재 숨김)
+      // 메일 설정이 없는 설치라 open 은 MAIL_REQUIRED, 나머지는 SIGNUP_CLOSED (Q15·Q19, M2)
+      const code = mode === "open" ? "MAIL_REQUIRED" : "SIGNUP_CLOSED";
       for (const e of [email("http"), early]) {
         const r = await client(app.handler).post("/sign-up/email", { email: e, password: PASSWORD, name: "x" });
-        expect({ status: r.status, code: r.json?.code }, `${mode} http ${e}`).toEqual({ status: 403, code: "SIGNUP_CLOSED" });
+        expect({ status: r.status, code: r.json?.code }, `${mode} http ${e}`).toEqual({ status: 403, code });
       }
       // 2) 서버 안 호출 auth.api.signUpEmail
-      await expect(app.api.signUpEmail({ body: { email: email("api"), password: PASSWORD, name: "x" } }), `${mode} api`).rejects.toMatchObject({ body: { code: "SIGNUP_CLOSED" } });
+      await expect(app.api.signUpEmail({ body: { email: email("api"), password: PASSWORD, name: "x" } }), `${mode} api`).rejects.toMatchObject({ body: { code } });
       // 3) OAuth·SSO 콜백의 JIT 생성이 부르는 길 (handleOAuthUserInfo → createOAuthUser / link-account → createUser)
       await expect(ctx.internalAdapter.createUser({ email: email("internal"), name: "x", emailVerified: true }, { method: "email-password" }), `${mode} createUser`).rejects.toMatchObject({ body: { code: "SIGNUP_CLOSED" } });
       await expect(

@@ -6,10 +6,11 @@ import { betterAuth, type BetterAuthOptions } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { AUTH_SCHEMA_OPTIONS } from "@magnetosphere/db/src/auth-options.ts";
-import { defaultMonthlyLimit, hasAdmin, publicSignupClosed } from "@magnetosphere/db/src/signup.ts";
+import { countSignup, decideSignup, loadSignupInputs, type SignupInputs } from "@magnetosphere/db/src/signup.ts";
+import { currentInvite } from "./invite-context.ts";
 import { resetPasswordMessage, verifyEmailMessage } from "./mail/messages.ts";
 import type { MailMessage, Mailer } from "./mail/types.ts";
-import { ipAddressOptions, rateLimitOptions, withClientIp, type ClientIp } from "./rate-limit.ts";
+import { CLIENT_IP_HEADER, ipAddressOptions, rateLimitOptions, withClientIp, type ClientIp } from "./rate-limit.ts";
 
 export type { Mailer, MailMessage } from "./mail/types.ts";
 export { CLIENT_IP_HEADER, RATE_LIMIT_RULES, resolveClientIp, type ClientIp } from "./rate-limit.ts";
@@ -58,6 +59,13 @@ export interface AuthConfig {
   waitUntil: (p: Promise<unknown>) => void;
   /** 메일 전송 실패. 응답과 떼어 보내므로 요청은 실패를 모른다. 메시지에는 토큰 링크가 있어 넘기지 않는다 */
   onMailError: (e: unknown, info: { to: string; subject: string }) => void;
+  /**
+   * 가입 판정 입력(관리자 있음·설정·메일·오늘 가입 수)을 요청 하나에서 한 번만 읽게 하는 메모 (서버 apps/server/src/signup/request-memo.ts).
+   * 서버 앞 판정·signUpGate·생성 훅이 같은 값으로 판정한다. 없으면 부를 때마다 읽는다. 인스턴스 캐시는 두지 않는다 (TC-M2.T5.a)
+   */
+  signupInputs?: (load: () => Promise<SignupInputs>) => Promise<SignupInputs>;
+  /** 회원 행이 커밋된 뒤 (user.create.after). 서버는 감사 기록 member.signup 을 남긴다. 던져도 가입은 그대로이고 경고만 남는다 */
+  onUserCreated?: (e: { userId: string; via: "public" | "invite"; inviteId: string | null; ip: string | null }) => Promise<void>;
 }
 
 /** 가입·로그인 요청의 이메일을 다듬는다. Better Auth 도 소문자로 바꾸지만 앞뒤 공백까지 우리가 먼저 정리한다 (V26). */
@@ -81,40 +89,81 @@ function deliverer(cfg: AuthConfig) {
   };
 }
 
+/** 판정 입력. 메모가 있으면 요청 하나에서 한 번만 읽는다 */
+function inputsOf(cfg: AuthConfig): () => Promise<SignupInputs> {
+  const { db, schema } = cfg.database as { db: any; schema: any };
+  const load = () => loadSignupInputs(db, schema);
+  return () => (cfg.signupInputs ? cfg.signupInputs(load) : load());
+}
+
+/** 가입을 만드는 엔드포인트. 이 경로가 아닌 회원 생성(OAuth·SSO JIT, internalAdapter 직접 호출)은 공개·초대 어느 줄도 아니다 */
+const SIGN_UP_PATH = "/sign-up/email";
+
+/** 생성 훅의 경로 판정. 공개 가입·초대 가입이 아니면 null */
+function viaOf(ctx: { path?: string } | null | undefined): "public" | "invite" | null {
+  if (ctx?.path !== SIGN_UP_PATH) return null;
+  return currentInvite() ? "invite" : "public";
+}
+
 /**
- * Better Auth 가 만드는 모든 사용자 행의 문지기 (보안 고침, TC-SEC.1.b·c). 이메일 가입, auth.api.signUpEmail, OAuth·SSO 콜백의 JIT 생성
- * (handleOAuthUserInfo → createOAuthUser·createUser)이 모두 databaseHooks.user.create.before 를 거친다. 서버의 /sign-up 경로 검사(app.ts)가
- * 놓친 새 엔드포인트·플러그인도 여기서 막힌다.
- *   - 관리자가 있으면(설치 뒤) 공개 가입이 닫혀 있는 동안 거부한다. 3단계 전에는 늘 닫혀 있다 (packages/db/src/signup.ts).
- *     /sign-up/* 는 그 전에 signUpGate 가 일괄 403 으로 막으므로, 이 훅은 그 밖의 경로를 막는 뒷받침이다.
- *     403 을 던지면 Better Auth 가입이 "이미 있는 이메일"용 가짜 200 으로 바꾸므로(requireEmailVerification) 400 SIGNUP_CLOSED 로 던진다
- *     (Better Auth 자체의 disableSignUp 과 같은 상태 코드).
- *   - 관리자가 없으면(설치 전) 막지 않는다. 그 구간의 /sign-up 은 서버가 setup_required 로 막고, 첫 관리자는 /api/setup 이 DB 에 직접 만든다.
- *   - monthly_limit_usd 가 비어 있으면 default_limit_usd 를 넣는다. 비워 두면 무제한이다 (계획서 5.3).
- * 관리자 확인과 설정 읽기는 가입 트랜잭션 밖의 연결로 한다 (쓰기 전 읽기뿐이라 잠금을 기다리지 않는다).
+ * 앞 판정 (hooks.before, 3단계 실행판 M2.T1). /sign-up/* 를 Better Auth 가 이메일을 찾기(findUserByEmail) 전에 판정한다. 그래서 같은 정책·같은 도메인이면
+ * 있는 이메일·없는 이메일이 같은 403 과 사유 코드를 받는다 (Q19 (가)). 서버(app.ts)도 HTTP 요청을 같은 판정으로 먼저 막는다.
+ * 1.7.7 은 서버 안 호출 auth.api.signUpEmail 에도 hooks.before 를 돌린다 (dispatch.mjs:210). 그래서 초대 문맥(runAsInvite) 안의 호출은 초대 줄로 판정한다.
+ * 관리자가 없으면(설치 전) 판정하지 않는다. 그 구간의 /sign-up 은 서버가 setup_required 로 막고, 첫 관리자는 /api/setup 이 DB 에 직접 만든다.
  */
-/**
- * 설치 뒤 /sign-up/* 를 이메일과 관계없이 한 응답(403 SIGNUP_CLOSED)으로 막는다. 사용자 생성 훅만으로 막으면 이미 있는 이메일은
- * 훅에 닿기 전에 가짜 200 을, 새 이메일은 거부를 받아 계정 존재가 드러난다. 서버(app.ts)도 같은 경로를 403 signup_closed 로 먼저 막는다.
- */
-function signUpGate(database: AuthDatabase) {
-  const { db, schema } = database as { db: any; schema: any };
-  return async (path: string) => {
-    if (!path.startsWith("/sign-up")) return;
-    if ((await hasAdmin(db, schema)) && (await publicSignupClosed(db, schema))) {
-      throw new APIError("FORBIDDEN", { code: "SIGNUP_CLOSED", message: "signup_closed" });
-    }
+function signUpGate(cfg: AuthConfig) {
+  const inputs = inputsOf(cfg);
+  return async (ctx: { path: string; body?: any }) => {
+    if (!ctx.path.startsWith("/sign-up")) return;
+    const i = await inputs();
+    if (!i.adminExists) return;
+    const invite = currentInvite();
+    const d = decideSignup({ inputs: i, email: ctx.body?.email, via: invite ? "invite" : "public", invite });
+    if (!d.ok) throw new APIError("FORBIDDEN", { code: d.code.toUpperCase(), message: d.code });
   };
 }
 
-function userCreateGuard(database: AuthDatabase) {
-  const { db, schema } = database as { db: any; schema: any };
-  return async (user: Record<string, unknown>) => {
-    if ((await hasAdmin(db, schema)) && (await publicSignupClosed(db, schema))) {
-      throw new APIError("BAD_REQUEST", { code: "SIGNUP_CLOSED", message: "signup_closed" });
+/**
+ * Better Auth 가 만드는 모든 사용자 행의 문지기 (뒷받침, TC-SEC.1.b·TC-M2.T1.b). 이메일 가입, auth.api.signUpEmail, OAuth·SSO 콜백의 JIT 생성
+ * (handleOAuthUserInfo → createOAuthUser·createUser)이 모두 databaseHooks.user.create.before 를 거친다. 앞 판정을 놓친 새 엔드포인트·플러그인도 여기서 막힌다.
+ *   - 관리자가 있으면(설치 뒤) /sign-up/email 의 공개 가입·초대 가입만 decideSignup 으로 판정하고, 그 밖의 경로는 모두 거부한다.
+ *     SSO JIT 는 5단계가 decideSignup 에 IdP 줄을 더할 때까지 닫혀 있다.
+ *     403 을 던지면 Better Auth 가입이 "이미 있는 이메일"용 가짜 200 으로 바꾸므로(requireEmailVerification) 400 으로 던진다.
+ *     /sign-up/* 는 그 전에 앞 판정이 같은 입력으로 막으므로 이 400 이 이메일 존재를 드러내는 경로는 없다.
+ *   - 통과하면 새 회원 값(역할·상태·인증·기본 월 한도·max_keys NULL)을 data 로 넣는다. 같은 트랜잭션이고, input: false 칼럼이라 본문으로는 못 바꾼다.
+ *   - 관리자가 없으면(설치 전) 막지 않고 기본 월 한도만 넣는다.
+ * 판정 입력은 가입 트랜잭션 밖의 연결로 읽는다 (쓰기 전 읽기뿐이라 잠금을 기다리지 않는다). 하루 가입 수는 여기서 세지 않는다 (userCreated).
+ */
+function userCreateGuard(cfg: AuthConfig) {
+  const inputs = inputsOf(cfg);
+  return async (user: Record<string, unknown>, ctx?: { path?: string } | null) => {
+    const i = await inputs();
+    if (!i.adminExists) return { data: { ...user, monthlyLimitUsd: user.monthlyLimitUsd ?? i.settings.default_limit_usd } };
+    const via = viaOf(ctx);
+    const d = via ? decideSignup({ inputs: i, email: user.email, via, invite: currentInvite() }) : ({ ok: false, code: "signup_closed" } as const);
+    if (!d.ok) throw new APIError("BAD_REQUEST", { code: d.code.toUpperCase(), message: d.code });
+    return { data: { ...user, ...d.data } };
+  };
+}
+
+/**
+ * 회원 행이 커밋된 뒤 (user.create.after, V29 createAfterRunsAfterCommit). 공개 가입이면 하루 가입 수를 센다 (Q13 (가), M2.T3).
+ * 가입 트랜잭션 안에서 세지 않는 이유: SQLite 는 가입 트랜잭션이 쓰기 잠금을 쥐어 다른 연결의 쓰기가 막히고, 뒤에 되돌려진 가입이 칸만 쓴다.
+ * 이 훅이 던지면 회원 행은 이미 커밋된 채 요청이 실패하므로 던지지 않고 경고만 남긴다. 다음 가입의 세기가 이어 간다.
+ */
+function userCreated(cfg: AuthConfig) {
+  const { db, schema, provider } = cfg.database;
+  return async (user: Record<string, unknown>, ctx?: { path?: string; headers?: Headers; request?: Request } | null) => {
+    const via = viaOf(ctx);
+    if (!via) return;
+    // HTTP 요청이면 withClientIp 가 정한 IP 머리글. 서버 안 호출(초대 수락)은 없다
+    const ip = (ctx?.headers ?? ctx?.request?.headers)?.get(CLIENT_IP_HEADER) ?? null;
+    try {
+      if (via === "public") await countSignup(db, schema, provider, new Date());
+      await cfg.onUserCreated?.({ userId: String(user.id), via, inviteId: currentInvite()?.inviteId ?? null, ip });
+    } catch (e) {
+      console.warn("[auth] 가입 뒤 하루 가입 수 세기·기록 실패 (가입은 그대로)", e);
     }
-    if (user.monthlyLimitUsd != null) return;
-    return { data: { ...user, monthlyLimitUsd: await defaultMonthlyLimit(db, schema) } };
   };
 }
 
@@ -155,11 +204,11 @@ export function authOptions(cfg: AuthConfig) {
     disabledPaths: SSO_DISABLED_PATHS,
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
-        await signUpGate(cfg.database)(ctx.path);
+        await signUpGate(cfg)(ctx);
         return normalizeEmailBody(ctx);
       }),
     },
-    databaseHooks: { user: { create: { before: userCreateGuard(cfg.database) } } },
+    databaseHooks: { user: { create: { before: userCreateGuard(cfg), after: userCreated(cfg) } } },
     advanced: {
       ipAddress: ipAddressOptions,
       backgroundTasks: { handler: cfg.waitUntil },

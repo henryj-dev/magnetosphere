@@ -6,6 +6,7 @@ import { createCipher } from "@magnetosphere/runtime/crypto";
 import type { Runtime } from "@magnetosphere/runtime/types";
 import type { Services } from "./app.ts";
 import { assertSetupTokenStrength } from "./setup/index.ts";
+import { signupAuthHooks } from "./signup/gate.ts";
 import { settingsMailer } from "./setup/mail.ts";
 import { readOmniRouteToken } from "./setup/omniroute.ts";
 
@@ -36,6 +37,8 @@ export interface ServiceOptions {
   fallbackMailer?: Mailer;
   /** 응답 뒤에도 살려 둘 작업 (Workers 는 ctx.waitUntil) */
   waitUntil: (p: Promise<unknown>) => void;
+  /** 메일 설정과 관계없이 늘 이 어댑터로 보낸다 (시험이 보낸 메일을 센다). 운영은 비운다 */
+  mailer?: Mailer;
 }
 
 export async function buildServices(rt: Runtime, opts: ServiceOptions): Promise<Services> {
@@ -48,10 +51,12 @@ export async function buildServices(rt: Runtime, opts: ServiceOptions): Promise<
     baseURL,
     secret: requireSecret(rt, "BETTER_AUTH_SECRET"),
     trustedOrigins: [new URL(baseURL).origin],
-    mailer: settingsMailer(async () => db, async () => cipher, opts.fallbackMailer ?? fallbackMailer()),
+    mailer: opts.mailer ?? settingsMailer(async () => db, async () => cipher, opts.fallbackMailer ?? fallbackMailer()),
     clientIp: rt.clientIp,
     waitUntil: opts.waitUntil,
     onMailError: (e, info) => console.error(`[mail] ${info.to} 에게 "${info.subject}" 를 보내지 못했다`, e),
+    // 가입 판정 입력은 요청 하나에서 한 번만 읽고, 가입 뒤 감사 기록 member.signup 을 남긴다 (signup/gate.ts)
+    ...signupAuthHooks(db),
   });
   // OmniRoute 연결은 선택이다. 없으면 설치 때 토큰 붙여 넣기로 간다 (setup/omniroute.ts)
   const omniroute = { baseUrl: rt.secret("OMNIROUTE_URL") || null, initialPassword: rt.secret("OMNIROUTE_INITIAL_PASSWORD") || null };

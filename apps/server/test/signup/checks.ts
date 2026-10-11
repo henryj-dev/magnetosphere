@@ -35,5 +35,14 @@ export async function tcM2T1a(rig: Rig) {
         mail: 0,
       });
     }
+    // 초대 문맥(runAsInvite, 가짜 초대) 안의 서버 호출. invite_only·open·domain_allowlist → +1, closed·sso_only → 0 (Q3)
+    const inv = await attempt(rig, () => rig.apiSignUp(body(mail(`t1a-inv-${mode}`, "invited.example")), FAKE_INVITE));
+    const want = INVITE_OPEN.has(mode) ? { status: 200, user: 1, account: 1 } : { status: 403, user: 0, account: 0 };
+    expect({ mode, status: inv.status, user: inv.user, account: inv.account }, inv.body).toEqual({ mode, ...want });
   }
 }
+
+/** 시험용 가짜 초대. 이메일 없는 링크라 수락이 인증을 대신하지 않는다 */
+export const FAKE_INVITE = { inviteId: "inv-test", role: "member", email: null, verified: false } as const;
+/** 초대를 받는 정책 (Q3) */
+const INVITE_OPEN = new Set(["invite_only", "open", "domain_allowlist"]);
