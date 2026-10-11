@@ -515,12 +515,12 @@ TC-M0.T7.b  ruleset 필수 검사가 이 잡을 포함한다
 
 ---
 
-# M1 — 회원 기반: 설정·상태 전이·감사 기록·스키마 0003 🔒 (M0 필요)
+# M1 — 회원 기반: 설정·상태 전이·감사 기록·스키마 0003 🔓 (M0 필요)
 
 **브랜치** `p3/m1`.
 **outputs** `packages/db/migrations/*/0003_*`, `apps/server/src/settings/**`, `apps/server/test/settings/**`, `apps/server/src/members/**`, `apps/server/test/members/**`, `apps/server/src/audit/**`, `apps/server/test/audit/**` (새 경로만). 고칠 기존 파일(`packages/db/src/schema/**`, `seed.ts`, `setup/index.ts`)은 `outputs`에 없다.
 
-### ☐ M1.T1 — 설정 저장소 하나 (`settings/`)
+### ☑ M1.T1 — 설정 저장소 하나 (`settings/`)
 선행 없음 · 산출 `apps/server/src/settings/**`, `apps/server/test/settings/**`, `apps/server/src/setup/index.ts` · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-M1.T1.d`
 
 【작업】
@@ -538,7 +538,9 @@ TC-M0.T7.b  ruleset 필수 검사가 이 잡을 포함한다
      - `open`·`domain_allowlist`는 메일이 없으면 `mail_required`
      - `domain_allowlist`는 `allowed_domains`가 비면 `domains_required`
      - `sso_only`는 켜진 IdP 가 없으면 `no_idp` (3단계에는 늘, Q18)
+   (실제: 정책 여섯 키가 아닌 값(`public_base_url`·`mail_settings`·OmniRoute 토큰)은 같은 upsert 를 `writeAppSetting`으로 쓰고, 정책 키는 그 길로 받지 않는다. `domain_allowlist`인 동안 `allowed_domains`를 비우는 쓰기도 `domains_required`다. 읽기는 행이 없거나 값이 검사에 맞지 않으면 시드 값이다. 오류는 `SettingsError`의 `code`(`invalid_value`·`mail_required`·`domains_required`·`no_idp`·`unknown_key`).)
 2. 설치(`setup/index.ts`)의 `writeSetting`(지우고 넣기, 원자적이지 않음)을 이 upsert 로 바꾼다. 재현 커밋 `Red: TC-M1.T1.d` → 고침.
+   (실제: Red 커밋에서 다섯 DB 모두 설치 쓰기 20건 중 16~19건이 기본 키 충돌로 실패했다. 설정 저장소 upsert 는 그때도 초록이었다. D1 은 시험 Worker `apps/server/test/settings/concurrent-worker.ts`.)
 
 【테스트】
 ```
@@ -560,7 +562,7 @@ TC-M1.T1.d  설정 쓰기는 한 문장이라 동시 쓰기에 행이 사라지�
 - [ ] G-M1.1 ~ G-M1.4 · G-M1.17 통과
 - [ ] G-M1.16 통과 (Red 커밋에서 TC-M1.T1.d 실패)
 
-### ☐ M1.T2 — 회원 상태 전이 (순수 함수) (Q8·Q12 의존)
+### ☑ M1.T2 — 회원 상태 전이 (순수 함수) (Q8·Q12 의존)
 선행 없음 · 산출 `apps/server/src/members/transition.ts`, `apps/server/test/members/**` · 되돌리기 커밋 1개
 
 【작업】
@@ -568,6 +570,7 @@ TC-M1.T1.d  설정 쓰기는 한 문장이라 동시 쓰기에 행이 사라지�
    - 동작: `approve`(pending→active), `reject`(pending→행 삭제, Q8), `suspend`(active→suspended), `unsuspend`(suspended→active), `delete`(active·suspended→deleted), `promote`·`demote`.
    - 보호(Q12): 최초 관리자는 demote·suspend·delete 불가(`bootstrap_admin`). 자기 자신은 demote·suspend 불가(`self`).
    - 그 밖 전이는 `invalid_transition`.
+   (실제: `promote`·`demote`는 동작 `role` 하나에 새 역할(`member`·`admin`)을 실어 받는다 — 표가 6 동작 24칸·허용 7칸이 되고 M4.T1 `PATCH …/role {role}`·감사 `member.role`과 같은 모양이다. 강등은 `role` 동작에서 admin → member 다. 역할 값이 둘이 아니면 `invalid_role`. 거절의 `to`는 `"row_deleted"`.)
 
 【테스트】
 ```
@@ -582,7 +585,7 @@ TC-M1.T2.b  최초 관리자·자기 자신 보호 (Q12 의존)
 【통과】
 - [ ] G-M1.5 · G-M1.6 통과
 
-### ☐ M1.T3 — 감사 기록 쓰기 하나 (`audit/`) (Q17 의존)
+### ☑ M1.T3 — 감사 기록 쓰기 하나 (`audit/`) (Q17 의존)
 선행 없음 · 산출 `apps/server/src/audit/**`, `apps/server/test/audit/**` · 되돌리기 커밋 1개
 
 【작업】
@@ -590,6 +593,7 @@ TC-M1.T2.b  최초 관리자·자기 자신 보호 (Q12 의존)
    - `action`은 허용 목록과 2단계 이름만 받는다. 허용 목록(Q17): `member.signup`, `member.approve`, `member.reject`, `member.suspend`, `member.unsuspend`, `member.role`, `member.delete`, `invite.create`, `invite.revoke`, `invite.accept`, `settings.update`, `alert.signup_cap`.
    - `detail`은 JSON 객체다. 키 이름이 `email`, `name`, `password`, `token`, `*_hash` 이면 던진다.
    - 트랜잭션·D1 batch 안에서 쓸 수 있게 문장을 돌려주는 `auditStatement`도 둔다.
+   (실제: 2단계 이름은 `PHASE2_AUDIT_ACTIONS` 9개다. 금지 키는 대소문자·`_`·`-`를 지우고 `name`이거나 `email`·`password`·`token`·`hash`·`secret`·`apikey`로 끝나는 키다 (`newEmail`·`tokenHash`). `auditStatement(h, entry, db = h.db)`는 문을 만들 때 검사한다.)
 
 【테스트】
 ```
@@ -604,11 +608,12 @@ TC-M1.T3.b  모르는 action 은 쓰지 않는다 (Q17 의존)
 【통과】
 - [ ] G-M1.7 · G-M1.8 통과
 
-### ☐ M1.T4 — 스키마 0003 (Q4·Q9 의존)
+### ☑ M1.T4 — 스키마 0003 (Q4·Q9 의존)
 선행 없음 · 산출 `packages/db/src/schema/**`, `packages/db/migrations/{sqlite,mysql,pg}/0003_*` · 되돌리기 커밋 1개
 
 【작업】
 1. 공통 정의에 더한다: `invites.revoked_at`(시각, NULL), `invites.used_by`(id, NULL), `invites`에 색인 `(expires_at)`, `user.deleted_at`(시각, NULL, Q9). `user` 칼럼은 `USER_ADDITIONAL_FIELDS`에 `input: false`로 넣는다 (4.6). 세 벌 생성·마이그레이션. 커밋.
+   (실제: `0003_m1_members`, 색인 `idx_invites_expires`. 가입 본문 `deletedAt` 값은 400 `FIELD_NOT_ALLOWED`·계정 없음, `null`·칼럼 이름 `deleted_at`은 버려져 200 + NULL (TC-S3.T1.a 의 `monthlyLimitUsd null`과 같다). 수정은 400 `FIELD_NOT_ALLOWED`, `null`만 보내면 400 "No fields to update".)
 
 【테스트】
 ```
@@ -626,7 +631,7 @@ TC-M1.T4.c  마이그레이션과 생성 스키마가 같다
 【통과】
 - [ ] G-M1.9 ~ G-M1.11 통과
 
-### ☐ M1.T5 — M1 CI 잡과 봉인
+### ◐ M1.T5 — M1 CI 잡과 봉인
 선행 M1.T1 ~ M1.T4 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
 
 【작업】
