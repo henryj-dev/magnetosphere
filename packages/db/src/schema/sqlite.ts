@@ -2,7 +2,7 @@
 // 원본: packages/db/src/schema/common.ts · 생성: pnpm -C packages/db gen
 import { index, integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
-// 회원. Better Auth 칼럼 + 권한 칼럼 다섯
+// 회원. Better Auth 칼럼 + 권한 칼럼 다섯 + 삭제 시각
 export const user = sqliteTable("user", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -16,6 +16,7 @@ export const user = sqliteTable("user", {
   monthlyLimitUsd: real("monthly_limit_usd"),
   maxKeys: integer("max_keys"),
   isBootstrapAdmin: integer("is_bootstrap_admin", { mode: "boolean" }).default(false).notNull(),
+  deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
 });
 
 // 로그인 세션
@@ -114,7 +115,11 @@ export const invites = sqliteTable("invites", {
   expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
   usedAt: integer("used_at", { mode: "timestamp_ms" }),
   createdBy: text("created_by").notNull(),
-});
+  revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+  usedBy: text("used_by"),
+}, (table) => [
+  index("idx_invites_expires").on(table.expiresAt),
+]);
 
 // 회원 키와 OmniRoute 키의 대응 (계획서 5.2, 5.7)
 export const apiKeys = sqliteTable("api_keys", {

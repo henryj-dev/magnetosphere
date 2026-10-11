@@ -2,7 +2,7 @@
 // 원본: packages/db/src/schema/common.ts · 생성: pnpm -C packages/db gen
 import { bigint, boolean, index, integer, numeric, pgTable, primaryKey, text, timestamp, varchar } from "drizzle-orm/pg-core";
 
-// 회원. Better Auth 칼럼 + 권한 칼럼 다섯
+// 회원. Better Auth 칼럼 + 권한 칼럼 다섯 + 삭제 시각
 export const user = pgTable("user", {
   id: varchar("id", { length: 36 }).primaryKey(),
   name: text("name").notNull(),
@@ -16,6 +16,7 @@ export const user = pgTable("user", {
   monthlyLimitUsd: numeric("monthly_limit_usd", { precision: 12, scale: 6, mode: "number" }),
   maxKeys: integer("max_keys"),
   isBootstrapAdmin: boolean("is_bootstrap_admin").default(false).notNull(),
+  deletedAt: timestamp("deleted_at"),
 });
 
 // 로그인 세션
@@ -114,7 +115,11 @@ export const invites = pgTable("invites", {
   expiresAt: timestamp("expires_at").notNull(),
   usedAt: timestamp("used_at"),
   createdBy: varchar("created_by", { length: 36 }).notNull(),
-});
+  revokedAt: timestamp("revoked_at"),
+  usedBy: varchar("used_by", { length: 36 }),
+}, (table) => [
+  index("idx_invites_expires").on(table.expiresAt),
+]);
 
 // 회원 키와 OmniRoute 키의 대응 (계획서 5.2, 5.7)
 export const apiKeys = pgTable("api_keys", {
