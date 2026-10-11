@@ -817,6 +817,9 @@ export const GATES = {
       { id: "G-M3.11", how: "test", desc: "TC-M3.T2.d 초대 회원의 역할·상태·한도는 초대 문맥에서만 온다 (Q6·Q16)", cmd: 'pnpm -C apps/server test -t "TC-M3.T2.d"', expectPassed: 1 },
       { id: "G-M3.12", how: "test", desc: "TC-M3.T2.e 이미 있는 이메일로 수락하면 초대가 소진되지 않는다 (V29)", cmd: 'pnpm -C apps/server test -t "TC-M3.T2.e"', expectPassed: 1 },
       { id: "G-M3.13", how: "test", desc: "TC-M3.T2.f 수락 요청 수 제한", cmd: 'pnpm -C apps/server test -t "TC-M3.T2.f"', expectPassed: 1 },
+      // M3.T3 만료·취소한 초대 정리
+      { id: "G-M3.14", how: "test", requires: ["local-services"], desc: "TC-M3.T3.a 30일 지난 만료·취소 초대만 지운다 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-M3.T3.a" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-M3.19", how: "test", requires: ["local-services"], desc: "TC-M3.T3.a 초대 정리 (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M3.T3.a"', expectPassed: 1 },
       // M3.T1 보안 리뷰 고침 (M1·L1)
       { id: "G-M3.20", how: "test", desc: "TC-M3.T1.g 감사 기록은 실제 변경과 같다 — 끼어든 DELETE 404·감사 0, 재초대 revoke 는 실제 취소 행만 (리뷰 M1)", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.g"', expectPassed: 1 },
       { id: "G-M3.21", how: "cmd", desc: "재현 빨강: TC-M3.T1.g 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M3.20 --since seal:M2" },
