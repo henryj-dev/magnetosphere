@@ -813,6 +813,10 @@ export const GATES = {
       { id: "G-M3.20", how: "test", desc: "TC-M3.T1.g 감사 기록은 실제 변경과 같다 — 끼어든 DELETE 404·감사 0, 재초대 revoke 는 실제 취소 행만 (리뷰 M1)", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.g"', expectPassed: 1 },
       { id: "G-M3.21", how: "cmd", desc: "재현 빨강: TC-M3.T1.g 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M3.20 --since seal:M2" },
       { id: "G-M3.22", how: "test", desc: "TC-M3.T1.h 같은 이메일 동시 재초대 → 살아 있는 초대 1개 (리뷰 L1)", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.h"', expectPassed: 1 },
+      // 초대 쓰기 직렬화 (네 DB 실제 동시 요청 교착 고침)
+      { id: "G-M3.23", how: "test", requires: ["local-services"], desc: "TC-M3.T1.i·g·h 실제 동시 초대 만들기는 모두 201·이메일마다 살아 있는 초대 1개·감사 = 실제 변경 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-M3.T1.[ghi]" --db sqlite,mysql,mariadb,pg', expectPassed: 12 },
+      { id: "G-M3.24", how: "test", desc: "TC-M3.T1.i 실제 동시 초대 만들기 (SQLite)", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.i"', expectPassed: 1 },
+      { id: "G-M3.25", how: "cmd", desc: "재현 빨강: TC-M3.T1.i 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M3.23 --since seal:M2" },
     ],
   },
   M4: {
