@@ -71,7 +71,7 @@ describe("M1.T1 설정 저장소", () => {
     for (const [key, value] of bad) await rejected(key, value, "invalid_value");
     // 모르는 키는 정책 쓰기로 받지 않고, 정책 키는 검사 없는 쓰기로 받지 않는다
     await expect(writeSetting(h, "public_base_url" as SettingKey, "https://x", null, NOW)).rejects.toMatchObject({ code: "unknown_key" });
-    await expect(writeAppSetting(h, "daily_signup_cap", -1, null, NOW)).rejects.toMatchObject({ code: "unknown_key" });
+    await expect(writeAppSetting(h, "daily_signup_cap", -1, null, NOW)).rejects.toMatchObject({ code: "policy_key" });
     expect(await stored("daily_signup_cap")).toBe(DEFAULT_SETTINGS.daily_signup_cap);
 
     // 대조: 맞는 값은 저장된다. 도메인은 가입 이메일과 같은 꼴(소문자·punycode)로 바꿔 저장한다

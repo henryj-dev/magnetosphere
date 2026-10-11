@@ -78,7 +78,7 @@ const DEFAULTS: SignupSettings = { ...DEFAULT_SETTINGS, allowed_domains: [] };
 /** 행의 값이 깨졌을 때 읽는 값. 가입을 더 막는 쪽이다. 기본 한도는 #13 과 같이 시드 값 5 다 */
 const BROKEN: SignupSettings = { ...DEFAULTS, signup_mode: "closed", daily_signup_cap: 0, signup_requires_approval: true, allowed_domains: [] };
 
-export type SettingsErrorCode = "unknown_key" | "invalid_value" | "mail_required" | "domains_required" | "no_idp";
+export type SettingsErrorCode = "unknown_key" | "policy_key" | "invalid_value" | "mail_required" | "domains_required" | "no_idp";
 
 /** 저장하지 않은 설정. code 는 설정 API 의 오류 코드로 그대로 쓴다 (invalid_value 400, 나머지 409) */
 export class SettingsError extends Error {
@@ -167,7 +167,7 @@ export async function writeSetting<K extends SettingKey>(h: DbHandle, key: K, va
 
 /** 정책 키가 아닌 app_settings 값 쓰기 (설치의 public_base_url·mail_settings 등). 정책 키는 writeSetting 만 쓴다 */
 export async function writeAppSetting(h: DbHandle, key: string, value: unknown, updatedBy: string | null, now: Date): Promise<void> {
-  if (isSettingKey(key)) throw new SettingsError("unknown_key", key);
+  if (isSettingKey(key)) throw new SettingsError("policy_key", key);
   await upsert(h, key, value, updatedBy, now);
 }
 
