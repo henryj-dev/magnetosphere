@@ -100,6 +100,9 @@ jobs:
         run: node scripts/gate.mjs S3 --explain
       - name: packages/auth 테스트 전부
         run: pnpm -C packages/auth test && pnpm -C packages/auth test:smtp
+      # 봉인된 단계의 게이트 밖 보안 고침 시험. Workers + D1 비밀번호 재설정 (wrangler dev 는 시험이 직접 띄운다)
+      - name: D1 비밀번호 재설정 (TC-SEC.2.a)
+        run: pnpm -C apps/server test:workers -t "TC-SEC.2.a"
 
   server:
     name: 서버·런타임 (S4 게이트)
