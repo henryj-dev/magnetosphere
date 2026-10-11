@@ -1,6 +1,7 @@
 // 감사 기록 쓰기 하나 (3단계 실행판 M1.T3, 계획서 5.9, Q17). 3단계 코드(가입·초대·회원 관리·설정)는 이것만 쓴다.
 //   - action 은 허용 목록(3단계 열둘)과 2단계가 이미 쓰는 이름만 받는다. 철자가 틀린 action 은 7단계 감사 화면의 거르기에서 빠진다.
-//   - detail 은 JSON 객체다. 키 이름이 개인정보·비밀 값(email·name·password·token·*_hash 등)이면 어느 깊이든 던진다.
+//   - detail 은 JSON 객체다. 키 이름이 개인정보·비밀 값(email·*name·password·token·*_hash 등)이거나 문자열 값이 이메일 꼴이면
+//     어느 깊이든 던진다 (target 의 이메일 꼴 값도).
 //     탈퇴로 지운 개인정보(Q9)가 감사 기록에 남지 않게 한다. target 은 회원·초대 id 다.
 //   - writeAudit 은 바로 쓰고, auditStatement 는 실행하지 않은 INSERT 문을 돌려준다. 트랜잭션(tx) 안이나 D1 batch 에 넣어
 //     상태 쓰기와 감사 기록을 한 번에 남길 때 쓴다. 검사는 문을 만들 때 한다 (잘못된 기록이면 batch 를 보내기 전에 던진다).
@@ -61,10 +62,16 @@ export class AuditError extends Error {
   }
 }
 
-/** 개인정보·비밀 값 키. 대소문자·_·- 를 지우고 비교한다 (email·e_mail·newEmail, token·sessionToken, token_hash·tokenHash …) */
+/** name 으로 끝나지만 개인정보가 아닌 키 (소문자·_·- 지운 꼴). 설정 API 의 바뀐 키 이름 등 */
+const NAME_KEY_EXCEPTIONS: ReadonlySet<string> = new Set(["keyname"]);
+/** 이메일 꼴: @ 앞뒤에 글자가 있고 @ 뒤에 점이 든 도메인. 지운 회원 주소(deleted-<id>@invalid)는 점이 없어 걸리지 않는다 */
+const EMAIL_LIKE = /[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+/;
+
+/** 개인정보·비밀 값 키. 대소문자·_·- 를 지우고 비교한다 (email·newEmail, displayName·user_name, token·sessionToken, tokenHash …) */
 function forbiddenKey(key: string): boolean {
   const k = key.toLowerCase().replace(/[_-]/g, "");
-  return k === "name" || /(email|password|token|hash|secret|apikey)$/.test(k);
+  if (NAME_KEY_EXCEPTIONS.has(k)) return false;
+  return /(name|email|password|token|hash|secret|apikey)$/.test(k);
 }
 
 function checkDetail(v: unknown, path: string): void {
@@ -72,6 +79,7 @@ function checkDetail(v: unknown, path: string): void {
     v.forEach((x, i) => checkDetail(x, `${path}[${i}]`));
     return;
   }
+  if (typeof v === "string" && EMAIL_LIKE.test(v)) throw new AuditError("forbidden_detail_key", `감사 기록 ${path} 에 이메일 꼴 값`);
   if (v === null || typeof v !== "object") return;
   for (const [k, x] of Object.entries(v)) {
     if (forbiddenKey(k)) throw new AuditError("forbidden_detail_key", `감사 기록 detail 에 넣을 수 없는 키: ${path}.${k}`);
@@ -85,6 +93,7 @@ function auditRow(e: AuditEntry) {
   const detail = e.detail ?? null;
   if (detail !== null && (typeof detail !== "object" || Array.isArray(detail))) throw new AuditError("invalid_detail", "감사 기록 detail 은 JSON 객체다");
   checkDetail(detail, "detail");
+  checkDetail(e.target, "target");
   return {
     id: crypto.randomUUID(),
     actorId: e.actorId,
