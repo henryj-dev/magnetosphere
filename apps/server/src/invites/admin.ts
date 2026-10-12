@@ -273,8 +273,9 @@ export function inviteAdminRoutes(services: () => Promise<Services>) {
       ip,
       now,
     };
-    // 같은 이메일의 살아 있는 초대
-    const sameEmail = p.email === null ? null : and(eq(t.email, p.email), liveOn(t, now));
+    // 같은 이메일의 살아 있는 초대. MySQL·MariaDB 의 기본 정렬은 악센트를 무시하므로 정규화 뒤 바이트가 같은 주소만 고른다.
+    // 다른 DB 는 기존 eq 그대로다. 취소와 재초대 감사는 이 조건을 같이 쓴다.
+    const sameEmail = p.email === null ? null : and(h.provider === "mysql" ? sql`${t.email} = cast(${p.email} as binary)` : eq(t.email, p.email), liveOn(t, now));
     if (h.kind === "d1") {
       await h.db.batch([
         ...(sameEmail ? [auditEachStatement(h, h.db, reinvite, sameEmail), h.db.update(t).set({ revokedAt: now }).where(sameEmail)] : []),
