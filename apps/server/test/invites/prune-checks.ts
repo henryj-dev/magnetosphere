@@ -1,7 +1,8 @@
 // 만료·취소한 초대 정리 (M3.T3) 공용 행. 네 DB(prune.db.test.ts)와 D1(prune.workers.test.ts, prune-worker.ts)이 같은 행으로 단언한다.
-// 시각은 ms. TC-M3.T3.a 의 문서 행 다섯(만료 31일·만료 29일·취소 31일·사용됨 90일·유효)에 둘을 더한다 (M3.T2 보안 리뷰 L-4):
-//   차지 중(used_at 31일 전·used_by 없음) — 수락 2~5단계 사이의 행, 사용·취소(used_at 있음·revoked_at 35일 전) — 사용한 초대는 취소돼도 남는다.
-// 그래서 문서 단언 "지움 2·남음 3" 이 여기서는 "지움 2·남음 5" 다.
+// 시각은 ms. TC-M3.T3.a 의 문서 행 다섯(만료 31일·만료 29일·취소 31일·사용됨 90일·유효)에 셋을 더한다:
+//   차지 중(used_at 31일 전·used_by 없음) — 수락 2~5단계 사이의 행, 사용·취소(used_at 있음·revoked_at 35일 전) — 사용한 초대는 취소돼도 남는다 (M3.T2 보안 리뷰 L-4).
+//   취소 29일(미사용·expires_at 미래) — 만료 조건과 분리해 취소 보존 기간을 본다.
+// 그래서 문서 단언 "지움 2·남음 3" 이 여기서는 "지움 2·남음 6" 다.
 import { randomUUID } from "node:crypto";
 
 export const T3_NOW = Date.parse("2026-10-11T00:00:00.000Z");
@@ -26,6 +27,7 @@ export function t3aRows() {
   };
   const keep = {
     expired29: row(ago(29)),
+    revoked29: row(T3_NOW + 7 * DAY, { revokedAt: ago(29) }),
     used90: row(ago(83), { usedAt: ago(90), usedBy: randomUUID() }),
     valid: row(T3_NOW + 7 * DAY),
     claimed31: row(ago(31), { usedAt: ago(31) }),

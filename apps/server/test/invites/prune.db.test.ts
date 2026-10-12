@@ -1,5 +1,5 @@
 // 만료·취소한 초대 정리 (M3.T3) — Node 네 DB (pnpm test:db). 시각 비교(timestamp 칼럼)와 MySQL 파생 테이블 감싸기가 DB 마다 같은지 본다.
-// D1 판은 prune.workers.test.ts. 문서 단언 "지움 2·남음 3" 에 차지 중·사용·취소 행을 더해 "지움 2·남음 5" 다 (prune-checks.ts).
+// D1 판은 prune.workers.test.ts. 문서 단언 "지움 2·남음 3" 에 차지 중·사용·취소·취소 29일 행을 더해 "지움 2·남음 6" 다 (prune-checks.ts).
 import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { acquireLease } from "@magnetosphere/runtime/lease";
@@ -25,7 +25,7 @@ describe.each(enabledDbs())("%s", (kind: DbKind) => {
     await t?.drop();
   });
 
-  it(`TC-M3.T3.a ${LABEL[kind]}: 만료 31일·만료 29일·취소 31일·사용됨 90일·유효 + 차지 중 31일·사용·취소 → 지움 2·남음 5, 임대를 잃으면 0행`, async () => {
+  it(`TC-M3.T3.a ${LABEL[kind]}: 만료 31일·만료 29일·취소 31일·사용됨 90일·유효 + 차지 중 31일·사용·취소·취소 29일(미사용·만료 미래) → 지움 2·남음 6, 임대를 잃으면 0행`, async () => {
     expect(INVITE_RETENTION_MS).toBe(30 * 24 * 60 * 60_000);
     const inv = h.schema.invites;
     const { drop, keep } = t3aRows();
