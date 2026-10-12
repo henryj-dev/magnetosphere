@@ -801,7 +801,43 @@ export const GATES = {
     waivable: false,
     strictTests: true,
     outputs: ["apps/server/src/invites/**", "apps/server/test/invites/**"],
-    checks: [],
+    checks: [
+      // M3.T1 관리자 초대 API
+      { id: "G-M3.1", how: "test", desc: "TC-M3.T1.a 이메일 없는 관리자 초대는 만들 수 없다", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.a"', expectPassed: 1 },
+      { id: "G-M3.2", how: "test", desc: "TC-M3.T1.b 원문 토큰은 응답에만 있다", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.b"', expectPassed: 1 },
+      { id: "G-M3.3", how: "test", desc: "TC-M3.T1.c 만료 기본·최대 (Q4)", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.c"', expectPassed: 1 },
+      { id: "G-M3.4", how: "test", desc: "TC-M3.T1.d 관리자만 초대를 다룬다", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.d"', expectPassed: 1 },
+      { id: "G-M3.5", how: "test", desc: "TC-M3.T1.e 정책·메일에 따라 초대 만들기를 거부한다 (Q3·Q5)", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.e"', expectPassed: 1 },
+      { id: "G-M3.6", how: "test", desc: "TC-M3.T1.f 취소한 초대와 같은 이메일 재초대", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.f"', expectPassed: 1 },
+      // M3.T2 초대 수락
+      { id: "G-M3.7", how: "test", requires: ["local-services"], desc: "TC-M3.T2.a 동시 수락 — 201 정확히 1 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-M3.T2.a" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-M3.8", how: "test", requires: ["local-services"], desc: "TC-M3.T2.a 동시 수락 (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M3.T2.a"', expectPassed: 1 },
+      { id: "G-M3.9", how: "test", desc: "TC-M3.T2.b 실패한 수락의 이유를 가르지 않는다", cmd: 'pnpm -C apps/server test -t "TC-M3.T2.b"', expectPassed: 1 },
+      { id: "G-M3.10", how: "test", desc: "TC-M3.T2.c 이메일 지정 초대는 인증된 회원을 만들고 인증 메일을 보내지 않는다 (Q5·V29)", cmd: 'pnpm -C apps/server test -t "TC-M3.T2.c"', expectPassed: 1 },
+      { id: "G-M3.11", how: "test", desc: "TC-M3.T2.d 초대 회원의 역할·상태·한도는 초대 문맥에서만 온다 (Q6·Q16)", cmd: 'pnpm -C apps/server test -t "TC-M3.T2.d"', expectPassed: 1 },
+      { id: "G-M3.12", how: "test", desc: "TC-M3.T2.e 이미 있는 이메일로 수락하면 초대가 소진되지 않는다 (V29)", cmd: 'pnpm -C apps/server test -t "TC-M3.T2.e"', expectPassed: 1 },
+      { id: "G-M3.13", how: "test", desc: "TC-M3.T2.f 수락 요청 수 제한", cmd: 'pnpm -C apps/server test -t "TC-M3.T2.f"', expectPassed: 1 },
+      // M3.T3 만료·취소한 초대 정리
+      { id: "G-M3.14", how: "test", requires: ["local-services"], desc: "TC-M3.T3.a 30일 지난 만료·취소 초대만 지운다 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-M3.T3.a" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-M3.19", how: "test", requires: ["local-services"], desc: "TC-M3.T3.a 초대 정리 (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M3.T3.a"', expectPassed: 1 },
+      // 저장소·타입·CI 단계 잡·필수 검사 (M3.T4)
+      { id: "G-M3.15", how: "grep", desc: "초대 원문 저장 칼럼 없음", pattern: "\\b(invite_token|token_raw|raw_token)\\b", in: ["packages/db/src/schema"], op: "==", limit: 0 },
+      { id: "G-M3.16", how: "cmd", desc: "타입 검사", cmd: "pnpm -r typecheck" },
+      { id: "G-M3.17", how: "grep", desc: "TC-M3.T4.a CI 단계 잡 (M3)", pattern: "^\\s+run: node scripts/gate\\.mjs M3\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
+      { id: "G-M3.18", how: "cmd", desc: "TC-M3.T4.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
+      // M3.T1 보안 리뷰 고침 (M1·L1)
+      { id: "G-M3.20", how: "test", desc: "TC-M3.T1.g 감사 기록은 실제 변경과 같다 — 끼어든 DELETE 404·감사 0, 재초대 revoke 는 실제 취소 행만 (리뷰 M1)", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.g"', expectPassed: 1 },
+      { id: "G-M3.21", how: "cmd", desc: "재현 빨강: TC-M3.T1.g 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M3.20 --since seal:M2" },
+      { id: "G-M3.22", how: "test", desc: "TC-M3.T1.h 같은 이메일 동시 재초대 → 살아 있는 초대 1개 (리뷰 L1)", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.h"', expectPassed: 1 },
+      // 초대 쓰기 직렬화 (네 DB 실제 동시 요청 교착 고침)
+      { id: "G-M3.23", how: "test", requires: ["local-services"], desc: "TC-M3.T1.i·g·h 실제 동시 초대 만들기는 모두 201·이메일마다 살아 있는 초대 1개·감사 = 실제 변경 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-M3.T1.[ghi]" --db sqlite,mysql,mariadb,pg', expectPassed: 12 },
+      { id: "G-M3.24", how: "test", desc: "TC-M3.T1.i 실제 동시 초대 만들기 (SQLite)", cmd: 'pnpm -C apps/server test -t "TC-M3.T1.i"', expectPassed: 1 },
+      { id: "G-M3.25", how: "cmd", desc: "재현 빨강: TC-M3.T1.i 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M3.23 --since seal:M2" },
+      // M3.T2 보안 리뷰 고침 (H-1)
+      { id: "G-M3.26", how: "test", desc: "TC-M3.T2.g 이메일 없는 초대를 남의 이메일로 수락해도 가로채지 못한다 (리뷰 H-1)", cmd: 'pnpm -C apps/server test -t "TC-M3.T2.g"', expectPassed: 1 },
+      { id: "G-M3.27", how: "cmd", desc: "재현 빨강: TC-M3.T2.g 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M3.26 --since seal:M2" },
+      { id: "G-M3.28", how: "test", requires: ["local-services"], desc: "TC-M3.T2.g 이메일 없는 초대로 남의 이메일을 가로채지 못한다 (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M3.T2.g"', expectPassed: 1 },
+    ],
   },
   M4: {
     needs: ["M3"],

@@ -8,6 +8,8 @@
 //   /api/me/keys   회원 키 API (routes/keys.ts). /api/admin/users/:id 는 관리자 한도·최대 개수 (routes/admin-limits.ts)
 //                  두 경로의 GET 아닌 요청은 Origin 이 BETTER_AUTH_URL 출처와 같아야 한다 (routes/guard.ts, 7장 CSRF)
 //   /api/admin/settings/{signup,mail} 가입 정책·메일 설정 API (signup/admin.ts·signup/mail.ts, M2.T5). 같은 CSRF 검사
+//   /api/admin/invites 초대 만들기·목록·취소 (invites/admin.ts, M3.T1). 같은 CSRF 검사
+//   /api/invites/accept 초대 수락 (invites/accept.ts, M3.T2). 공개 경로, application/json 만 받는다
 //   /api/*         그 밖은 JSON 404. 모르는 API 경로가 index.html 200 이 되면 클라이언트가 오류를 성공으로 오인한다
 //   나머지         SPA 정적 파일 (apps/web 빌드). 없는 경로는 index.html (TC-S4.T3.a)
 // 모든 응답(SPA·API)에 보안 헤더를 단다 (TC-S4.T3.f). 스크립트·스타일 출처는 SPA 빌드가 <meta> CSP 로 건다
@@ -20,6 +22,8 @@ import { secureHeaders } from "hono/secure-headers";
 import type { Mailer } from "@magnetosphere/auth";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
+import { inviteAcceptRoutes } from "./invites/accept.ts";
+import { inviteAdminRoutes } from "./invites/admin.ts";
 import type { ClientFor } from "./limits/daily.ts";
 import { adminLimitRoutes } from "./routes/admin-limits.ts";
 import { sameOrigin } from "./routes/guard.ts";
@@ -38,7 +42,11 @@ export const API_BODY_LIMIT = 64 * 1024;
 
 export interface Services {
   db: DbHandle;
-  auth: { handler(req: Request): Promise<Response> };
+  auth: {
+    handler(req: Request): Promise<Response>;
+    /** 서버 안 호출. 초대 수락(invites/accept.ts)이 초대 문맥(runAsInvite) 안에서 부른다. 시험의 가짜 인증에는 없다 */
+    api?: { signUpEmail(o: { body: { email: string; name: string; password: string } }): Promise<unknown> };
+  };
   /** APP_ENCRYPTION_KEY 로 만든 암호화 유틸 */
   cipher: Cipher;
   /** OmniRoute 주소와 부트스트랩 비밀번호 (OMNIROUTE_URL, OMNIROUTE_INITIAL_PASSWORD). 없으면 null */
@@ -134,10 +142,25 @@ export function createApp(deps: AppDeps) {
   app.route("/api/me/keys", keyRoutes(deps.services));
   app.route("/api/admin/settings/signup", signupSettingsRoutes(deps.services));
   app.route("/api/admin/settings/mail", mailSettingsRoutes(deps.services));
+  app.route("/api/admin/invites", inviteAdminRoutes(deps.services));
   app.route("/api/admin", adminLimitRoutes(deps.services));
+  app.route("/api/invites", inviteAcceptRoutes(deps.services));
   app.all("/api/*", (c) => c.json({ error: "not_found" }, 404));
   app.get("*", deps.assets);
   app.onError((e, c) => {
+    // drizzle 쿼리 오류(DrizzleQueryError)는 메시지·params 에 이메일·token_hash 같은 값이 들어 있다. 쿼리 문과 원인 메시지만 남긴다.
+    // 원인 메시지도 값을 따옴표로 싸서 담을 수 있다 (MySQL ER_DUP_ENTRY "Duplicate entry 'a@x.com' for key …"). 따옴표 안은 ? 로 가린다.
+    // 패키지 사본마다 클래스가 달라 instanceof 대신 모양(query 문자열·params 배열)으로 가린다
+    const q = e as { query?: unknown; params?: unknown; cause?: { message?: unknown } };
+    if (typeof q.query === "string" && Array.isArray(q.params)) {
+      const cause = String(q.cause?.message ?? "알 수 없음")
+        // MySQL ER_DUP_ENTRY 는 값 안에 작은따옴표가 들어 있을 수 있어(o'brien@…) 꼴 전체를 가린다
+        .replace(/Duplicate entry '[\s\S]*' for key '[\s\S]*'/g, "Duplicate entry '?' for key '?'")
+        .replace(/'(?:[^'\\]|\\.)*'/g, "'?'")
+        .replace(/"(?:[^"\\]|\\.)*"/g, '"?"');
+      console.error(`[server] 처리하지 못한 DB 오류: ${q.query} (원인: ${cause})`);
+      return c.json({ error: "internal_error" }, 500);
+    }
     console.error("[server] 처리하지 못한 오류", e);
     return c.json({ error: "internal_error" }, 500);
   });

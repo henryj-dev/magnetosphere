@@ -1019,6 +1019,7 @@ TC-M2.T6.b  ruleset 필수 검사가 이 잡을 포함한다
      - 정책이 `closed`·`sso_only`면 409 `signup_closed` (Q3).
      - 메일 없는 설치에서 이메일 없는 링크는 409 `mail_required` (Q5).
      - 같은 이메일의 미사용·미만료 초대가 있으면 그것을 취소하고 새로 만든다.
+       (실제: 초대 만들기는 `job_leases`의 고정 행 `invite_write_mutex`를 트랜잭션 첫 잠금으로 직렬화한다(pg·mysql·mariadb, READ COMMITTED 명시, pg `lock_timeout` 5s). SQLite·D1 은 이미 직렬이다. `invites.email`에 인덱스가 없어 email 조건 잠금이 MySQL·MariaDB 에서 표를 잠가 동시 요청이 교착(500)했기 때문이다. 그래서 같은 이메일 동시 요청도 모두 201 이고 나중에 커밋된 초대가 앞 초대를 취소한다 — 차례로 재초대한 것과 같다. 409 는 없다. `invite.revoke` 감사는 트랜잭션·batch 안에서 실제로 취소한 행에만 남는다.)
    - 감사 기록 `invite.create`·`invite.revoke`. 요청 수 제한은 관리자당 분당 30회(`consume`).
 
 【테스트】
@@ -1041,7 +1042,14 @@ TC-M3.T1.e  정책·메일에 따라 초대 만들기를 거부한다 (Q3·Q5 �
 TC-M3.T1.f  취소한 초대와 같은 이메일 재초대
   단언:  DELETE → revoked_at 설정·audit invite.revoke 1행. 같은 이메일 두 번 POST → 미사용 초대 1개(앞 것 revoked_at)
   검출:  같은 이메일 초대가 여럿 살아, 관리자가 취소한 줄 아는 옛 링크로 가입되는 것
+TC-M3.T1.g  감사 기록은 실제 변경과 같다 (보안 리뷰 M1, Node SQLite·D1 경로)
+  단언:  읽은 뒤 사용·취소된 초대의 DELETE → 404·감사 0행, 재초대 invite.revoke 는 실제로 취소된 행만 (끼어든 초대 포함, 사용된 초대 제외)
+TC-M3.T1.h  같은 이메일 재초대는 차례로 대체한다 (보안 리뷰 L1)
+  단언:  만들기 직전 끼어든 같은 이메일 초대도 취소, 동시 6개 → 모두 201·살아 있는 초대 1개(해시가 201 링크 하나와 일치)·나머지 취소·감사 = 실제 취소
+TC-M3.T1.i  실제 동시 초대 만들기 (네 DB, 교착 고침)
+  단언:  빈 표 같은 이메일 2개·같은 이메일 4·8개·서로 다른 이메일 12개 동시 × 3회 → 모두 201(500·409 0), 이메일마다 살아 있는 초대 1개, 감사 = 실제 취소, expires_at 왕복 일치
 ```
+문서와 달라진 단언: TC-M3.T1.h 는 처음 "(expires_at, id) 큰 쪽이 이기고 진 쪽은 409 invite_conflict" 였다. 초대 쓰기를 직렬화한 뒤 409 를 없애고 "모두 201, 나중이 이김" 으로 바꿨다.
 
 【통과】
 - [ ] G-M3.1 ~ G-M3.6 통과
@@ -1069,6 +1077,7 @@ TC-M3.T2.b  실패한 수락의 이유를 가르지 않는다
   검출:  "만료됨"·"이메일이 다름"을 따로 알려 초대 대상 이메일이나 토큰의 유효성을 바깥에서 알아내는 것
 TC-M3.T2.c  이메일 지정 초대는 인증된 회원을 만들고 인증 메일을 보내지 않는다 (Q5·V29 의존)
   단언:  email 지정 초대 수락 → emailVerified true, 인증 메일 0통, 곧바로 POST /api/me/keys 201. 이메일 없는 링크 수락 → emailVerified false, 인증 메일 1통, 키 발급 403
+  현재:  키 발급 거부는 "로그인 403(미인증) · 억지로 만든 세션의 키 발급 401" 로 단언한다. M2 보안 리뷰 H1 이후 미인증 회원의 세션은 무효라(get-session null) 키 API 가 403 이 아니라 401 을 낸다. 인증 메일은 H1 확인 링크다 (TC-M3.T2.g)
   검출:  sign-up.mjs 가 emailVerified: false 로 만들고 :241 에서 메일을 늘 보내, 메일 없는 invite_only 설치의 초대 회원이 K4 발급 확인에 막히거나 인증된 회원이 쓸모없는 인증 메일을 받는 것
 TC-M3.T2.d  초대 회원의 역할·상태·한도는 초대 문맥에서만 온다 (Q6·Q16 의존)
   단언:  role admin 초대 → role admin·status active·monthly_limit_usd == default_limit_usd(5)·max_keys NULL. 본문에 role·status·monthlyLimitUsd·emailVerified 를 넣어도 같은 결과. member 초대 본문 role admin → member
@@ -1079,24 +1088,33 @@ TC-M3.T2.e  이미 있는 이메일로 수락하면 초대가 소진되지 않�
 TC-M3.T2.f  수락 요청 수 제한
   단언:  같은 IP 에서 10분 안에 11번째 → 429, 다른 IP 는 400 invalid_invite
   검출:  이메일 없는 링크 하나를 쥔 사람이 수락을 되풀이해 "이미 있는 이메일"을 탐침하는 것 (응답은 같지만 횟수를 막는다)
+TC-M3.T2.g  이메일 없는 초대를 남의 이메일로 수락해도 가로채지 못한다 (보안 리뷰 H-1, SQLite·D1)
+  단언:  이메일 없는 초대를 피해자 이메일 + 공격자 비밀번호로 수락 → 메일 링크는 H1 확인 링크(GET 무변경), core /verify-email 401·미인증, 모르는 비밀번호 확인 401, 공격자 로그인 403, 피해자 재설정 → 인증·공격자 비밀번호 무효·피해자 로그인. 대조: 이메일 지정 초대는 바로 로그인·키 201
+  검출:  invite 분기가 Better Auth 기본 /verify-email 링크를 보내 메일 주인이 링크를 누르는 것만으로 공격자 비밀번호 계정이 인증되는 것
 ```
+TC-M3.T2.b 의 실패 목록에는 형식이 틀린 토큰(43자 base64url 아님)·입력 형식 오류·재초대로 대체된 링크·정책을 닫은 뒤의 기존 링크·이메일 없는 관리자 초대 행(보안 리뷰 L-3)을 더했다.
 
 【통과】
 - [ ] G-M3.7 ~ G-M3.13 통과
 
 ### ☐ M3.T3 — 만료한 초대 정리
-선행 M3.T1 · 산출 `apps/server/src/invites/prune.ts`, `apps/server/src/jobs.ts` · 되돌리기 커밋 1개
+선행 M3.T1 · 산출 `apps/server/src/invites/prune.ts`, `apps/server/src/queue/runner.ts` · 되돌리기 커밋 1개
+(실제: 등록은 `jobs.ts`가 아니라 `queue/runner.ts`의 1분 `queueJob` 안 `pruneDone` 바로 옆 한 줄이다. 끝난 작업 정리가 실제로 도는 자리가 그곳이고, `jobs.ts`·cron 목록(wrangler.toml)을 바꾸지 않아도 된다. 실패는 `pruneDone`처럼 경고만 남긴다. 임대를 주면 `fenced`로 펜싱한다.)
 
 【작업】
 1. 1분 작업 큐 실행기(K6.T4 의 `pruneDone`과 같은 자리)에서 초대를 500행씩 지운다. 커밋.
    - 지우는 것: `expires_at`이 30일 지난 미사용 초대, `revoked_at`이 30일 지난 초대.
    - 사용한 초대(`used_at`)는 남긴다. 누가 누구를 초대했는지가 남아야 한다.
+   - (실제: 취소 조건도 `used_at IS NULL`일 때만 건다. 사용한 초대는 취소돼도 남고, 수락이 차지 중인 행(`used_at` 있음·`used_by` 없음)은 지우지도 풀지도 않는다 — 보안 리뷰 L-4.)
 
 【테스트】
 ```
 TC-M3.T3.a  30일 지난 만료·취소 초대만 지운다 (다섯 DB)
   단언:  만료 31일 · 만료 29일 · 취소 31일 · 사용됨 90일 · 유효 → 지움 2, 남음 3
   검출:  사용한 초대까지 지워 초대한 관리자와 가입한 회원의 연결이 사라지는 것, 만료 직후 지워 관리자가 "만료됨" 목록을 못 보는 것
+  현재:  차지 중(used_at 31일 전·used_by 없음)·사용·취소(used_at 있음·revoked_at 35일 전) 행을 더해 "지움 2, 남음 5" 로 단언한다. 임대를 잃은 실행기의 정리는 0행
+TC-M3.T3.b  한 번에 최대 500행 (SQLite)
+  단언:  31일 지난 미사용 만료 초대 501행 → 500 → 1 → 0
 ```
 
 【통과】
@@ -1137,10 +1155,34 @@ TC-M3.T4.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-M3.16 | 타입 검사 | `pnpm -r typecheck` | 종료코드 0 |
 | G-M3.17 | TC-M3.T4.a CI 단계 잡 | grep `^\s+run: node scripts/gate\.mjs M3\b` in ci.yml | == 1 |
 | G-M3.18 | ruleset · TC-M3.T4.b | `node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere` | 종료코드 0 |
+| G-M3.20 · 21 | TC-M3.T1.g 감사 기록 = 실제 변경 (리뷰 M1) · 재현 빨강 | `pnpm -C apps/server test -t "TC-M3.T1.g"` · `node scripts/check-red.mjs --check G-M3.20 --since seal:M2` | 통과 = 1 · 종료코드 0 |
+| G-M3.22 | TC-M3.T1.h 같은 이메일 재초대는 차례로 대체 (리뷰 L1) | `pnpm -C apps/server test -t "TC-M3.T1.h"` | 통과 = 1 |
+| G-M3.23 | TC-M3.T1.i·g·h 실제 동시 초대 만들기 (Node DB 넷, 교착 고침) | [L] `pnpm -C apps/server test:db -t "TC-M3.T1.[ghi]" --db sqlite,mysql,mariadb,pg` | 통과 = 12 |
+| G-M3.24 | TC-M3.T1.i (SQLite) | `pnpm -C apps/server test -t "TC-M3.T1.i"` | 통과 = 1 |
+| G-M3.25 | 재현 빨강 TC-M3.T1.i | `node scripts/check-red.mjs --check G-M3.23 --since seal:M2` | 종료코드 0 |
+| G-M3.26 · 27 | TC-M3.T2.g 이메일 없는 초대로 남의 이메일을 가로채지 못함 (리뷰 H-1) · 재현 빨강 | `pnpm -C apps/server test -t "TC-M3.T2.g"` · `node scripts/check-red.mjs --check G-M3.26 --since seal:M2` | 통과 = 1 · 종료코드 0 |
+| G-M3.28 | TC-M3.T2.g (D1) | [L] `pnpm -C apps/server test:workers -t "TC-M3.T2.g"` | 통과 = 1 |
 
 `node scripts/gate.mjs M3 --seal`
 
 가장 중요한 검사는 G-M3.8 이다. D1 은 대화형 트랜잭션이 없어 초대 차지와 가입 되돌리기가 다른 DB 와 다른 경로를 탄다. Node 쪽 시험은 그 경로를 지나지 않는다.
+(실제: libsql batch 로 D1 경로를 흉내 낸 단위 시험은 통과했지만 실제 wrangler dev D1 에서 감사 `INSERT … SELECT`가 batch 항목이 되지 못해 500 이었다(`db.run(sql)` 원시 문장). 쿼리 빌더 문장 `insert().select(sql)`로 고쳤다. D1 검사는 실제 wrangler dev 로만 믿는다.)
+
+**결정된 정책 (M3)**
+- 초대 링크의 주소는 설치 때 저장한 `public_base_url`이다 (`<public_base_url>/invite#<토큰>`, 없으면 409 `setup_required`).
+- 초대·인증 메일의 보내는 사람은 주소만 둔다 (M2 의 `from` 검사 그대로, 이름 표시는 7단계 설정 화면 때).
+- 미인증 invite 회원(이메일 없는 초대로 가입)도 공개 가입과 같은 H1 확인 흐름(메일 링크 + 가입 비밀번호)을 탄다. core `/verify-email`은 거부하고, 재설정은 member 의 public·legacy·invite 를 인증한다 (보안 리뷰 H-1).
+
+**사용자 결정 대기**
+- 수락 때 `mail_required` 재확인 (메일 설정을 지운 뒤 이메일 없는 링크 수락).
+- 초대 가입에 허용 도메인(`domain_allowlist`) 적용.
+- MySQL `invites.email`의 대소문자·악센트 무시 정렬(`ai_ci`) — 수락은 JS 에서 정확히 비교하지만 만들기의 같은 이메일 취소는 SQL `=`다.
+
+**백로그 (M3 보안 리뷰 LOW, 미룸)**
+- D1 비원자 가입 뒤 계정 없는 user 행 (Better Auth `transaction: false`).
+- 수락 마무리가 0행일 때(차지가 바뀜)의 감사 — 지금은 경고만 남기고 201.
+- Workers 에서 수락 응답 시간(≥ 400ms) 실측.
+- 클라이언트 IP 를 못 정할 때 모든 요청이 같은 `unknown` 요청 수 제한 칸을 쓰는 것.
 
 ---
 

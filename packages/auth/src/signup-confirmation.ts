@@ -1,11 +1,12 @@
-// 공개 가입 인증은 메일 소유와 현재 가입 비밀번호를 함께 확인한다. GET은 안내만 반환한다.
+// 공개 가입·이메일 없는 초대 가입의 인증은 메일 소유와 현재 가입 비밀번호를 함께 확인한다. GET은 안내만 반환한다.
+// 이메일 없는 초대는 링크를 쥔 사람이 아무 이메일로나 수락할 수 있어 공개 가입과 같은 위험이다 (M3.T2 보안 리뷰 H-1).
 // JWT에는 원문 해시 대신 회원·credential에 묶인 HMAC을 넣는다. DB의 조건부 UPDATE가 일회용 소비점이다.
 import { tryGetCurrentAuthEndpointContext } from "@better-auth/core/context";
 import { APIError, createAuthEndpoint, getAuthoritativeSessionFromCtx, getSessionFromCtx } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
 import { parseUserOutput } from "better-auth/db";
 import { constantTimeEqual, signJWT, verifyJWT } from "better-auth/crypto";
-import { and, eq, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { AuthConfig, MailMessage } from "./index.ts";
 import { VERIFY_EMAIL_EXPIRES_S } from "@magnetosphere/db/src/signup.ts";
 import { verifyEmailMessage } from "./mail/messages.ts";
@@ -17,6 +18,8 @@ const CHANGE = Symbol("changed-credential");
 type Context = any;
 
 const invalidProof = () => new APIError("UNAUTHORIZED", { code: "INVALID_CONFIRMATION", message: "인증 링크나 비밀번호를 확인해 주세요" });
+/** H1 확인 흐름을 타는 가입 경로 */
+const CONFIRMED_ORIGINS = ["public", "invite"];
 const staleLogin = () => new APIError("UNAUTHORIZED", { code: "INVALID_EMAIL_OR_PASSWORD", message: "다시 로그인해 주세요" });
 
 /** 요청 전용 문맥에 id만 기록한다. 가입 트랜잭션 안에서 바깥 DB 연결을 읽지 않는다. */
@@ -24,6 +27,11 @@ export function queueConfirmationMail(userId: string): void {
   const ctx = tryGetCurrentAuthEndpointContext();
   if (!ctx) throw new Error("인증 메일 요청 문맥이 없다");
   (ctx.context as any)[MAIL_USER] = userId;
+}
+
+/** core /verify-email 로 인증할 수 없는 회원: 공개 가입, 미인증 legacy, 미인증 invite (이메일 없는 초대 — H1 확인 흐름만 쓴다) */
+function coreBlocked(user: any): boolean {
+  return user.signupOrigin === "public" || ((user.signupOrigin === "legacy" || user.signupOrigin === "invite") && !user.emailVerified);
 }
 
 export function signupConfirmation(cfg: AuthConfig, deliver: (m: MailMessage) => Promise<void>) {
@@ -57,7 +65,7 @@ export function signupConfirmation(cfg: AuthConfig, deliver: (m: MailMessage) =>
     const p = await verifyJWT<any>(token, cfg.secret);
     if (!p || p.purpose !== PURPOSE || typeof p.uid !== "string" || typeof p.email !== "string" || typeof p.credentialFingerprint !== "string" || typeof p.exp !== "number" || p.exp <= Date.now() / 1000) throw invalidProof();
     const { user, account } = await load(p.uid);
-    if (!user || user.email !== p.email || user.signupOrigin !== "public" || user.emailVerified || user.deletedAt || !account?.password || !constantTimeEqual(await fingerprint(user.id, account), p.credentialFingerprint)) throw invalidProof();
+    if (!user || user.email !== p.email || !CONFIRMED_ORIGINS.includes(user.signupOrigin) || user.emailVerified || user.deletedAt || !account?.password || !constantTimeEqual(await fingerprint(user.id, account), p.credentialFingerprint)) throw invalidProof();
     return { user, account };
   };
   const checkOrigin = (ctx: Context) => {
@@ -83,7 +91,7 @@ export function signupConfirmation(cfg: AuthConfig, deliver: (m: MailMessage) =>
     // MySQL의 password 칼럼 기본 정렬은 대소문자를 무시한다. CAS는 저장된 해시를 바이트 단위로 비교한다.
     const samePassword = provider === "mysql" ? sql`binary ${a.password} = binary ${account.password}` : eq(a.password, account.password);
     const unchanged = sql`exists (select 1 from ${a} where ${a.userId} = ${user.id} and ${a.id} = ${account.id} and ${a.providerId} = 'credential' and ${a.accountId} = ${user.id} and ${samePassword})`;
-    const update = db.update(u).set({ emailVerified: true, updatedAt: now }).where(and(eq(u.id, user.id), eq(u.email, user.email), eq(u.signupOrigin, "public"), eq(u.emailVerified, false), isNull(u.deletedAt), unchanged));
+    const update = db.update(u).set({ emailVerified: true, updatedAt: now }).where(and(eq(u.id, user.id), eq(u.email, user.email), inArray(u.signupOrigin, CONFIRMED_ORIGINS), eq(u.emailVerified, false), isNull(u.deletedAt), unchanged));
     let changed: number;
     try {
       changed = provider === "mysql" ? (await update)[0].affectedRows : (await update.returning({ id: u.id })).length;
@@ -103,7 +111,7 @@ export function signupConfirmation(cfg: AuthConfig, deliver: (m: MailMessage) =>
       if (!id || ctx.context.returned instanceof Error) return;
       const { user, account } = await load(id);
       if (!user || user.emailVerified || user.deletedAt) return;
-      if (user.signupOrigin === "public" && account?.password) {
+      if (CONFIRMED_ORIGINS.includes(user.signupOrigin) && account?.password) {
         const token = await signJWT({ purpose: PURPOSE, uid: user.id, email: user.email, credentialFingerprint: await fingerprint(user.id, account) }, cfg.secret, VERIFY_EMAIL_EXPIRES_S);
         const url = `${cfg.baseURL.replace(/\/$/, "")}/api/auth/signup-confirmation?token=${encodeURIComponent(token)}`;
         await deliver(verifyEmailMessage(user.email, url));
@@ -116,10 +124,10 @@ export function signupConfirmation(cfg: AuthConfig, deliver: (m: MailMessage) =>
       const p = await verifyJWT<any>(ctx.query?.token ?? "", cfg.secret);
       if (!p || typeof p.email !== "string") throw invalidProof();
       const [user] = await db.select().from(u).where(eq(u.email, p.email)).limit(1);
-      if (!user || user.signupOrigin === "public" || (user.signupOrigin === "legacy" && !user.emailVerified)) throw invalidProof();
+      if (!user || coreBlocked(user)) throw invalidProof();
     },
     coreVerificationGuard(user: any) {
-      if (user.signupOrigin === "public" || (user.signupOrigin === "legacy" && !user.emailVerified)) throw invalidProof();
+      if (coreBlocked(user)) throw invalidProof();
     },
     async loginSnapshot(ctx: Context) {
       if (ctx.path !== "/sign-in/email") return;
