@@ -300,7 +300,22 @@ export function authOptions(cfg: AuthConfig) {
  * Better Auth 의 auth.handler 는 내보내지 않는다. 그것을 서버에 바로 붙이면(toNodeHandler(auth) 등) 클라이언트가
  * x-magnetosphere-client-ip 를 지어 넣어 요청 수 제한을 통째로 우회한다. api 는 서버 안 호출용(auth.api)이다.
  */
+/** M4.T4 자기 탈퇴 proof. Red 뼈대에서는 형태만 둔다 */
+export interface SelfDeleteCredentialProof {
+  authVersion: number;
+  accountId: string;
+  passwordHash: string;
+  observedSessionFingerprint: string | null;
+  currentCredentialFingerprint: string;
+}
 export function createAuth(cfg: AuthConfig) {
   const auth = betterAuth(authOptions(cfg));
-  return { handler: withClientIp(auth.handler, cfg.clientIp), api: auth.api };
+  return {
+    handler: withClientIp(auth.handler, cfg.clientIp),
+    api: auth.api,
+    // M4 Red 뼈대: 아직 구현하지 않았다
+    selfDeleteCredentialProof: async (_input: { userId: string; sessionId: string; password: string }): Promise<SelfDeleteCredentialProof | null> => {
+      throw new Error("M4 미구현: selfDeleteCredentialProof");
+    },
+  };
 }
