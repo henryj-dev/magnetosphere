@@ -843,8 +843,40 @@ export const GATES = {
     needs: ["M3"],
     waivable: false,
     strictTests: true,
-    outputs: ["apps/server/src/admin/**", "apps/server/test/admin/**", "apps/server/src/sessions/**", "apps/server/test/sessions/**"],
-    checks: [],
+    outputs: [
+      "apps/server/src/admin/**", "apps/server/test/admin/**", "apps/server/src/sessions/**", "apps/server/test/sessions/**",
+      "packages/auth/src/auth-version.ts", "packages/auth/src/safe-reset-adapter.ts",
+      "packages/auth/test/m4-session-version.test.ts", "packages/auth/test/m4-reset-delete.test.ts",
+      "packages/db/migrations/sqlite/0005_m4_auth_version.sql", "packages/db/migrations/mysql/0005_m4_auth_version.sql", "packages/db/migrations/pg/0005_m4_auth_version.sql",
+      "packages/db/migrations/sqlite/meta/0005_snapshot.json", "packages/db/migrations/mysql/meta/0005_snapshot.json", "packages/db/migrations/pg/meta/0005_snapshot.json",
+      "packages/db/test/migrate-0005.test.ts",
+    ],
+    // 초안. expectPassed: null 은 미확정이다 — 실제 수집 전에는 숫자를 적지 않는다. strictTests 라 null 인 test 검사는 실패한다.
+    // G-M4.1·5·7·9·10 의 숫자는 시험 파일 텍스트의 정적 목록 기준이다 (it·it.each 인자 리터럴 전개). runner 가 센 수가 아니다.
+    // G-M4.2·4·6·8 의 숫자는 정적 추정이다 — 위 전개에 고른 DB 수를 곱했다 (DB 넷 또는 다섯). runner 가 센 수가 아니다.
+    // Red 검사(check-red.mjs)는 Red 커밋 승인 뒤 추가한다.
+    checks: [
+      // M4.T1 회원 목록·상태 API
+      { id: "G-M4.1", how: "test", desc: "TC-M4.T1.a~f 목록·전이·권한·stale actor·K3 반영·거절 실패", cmd: 'pnpm -C apps/server test -t "TC-M4\\.T1\\.[a-f] "', expectPassed: 9 },
+      { id: "G-M4.2", how: "test", requires: ["local-services"], desc: "TC-M4.T1.db 회원 관리 뮤텍스·CAS (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-M4.T1.db" --db sqlite,mysql,mariadb,pg', expectPassed: 96 },
+      // G-M4.3: 시험이 beforeAll 에서 로컬 D1 과 시험 Worker 를 직접 띄운다 (member-wrangler.jsonc). 수는 미확정
+      // check-red 는 이 desc 를 G-M4.2 와 같은 TC-M4.T1.d 로 읽는다. G-M4.3 은 Red 대상이 아니라 Red 검사를 붙이지 않는다
+      { id: "G-M4.3", how: "test", requires: ["local-services"], desc: "TC-M4.T1.d1 실제 D1 batch 롤백 (D1)", cmd: 'pnpm -C apps/server test:workers -t "TC-M4.T1.d1"', expectPassed: null },
+      // G-M4.4·6·8: 시험은 MG_TEST_DBS 가 없으면 sqlite 만 돈다. test:migrate 는 --db 로, auth test 는 명령 앞 MG_TEST_DBS 로 DB 를 고른다
+      { id: "G-M4.4", how: "test", requires: ["local-services"], desc: "TC-M4.T1.migration 0005 업그레이드 보존·auth_version 0 (다섯 DB)", cmd: 'pnpm -C packages/db test:migrate -t "TC-M4.T1.migration" --db sqlite,mysql,mariadb,pg,d1', expectPassed: 5 },
+      // M4.T2 관리자 삭제
+      { id: "G-M4.5", how: "test", desc: "TC-M4.T2.a-d 익명화·소유 토큰·키 보존·120초 큐·권한 경계", cmd: 'pnpm -C apps/server test -t "TC-M4.T2"', expectPassed: 1 },
+      // M4.T3 세션 상태·인증 버전
+      { id: "G-M4.6", how: "test", requires: ["local-services"], desc: "TC-M4.T3.a M4.T3 상태·버전·ABA·비밀번호 변경 세션 계약 (Node DB 넷)", cmd: 'MG_TEST_DBS=sqlite,mysql,mariadb,pg pnpm -C packages/auth test -t "M4.T3"', expectPassed: 77 },
+      { id: "G-M4.7", how: "test", desc: "TC-M4.T3.f 공용 앱 회원·관리자 route guard", cmd: 'pnpm -C apps/server test -t "TC-M4.T3.f"', expectPassed: 11 },
+      // M4.T4 reset/delete 경합·자기 탈퇴
+      { id: "G-M4.8", how: "test", requires: ["local-services"], desc: "TC-M4.T4.reset M4.T4 reset/delete 늦은 credential 쓰기 차단 (Node DB 넷)", cmd: 'MG_TEST_DBS=sqlite,mysql,mariadb,pg pnpm -C packages/auth test -t "M4.T4.reset-"', expectPassed: 24 },
+      { id: "G-M4.9", how: "test", desc: "TC-M4.T4.a 자기 탈퇴 proof·bootstrap·last admin·Origin", cmd: 'pnpm -C apps/server test -t "TC-M4.T4.a"', expectPassed: 1 },
+      // M4.T5 setup 관리자 판정
+      { id: "G-M4.10", how: "test", desc: "TC-M4.T5.a·b 활성 관리자·설치 Origin·설치 완료 판정", cmd: 'pnpm -C apps/server test -t "TC-M4.T5"', expectPassed: 6 },
+      // 타입
+      { id: "G-M4.11", how: "cmd", desc: "타입 검사", cmd: "pnpm -r typecheck" },
+    ],
   },
   M5: {
     needs: ["M4"],
