@@ -2,7 +2,7 @@
 // 원본: packages/db/src/schema/common.ts · 생성: pnpm -C packages/db gen
 import { index, integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
-// 회원. Better Auth 칼럼 + 권한 칼럼 다섯 + 삭제 시각
+// 회원. Better Auth 칼럼 + 권한 칼럼 다섯 + 삭제 시각 + 인증 버전
 export const user = sqliteTable("user", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
@@ -18,6 +18,7 @@ export const user = sqliteTable("user", {
   isBootstrapAdmin: integer("is_bootstrap_admin", { mode: "boolean" }).default(false).notNull(),
   deletedAt: integer("deleted_at", { mode: "timestamp_ms" }),
   signupOrigin: text("signup_origin").default("legacy").notNull(),
+  authVersion: integer("auth_version").default(0).notNull(),
 });
 
 // 로그인 세션
@@ -31,6 +32,7 @@ export const session = sqliteTable("session", {
   userAgent: text("user_agent"),
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   credentialFingerprint: text("credential_fingerprint"),
+  authVersion: integer("auth_version").default(0).notNull(),
 }, (table) => [
   index("session_userId_idx").on(table.userId),
 ]);
