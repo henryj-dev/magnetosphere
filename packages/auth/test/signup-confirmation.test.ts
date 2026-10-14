@@ -1,6 +1,7 @@
 // handler와 auth.api 양쪽의 H1 증거. 비밀값은 단언 메시지나 로그로 출력하지 않는다.
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { validAuthVersion } from "../src/auth-version.ts";
 import { createAuth } from "../src/index.ts";
 import { signJWT, verifyJWT, hashPassword } from "better-auth/crypto";
 import { OPEN, type TestDb } from "./db.ts";
@@ -44,6 +45,12 @@ describe.each(kinds)("%s H1 auth.api", (kind) => {
     return api().resetPassword({ body: { token, newPassword } });
   };
   const credential = async (id: string) => (await h.db.select().from((h.schema as any).account).where(eq((h.schema as any).account.userId, id)))[0];
+  const readAuthVersion = async (id: string): Promise<number> => {
+    const rows: unknown = await h.db.select({ authVersion: sql<unknown>`${sql.identifier("auth_version")}` }).from(h.schema.user).where(sql`${sql.identifier("id")} = ${id}`).limit(1);
+    const row: unknown = Array.isArray(rows) ? rows[0] : undefined;
+    if (typeof row !== "object" || row === null || !("authVersion" in row) || !validAuthVersion(row.authVersion)) throw new Error("사용자 인증 버전을 읽지 못했다");
+    return row.authVersion;
+  };
   beforeAll(async () => {
     h = await OPEN[kind]();
     cfg = makeAuthConfig(h);
@@ -288,44 +295,80 @@ describe.each(kinds)("%s H1 auth.api", (kind) => {
     const x = await signup("safe-error");
     const hash = (await credential(x.id)).password;
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    const update = vi.spyOn(h.db, "update").mockImplementation(() => {
+    const originalUpdate = h.db.update.bind(h.db);
+    const originalTransaction = h.db.transaction.bind(h.db);
+    const faults = { confirmation: 0, credential: 0 };
+    const fail = (query: any, boundary: "confirmation" | "credential") => {
       const error = Object.assign(new Error(`query failed ${hash}`), { params: [hash], cause: new Error(hash) });
-      return { set: () => ({ where: () => ({ then: (_ok: any, fail: any) => fail(error), returning: () => Promise.reject(error) }) }) };
+      // returning()은 같은 builder의 config만 바꾼다. QueryPromise.then→execute 시에만 fault를 센다.
+      query.execute = async () => { faults[boundary]++; throw error; };
+      return query;
+    };
+    const transaction = vi.spyOn(h.db, "transaction").mockImplementation((callback: any, config: any) => originalTransaction(async (tx: any) => {
+      const update = tx.update.bind(tx);
+      tx.update = (table: any) => {
+        const query = update(table);
+        const set = query.set.bind(query);
+        query.set = (values: any) => table === (h.schema as any).account ? fail(set(values), "credential") : set(values);
+        return query;
+      };
+      return callback(tx);
+    }, config));
+    const update = vi.spyOn(h.db, "update").mockImplementation((table: any) => {
+      const query = originalUpdate(table);
+      if (table !== (h.schema as any).user) return query;
+      const set = query.set.bind(query);
+      query.set = (values: any) => fail(set(values), "confirmation");
+      return query;
     });
     try {
       let caught: any;
       try { await api().confirmSignupEmail({ body: { token: x.token, password: PASSWORD } }); }
       catch (e) { caught = e; }
+      expect(faults).toEqual({ confirmation: 1, credential: 0 });
       expect(caught?.statusCode).toBe(500);
       expect(String(caught)).not.toContain(hash);
       expect(JSON.stringify(caught)).not.toContain(hash);
       expect(caught?.cause).toBeUndefined();
       const response = await auth.handler(new Request(`${BASE}/api/auth/signup-confirmation`, { method: "POST", headers: { origin: BASE, "content-type": "application/json" }, body: JSON.stringify({ token: x.token, password: PASSWORD }) }));
+      expect(faults).toEqual({ confirmation: 2, credential: 0 });
       expect(response.status).toBe(500);
       expect(await response.text()).not.toContain(hash);
       expect(JSON.stringify(log.mock.calls)).not.toContain(hash);
-    } finally { update.mockRestore(); log.mockRestore(); }
+    } finally { transaction.mockRestore(); update.mockRestore(); log.mockRestore(); }
+    faults.confirmation = 0;
+    faults.credential = 0;
     await api().confirmSignupEmail({ body: { token: x.token, password: PASSWORD } });
     const login = await api().signInEmail({ body: { email: x.email, password: PASSWORD }, returnHeaders: true });
     const cookie = login.headers.getSetCookie().map((v: string) => v.split(";")[0]).join("; ");
     const changeLog = vi.spyOn(console, "error").mockImplementation(() => {});
-    const failed = vi.spyOn(h.db, "update").mockImplementation(() => {
-      const error = Object.assign(new Error(hash), { query: hash, params: [hash], cause: new Error(hash) });
-      return { set: () => ({ where: () => ({ then: (_ok: any, fail: any) => fail(error), returning: () => Promise.reject(error) }) }) };
-    });
+    const changeTransaction = vi.spyOn(h.db, "transaction").mockImplementation((callback: any, config: any) => originalTransaction(async (tx: any) => {
+      const update = tx.update.bind(tx);
+      tx.update = (table: any) => {
+        const query = update(table);
+        const set = query.set.bind(query);
+        query.set = (values: any) => table === (h.schema as any).account ? fail(set(values), "credential") : set(values);
+        return query;
+      };
+      return callback(tx);
+    }, config));
+    // change의fault는tx.account execute에만 있다. root update는원래builder를위임한다.
+    const failed = vi.spyOn(h.db, "update").mockImplementation((table: any) => originalUpdate(table));
     try {
       let caught: any;
       try { await api().changePassword({ headers: new Headers({ cookie }), body: { currentPassword: PASSWORD, newPassword: "safe-new-password-123" } }); }
       catch (e) { caught = e; }
+      expect(faults).toEqual({ confirmation: 0, credential: 1 });
       expect(caught?.statusCode).toBe(500);
       expect(String(caught)).not.toContain(hash);
       expect(JSON.stringify(caught)).not.toContain(hash);
       expect(caught?.cause).toBeUndefined();
       const response = await auth.handler(new Request(`${BASE}/api/auth/change-password`, { method: "POST", headers: { cookie, origin: BASE, "content-type": "application/json" }, body: JSON.stringify({ currentPassword: PASSWORD, newPassword: "safe-new-password-123" }) }));
+      expect(faults).toEqual({ confirmation: 0, credential: 2 });
       expect(response.status).toBe(500);
       expect(await response.text()).not.toContain(hash);
       expect(JSON.stringify(changeLog.mock.calls)).not.toContain(hash);
-    } finally { failed.mockRestore(); changeLog.mockRestore(); }
+    } finally { changeTransaction.mockRestore(); failed.mockRestore(); changeLog.mockRestore(); }
   });
 
   it("H1.NULL: 검증된 legacy·비credential 세션은 유지하고 미인증·삭제 회원의 NULL 세션은 거부한다", async () => {
@@ -379,28 +422,65 @@ describe.each(kinds)("%s H1 auth.api", (kind) => {
     const login = await api().signInEmail({ body: { email: x.email, password: PASSWORD }, returnHeaders: true });
     const cookie = login.headers.getSetCookie().map((v: string) => v.split(";")[0]).join("; ");
     const hash = (await credential(x.id)).password;
+    const beforeAuthVersion = await readAuthVersion(x.id);
+    const beforeSessions = await h.db.select().from((h.schema as any).session).where(eq((h.schema as any).session.userId, x.id));
     const originalUpdate = h.db.update.bind(h.db);
+    const originalTransaction = h.db.transaction.bind(h.db);
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const hashes = [hash];
-    const mock = vi.spyOn(h.db, "update").mockImplementation((table: any) => {
-      if (table !== (h.schema as any).session) return { set: (values: any) => {
-        if (typeof values.password === "string") hashes.push(values.password);
-        return originalUpdate(table).set(values);
-      } };
-      return { set: () => ({ where: () => Promise.reject(Object.assign(new Error(hashes.join(" ")), { params: hashes, cause: new Error(hashes.join(" ")) })) }) };
-    });
+    const captured = { count: 0 };
+    const faults = { credential: 0, session: 0 };
+    const instrument = (table: any, query: any) => {
+      const set = query.set.bind(query);
+      query.set = (values: any) => {
+        if (table === (h.schema as any).account && typeof values.password === "string" && values.password !== hashes[0]) { hashes.push(values.password); captured.count++; }
+        const next = set(values);
+        if (table === (h.schema as any).account) {
+          const execute = next.execute.bind(next);
+          next.execute = async (...args: any[]) => {
+            const result = await execute(...args);
+            faults.credential++;
+            return result;
+          };
+        }
+        if (table !== (h.schema as any).session) return next;
+        const error = Object.assign(new Error(hashes.join(" ")), { params: hashes, cause: new Error(hashes.join(" ")) });
+        next.execute = async () => { faults.session++; throw error; };
+        // returning/where/then 원기능을 유지한다. await then→execute 한곳에서만센다.
+        return next;
+      };
+      return query;
+    };
+    const transaction = vi.spyOn(h.db, "transaction").mockImplementation((callback: any, config: any) => originalTransaction(async (tx: any) => {
+      const update = tx.update.bind(tx);
+      tx.update = (table: any) => instrument(table, update(table));
+      return callback(tx);
+    }, config));
+    // 유지세션fault/capture는tx.update에만연결한다. root는원함수위임이다.
+    const mock = vi.spyOn(h.db, "update").mockImplementation((table: any) => originalUpdate(table));
     try {
       const response = await auth.handler(new Request(`${BASE}/api/auth/change-password`, { method: "POST", headers: { cookie, origin: BASE, "content-type": "application/json" }, body: JSON.stringify({ currentPassword: PASSWORD, newPassword: "keep-error-password-123", revokeOtherSessions: false }) }));
+      expect(faults).toEqual({ credential: 1, session: 1 });
+      expect(captured.count).toBe(1);
+      expect(hashes).toHaveLength(2);
+      expect(hashes[1].length > 0 && hashes[1] !== hashes[0]).toBe(true);
       expect(response.status).toBe(500);
       const text = await response.text();
       for (const value of hashes) {
         expect(text.includes(value)).toBe(false);
         expect(JSON.stringify(errors.mock.calls).includes(value)).toBe(false);
       }
-      await originalUpdate((h.schema as any).account).set({ password: hash }).where(eq((h.schema as any).account.userId, x.id));
+      expect((await credential(x.id)).password === hash).toBe(true);
+      expect(await readAuthVersion(x.id)).toBe(beforeAuthVersion);
+      const afterHttpSessions = await h.db.select().from((h.schema as any).session).where(eq((h.schema as any).session.userId, x.id));
+      expect(JSON.stringify(afterHttpSessions) === JSON.stringify(beforeSessions)).toBe(true);
       let caught: any;
       try { await api().changePassword({ headers: new Headers({ cookie }), body: { currentPassword: PASSWORD, newPassword: "keep-api-error-password-123", revokeOtherSessions: false } }); }
       catch (e) { caught = e; }
+      expect(faults).toEqual({ credential: 2, session: 2 });
+      expect(captured.count).toBe(2);
+      expect(hashes).toHaveLength(3);
+      expect(hashes[2].length > 0 && hashes[2] !== hashes[0]).toBe(true);
       expect(caught?.statusCode).toBe(500);
       expect(caught?.cause).toBeUndefined();
       for (const value of hashes) {
@@ -408,7 +488,11 @@ describe.each(kinds)("%s H1 auth.api", (kind) => {
         expect(JSON.stringify(caught).includes(value)).toBe(false);
         expect(JSON.stringify(errors.mock.calls).includes(value)).toBe(false);
       }
-    } finally { mock.mockRestore(); errors.mockRestore(); }
+      expect((await credential(x.id)).password === hash).toBe(true);
+      expect(await readAuthVersion(x.id)).toBe(beforeAuthVersion);
+      const afterApiSessions = await h.db.select().from((h.schema as any).session).where(eq((h.schema as any).session.userId, x.id));
+      expect(JSON.stringify(afterApiSessions) === JSON.stringify(beforeSessions)).toBe(true);
+    } finally { transaction.mockRestore(); mock.mockRestore(); errors.mockRestore(); }
   });
 
   it("H1.SESSION: 변경된 credential의 남은 세션은 getSession과 내부 보호 API에서 삭제·거부한다", async () => {

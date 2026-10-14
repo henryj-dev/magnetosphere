@@ -3,8 +3,7 @@
 // 그대로 펼쳐 쓴다. 스키마 생성기와 같은 객체라 테이블·칼럼이 어긋나지 않는다 (TC-S3.T1.e).
 // 이 파일은 Workers 에서도 import 된다. Node 전용 모듈(nodemailer 등)을 여기서 부르지 않는다.
 import { betterAuth, type BetterAuthOptions } from "better-auth";
-import { eq } from "drizzle-orm";
-import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { safeResetAdapter, confirmResetEmail } from "./safe-reset-adapter.ts";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { AUTH_SCHEMA_OPTIONS } from "@magnetosphere/db/src/auth-options.ts";
 import { countSignup, decideSignup, loadSignupInputs, VERIFY_EMAIL_EXPIRES_S, type SignupInputs } from "@magnetosphere/db/src/signup.ts";
@@ -203,13 +202,12 @@ function trimSignUpResponse(ctx: { path: string; json: (v: unknown) => unknown; 
  * Better Auth 옵션. 스키마 비교(TC-S3.T1.e)와 SSO 경로 검사(check-sso-paths.mjs)가 이 함수의 결과를 쓴다.
  * 서버는 이것으로 betterAuth() 를 직접 만들지 않고 createAuth 를 쓴다 (직접 만들면 handler 가 감싸지지 않는다).
  */
-export function authOptions(cfg: AuthConfig) {
+export function authOptions(cfg: AuthConfig, confirmation = signupConfirmation(cfg, deliverer(cfg))) {
   // 세션·토큰 서명 키. 짧으면 추측·무차별 대입에 약하므로 시작을 거부한다 (S3 보안 리뷰 L1)
   if (typeof cfg.secret !== "string" || cfg.secret.length < MIN_SECRET_LENGTH) {
     throw new Error(`BETTER_AUTH_SECRET 은 ${MIN_SECRET_LENGTH}자 이상이어야 한다 (지금 ${cfg.secret?.length ?? 0}자)`);
   }
   const deliver = deliverer(cfg);
-  const confirmation = signupConfirmation(cfg, deliver);
   const { db, schema } = cfg.database as { db: any; schema: any };
   return {
     ...AUTH_SCHEMA_OPTIONS,
@@ -226,7 +224,7 @@ export function authOptions(cfg: AuthConfig) {
       log: (level: string, message: string, ...args: unknown[]) =>
         (level === "error" ? console.error : level === "warn" ? console.warn : console.info)(`[auth] ${message}${errorTags(args)}`),
     },
-    database: drizzleAdapter(cfg.database.db, { provider: cfg.database.provider, schema: cfg.database.schema, transaction: cfg.database.kind !== "d1" }),
+    database: safeResetAdapter(cfg),
     emailAndPassword: {
       ...AUTH_SCHEMA_OPTIONS.emailAndPassword,
       // 인증 전에는 로그인되지 않는다 (계획서 4.2 "인증 후 키 발급"의 전제)
@@ -235,12 +233,7 @@ export function authOptions(cfg: AuthConfig) {
       // 재설정은 그 회원의 세션을 모두 끊는다 (계획서 4.5, 실행판 M4 몫을 M2 보안 리뷰 H1 로 당겨 옴)
       revokeSessionsOnPasswordReset: true,
       // 성공한 재설정은 메일 소유와 새 비밀번호 설정을 함께 증명한다. 초대·관리자의 인증 정책은 바꾸지 않는다.
-      onPasswordReset: async ({ user }) => {
-        const [current] = await db.select().from(schema.user).where(eq(schema.user.id, user.id)).limit(1);
-        // invite 포함: 이메일 없는 초대를 남의 이메일로 수락한 계정도 메일 주인이 재설정으로 되찾는다 (M3.T2 보안 리뷰 H-1). 관리자·설치 계정은 자동 인증하지 않는다
-        if (current?.role !== "member" || !["public", "legacy", "invite"].includes(current.signupOrigin) || current.deletedAt) return;
-        await db.update(schema.user).set({ emailVerified: true, updatedAt: new Date() }).where(eq(schema.user.id, user.id));
-      },
+      onPasswordReset: async ({ user }) => confirmResetEmail(cfg, user.id),
     },
     emailVerification: {
       sendOnSignUp: true,
@@ -300,22 +293,26 @@ export function authOptions(cfg: AuthConfig) {
  * Better Auth 의 auth.handler 는 내보내지 않는다. 그것을 서버에 바로 붙이면(toNodeHandler(auth) 등) 클라이언트가
  * x-magnetosphere-client-ip 를 지어 넣어 요청 수 제한을 통째로 우회한다. api 는 서버 안 호출용(auth.api)이다.
  */
-/** M4.T4 자기 탈퇴 proof. Red 뼈대에서는 형태만 둔다 */
 export interface SelfDeleteCredentialProof {
   authVersion: number;
   accountId: string;
+  /** 서버 내부 CAS proof. HTTP·JSON·logger·오류 cause에 넣지 않는다. */
   passwordHash: string;
+  /** DB session.credentialFingerprint 원값. NULL을 현재 HMAC으로 바꾸지 않는다. T2 CAS는 NULL이면 IS NULL, string이면 동등 비교. */
   observedSessionFingerprint: string | null;
+  /** 현재 credential의 HMAC. 저장된 NULL fingerprint를 이 값으로 재바인딩하지 않는다. */
   currentCredentialFingerprint: string;
 }
 export function createAuth(cfg: AuthConfig) {
-  const auth = betterAuth(authOptions(cfg));
+  const confirmation = signupConfirmation(cfg, deliverer(cfg));
+  const auth = betterAuth(authOptions(cfg, confirmation));
   return {
     handler: withClientIp(auth.handler, cfg.clientIp),
     api: auth.api,
-    // M4 Red 뼈대: 아직 구현하지 않았다
-    selfDeleteCredentialProof: async (_input: { userId: string; sessionId: string; password: string }): Promise<SelfDeleteCredentialProof | null> => {
-      throw new Error("M4 미구현: selfDeleteCredentialProof");
+    // 서버 내부 경로. HTTP endpoint나 auth.api에 추가하지 않는다.
+    selfDeleteCredentialProof: async (input: { userId: string; sessionId: string; password: string }): Promise<SelfDeleteCredentialProof | null> => {
+      const context = await auth.$context;
+      return confirmation.selfDeleteCredentialProof(input, context.password.verify.bind(context.password));
     },
   };
 }

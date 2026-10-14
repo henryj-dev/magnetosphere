@@ -5,8 +5,9 @@
 //                  (packages/db/src/signup.ts)이 받지 않으면 403 과 사유 코드(signup_closed·domain_not_allowed·mail_required·signup_cap, Q19)다.
 //                  Better Auth 안에서도 앞 판정(signUpGate)과 사용자 생성 훅이 같은 판정으로 막는다 (packages/auth, 다른 생성 경로까지)
 //   /api/setup     최초 설치 (setup/). /api/setup/omniroute 는 OmniRoute 토큰 상태·붙여 넣기 (관리자 세션)
-//   /api/me/keys   회원 키 API (routes/keys.ts). /api/admin/users/:id 는 관리자 한도·최대 개수 (routes/admin-limits.ts)
-//                  두 경로의 GET 아닌 요청은 Origin 이 BETTER_AUTH_URL 출처와 같아야 한다 (routes/guard.ts, 7장 CSRF)
+//   /api/me/keys   활성 회원 키 API (routes/keys.ts). DELETE /api/me 는 자기 탈퇴 (admin/self-delete.ts)
+//   /api/admin/users 회원 목록·상태·역할·삭제 (admin/members.ts). 기존 PATCH /users/:id 는 한도·최대 개수 (routes/admin-limits.ts)
+//                  회원·관리자·설치 루트와 하위의 GET·HEAD 아닌 요청은 정확한 Origin 을 요구한다 (routes/guard.ts, 7장 CSRF)
 //   /api/admin/settings/{signup,mail} 가입 정책·메일 설정 API (signup/admin.ts·signup/mail.ts, M2.T5). 같은 CSRF 검사
 //   /api/admin/invites 초대 만들기·목록·취소 (invites/admin.ts, M3.T1). 같은 CSRF 검사
 //   /api/invites/accept 초대 수락 (invites/accept.ts, M3.T2). 공개 경로, application/json 만 받는다
@@ -19,9 +20,11 @@
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
-import type { Mailer } from "@magnetosphere/auth";
+import type { Mailer, SelfDeleteCredentialProof } from "@magnetosphere/auth";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
+import { memberAdminRoutes } from "./admin/members.ts";
+import { selfDeleteRoutes } from "./admin/self-delete.ts";
 import { inviteAcceptRoutes } from "./invites/accept.ts";
 import { inviteAdminRoutes } from "./invites/admin.ts";
 import type { ClientFor } from "./limits/daily.ts";
@@ -46,6 +49,8 @@ export interface Services {
     handler(req: Request): Promise<Response>;
     /** 서버 안 호출. 초대 수락(invites/accept.ts)이 초대 문맥(runAsInvite) 안에서 부른다. 시험의 가짜 인증에는 없다 */
     api?: { signUpEmail(o: { body: { email: string; name: string; password: string } }): Promise<unknown> };
+    /** 서버 전용 자기 탈퇴 proof. HTTP·auth.api·응답 DTO 로 내보내지 않는다 */
+    selfDeleteCredentialProof?(input: { userId: string; sessionId: string; password: string }): Promise<SelfDeleteCredentialProof | null>;
   };
   /** APP_ENCRYPTION_KEY 로 만든 암호화 유틸 */
   cipher: Cipher;
@@ -136,14 +141,21 @@ export function createApp(deps: AppDeps) {
     }),
   );
   app.all("/api/auth/*", async (c) => (await deps.services()).auth.handler(c.req.raw));
+  // 최초 설치도 세션·설치 토큰 판정보다 먼저 Origin 을 검사한다. services 는 설치 완료를 기다리지 않는다.
+  app.use("/api/setup", sameOrigin(deps.services));
+  app.use("/api/setup/*", sameOrigin(deps.services));
   app.route("/api/setup", setupRoutes(deps.services, { setupTokenFromSecret: deps.setupTokenFromSecret, log: deps.log }));
+  // /api/me/* 에만 기대지 않고 자기 탈퇴의 exact root 를 명시해 보호한다.
+  app.use("/api/me", sameOrigin(deps.services));
   app.use("/api/me/*", sameOrigin(deps.services));
   app.use("/api/admin/*", sameOrigin(deps.services));
   app.route("/api/me/keys", keyRoutes(deps.services));
+  app.route("/api/me", selfDeleteRoutes(deps.services));
   app.route("/api/admin/settings/signup", signupSettingsRoutes(deps.services));
   app.route("/api/admin/settings/mail", mailSettingsRoutes(deps.services));
   app.route("/api/admin/invites", inviteAdminRoutes(deps.services));
   app.route("/api/admin", adminLimitRoutes(deps.services));
+  app.route("/api/admin", memberAdminRoutes(deps.services));
   app.route("/api/invites", inviteAcceptRoutes(deps.services));
   app.all("/api/*", (c) => c.json({ error: "not_found" }, 404));
   app.get("*", deps.assets);
