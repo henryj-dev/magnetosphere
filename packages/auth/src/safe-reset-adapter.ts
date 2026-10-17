@@ -4,7 +4,7 @@
 import { tryGetCurrentAuthEndpointContext } from "@better-auth/core/context";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError } from "better-auth/api";
-import { and, eq, inArray, isNull, lt, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, sql } from "drizzle-orm";
 import { AUTH_VERSION_MAX } from "@magnetosphere/db/src/schema/common.ts";
 import { activeAuthUser, aliveAuthUser, validAuthVersion } from "./auth-version.ts";
 import type { AuthConfig } from "./index.ts";
@@ -64,7 +64,8 @@ export function credentialWriter(cfg: AuthConfig) {
   const affected = async (query: any, column: any) => provider === "mysql" ? (await query)[0].affectedRows : (await query.returning({ id: column })).length;
   const sameHash = (password: string) => provider === "mysql" ? sql`binary ${a.password} = binary ${password}` : eq(a.password, password);
   const existsCredential = (w: CredentialWrite) => sql`exists (select 1 from ${a} where ${credential(w.userId)} and ${a.id} = ${w.account.id} and ${sameHash(w.account.password)})`;
-  const existsSession = (w: CredentialWrite) => sql`exists (select 1 from ${s} where ${s.id} = ${w.session.id} and ${s.userId} = ${w.userId} and ${s.token} = ${w.session.token} and ${s.authVersion} = ${w.version} and ${s.expiresAt} > ${new Date()})`;
+  const existsSession = (w: CredentialWrite) => sql`exists (select 1 from ${s} where ${s.id} = ${w.session.id} and ${s.userId} = ${w.userId} and ${s.token} = ${w.session.token} and ${s.authVersion} = ${w.version} and ${gt(s.expiresAt, new Date())})`;
+  // 날짜는 칼럼 encoder(gt)로 묶는다. 원시 sql 의 Date 는 D1 이 바인딩하지 못해 batch 가 실패하고 change 가 늘 401 이 된다.
   const userWhere = (w: CredentialWrite) => and(eq(u.id, w.userId), eq(u.authVersion, w.version), lt(u.authVersion, AUTH_VERSION_MAX), isNull(u.deletedAt), w.mode === "change" ? and(eq(u.status, "active"), eq(u.emailVerified, true), existsCredential(w), existsSession(w)) : inArray(u.status, ["pending", "active"]));
   const accountData = (w: CredentialWrite) => ({
     id: typeof w.data?.id === "string" ? w.data.id : crypto.randomUUID(),
