@@ -234,11 +234,18 @@ export async function tcM4DeleteAndSelf(rig: Rig) {
   await rig.h.db.update(s.user).set({ isBootstrapAdmin: true }).where(eq(s.user.id, admin.id));
   expect((await call(app, "DELETE", "/api/me", { cookie: admin.cookie, body: { password: PASSWORD } })).status).toBe(409);
   await rig.h.db.update(s.user).set({ isBootstrapAdmin: false }).where(eq(s.user.id, admin.id));
-  // installed()의 설치 관리자와 login()의 관리자 둘이 활성이다. 자기 삭제는 self 규칙 밖이라(설계 6장 관리자 보호) 나머지를 잠시 정지해 마지막 활성 관리자로 만든다.
+  // 관리자 API 로 자기 계정을 지우지 못한다. 다른 활성 관리자가 있어도 409 self 이고 아무것도 쓰지 않는다 (M4 보안 리뷰 M1, 자기 탈퇴는 /api/me 뿐)
+  const selfBefore = await rows(rig);
+  const selfAdmin = await call(app, "DELETE", `/api/admin/users/${admin.id}`, { cookie: admin.cookie });
+  expect({ status: selfAdmin.status, json: selfAdmin.json }).toEqual({ status: 409, json: { error: "self" } });
+  const selfAfter = await rows(rig);
+  expect(selfAfter.users.find((row: any) => row.id === admin.id)).toEqual(selfBefore.users.find((row: any) => row.id === admin.id));
+  expect([selfAfter.sessions.length, selfAfter.audits.length, selfAfter.jobs.length]).toEqual([selfBefore.sessions.length, selfBefore.audits.length, selfBefore.jobs.length]);
+  // installed()의 설치 관리자와 login()의 관리자 둘이 활성이다. 나머지를 잠시 정지해 마지막 활성 관리자로 만들면 자기 탈퇴(/api/me)도 409 last_admin 이다.
   const otherAdmins = (await rows(rig)).users.filter((row: any) => row.role === "admin" && row.status === "active" && row.id !== admin.id).map((row: any) => row.id as string);
   expect(otherAdmins.length).toBeGreaterThan(0);
   for (const id of otherAdmins) await rig.h.db.update(s.user).set({ status: "suspended" }).where(eq(s.user.id, id));
-  const lastAdmin = await call(app, "DELETE", `/api/admin/users/${admin.id}`, { cookie: admin.cookie });
+  const lastAdmin = await call(app, "DELETE", "/api/me", { cookie: admin.cookie, body: { password: PASSWORD } });
   expect({ status: lastAdmin.status, json: lastAdmin.json }).toEqual({ status: 409, json: { error: "last_admin" } });
   expect((await rows(rig)).users.find((row: any) => row.id === admin.id)).toMatchObject({ role: "admin", status: "active" });
   for (const id of otherAdmins) await rig.h.db.update(s.user).set({ status: "active" }).where(eq(s.user.id, id));

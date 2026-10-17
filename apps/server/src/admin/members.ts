@@ -180,6 +180,8 @@ export function memberAdminRoutes(services: () => Promise<Services>) {
     const ip = (await s.clientIp?.(c.req.raw)) ?? null;
     try {
       if (action === "delete") {
+        // 자기 계정은 관리자 API 로 지우지 않는다. 자기 탈퇴는 DELETE /api/me + 비밀번호 재확인뿐이다 (설계 탈퇴 절, M4 보안 리뷰 M1)
+        if (targetId === admin.member.id) return c.json({ error: "self" }, 409);
         const deleted = await deleteMember(s, { actorId: admin.member.id, actorSessionId: admin.sessionId, targetId, ip, now });
         return c.json(deleted);
       }
