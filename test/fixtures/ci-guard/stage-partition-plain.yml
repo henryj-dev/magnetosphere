@@ -1,0 +1,25 @@
+# TC-CI.2.k 음성 대조: 분할 단계에 분할 없는 줄이 함께 있음
+# expect: stage-partition
+name: ci
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  p2-k2:
+    name: 한도 분배 (K2 게이트, OmniRoute 3.8.51)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/2", "2/2"]
+    steps:
+      - name: K2 게이트
+        run: node scripts/gate.mjs K2 --explain --shard ${{ matrix.shard }}
+  p2-k2-whole:
+    name: 한도 분배 전체
+    runs-on: ubuntu-latest
+    steps:
+      - name: K2 게이트 전체
+        run: node scripts/gate.mjs K2 --explain

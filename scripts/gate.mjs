@@ -8,8 +8,13 @@
 //   gate --status [--json]               단계별 상태
 //   gate --assert-order [--base <ref>] [--head <ref>]
 //                                        잠긴 단계의 산출 경로·설정 변경이 있으면 실패
+//   gate <단계> --shard i/n              검사 배열을 n 조각으로 나눠 i 번째만 돈다 (1≤i≤n, n≥2)
 //   gate --verify-seals [--rerun] [--since <ref>] [--skip-requires <태그>]
 //                                        봉인 구조 검사, --rerun 이면 봉인 커밋에서 검사를 다시 돌린다
+//   gate --verify-seals [--since <ref>] --list-changed
+//                                        구조 검사 뒤, 재실행 대상 단계 이름을 JSON 배열 한 줄로 출력
+//   gate --verify-seals --rerun --only-phase <단계> [--since <ref>] [--skip-requires <태그>]
+//                                        그 단계만 구조 확인 + 재실행. "none" 이면 아무것도 안 하고 종료
 //
 // --skip-requires <태그>: 검사 정의의 requires 에 그 태그가 있는 검사를 SKIP 으로 표시하고 돌리지 않는다.
 //   이 컴퓨터에만 준비된 서비스(시험용 OmniRoute·Keycloak 등)가 필요한 검사를 CI 재검에서 빼는 용도다.
@@ -42,7 +47,7 @@ function parseArgs(argv) {
       continue;
     }
     const key = a.slice(2);
-    if (["root", "base", "head", "since", "waived", "skip-requires", "skip-ids"].includes(key)) {
+    if (["root", "base", "head", "since", "waived", "skip-requires", "skip-ids", "shard", "only-phase"].includes(key)) {
       const next = argv[i + 1];
       if (next === undefined || next.startsWith("--")) fail(`--${key} 에 값이 필요하다`);
       args[key] = next;
@@ -319,11 +324,13 @@ const CHECKS = {
   },
 };
 
-function runChecks(root, phase, def, skipTag = null, skipIds = new Set()) {
+function runChecks(root, phase, def, skipTag = null, skipIds = new Set(), shard = null) {
   if (!def.checks?.length) fail(`${phase}: 검사 정의가 없다. 빈 단계는 실행·봉인하지 않는다`, 1);
-  return def.checks.map((c) => {
-    if ((skipTag && (c.requires ?? []).includes(skipTag)) || skipIds.has(c.id)) {
-      return { id: c.id, desc: c.desc ?? "", ok: true, skipped: true, measured: skipIds.has(c.id) ? "--skip-ids" : `requires ${skipTag}`, limit: "-" };
+  return def.checks.map((c, idx) => {
+    const shardSkip = shard && idx % shard.n !== shard.i - 1;
+    if ((skipTag && (c.requires ?? []).includes(skipTag)) || skipIds.has(c.id) || shardSkip) {
+      const measured = skipIds.has(c.id) ? "--skip-ids" : shardSkip ? "--shard" : `requires ${skipTag}`;
+      return { id: c.id, desc: c.desc ?? "", ok: true, skipped: true, measured, limit: "-" };
     }
     const impl = CHECKS[c.how];
     if (!impl) fail(`${c.id}: 알 수 없는 검사 종류 "${c.how}"`);
@@ -400,7 +407,15 @@ async function cmdAssertOrder(root, baseArg, headArg) {
 }
 
 // sinceRef 가 있으면 그 커밋 이후 봉인 파일이 바뀐 단계만 다시 돌린다 (CI 에서 매 push 전부 재실행하지 않으려고).
-function cmdVerifySeals(root, gates, rerun, sinceRef, skipTag = null) {
+// listChanged 면 구조 검사만 하고 재실행 대상 단계 이름을 JSON 배열 한 줄로 출력한다 (rerun 과 함께 쓰지 않는다).
+// onlyPhase 면 그 단계만 구조 확인 + 재실행한다. "none" 이면 아무것도 안 하고 종료한다.
+function cmdVerifySeals(root, gates, rerun, sinceRef, skipTag = null, { listChanged = false, onlyPhase = null } = {}) {
+  if (listChanged && rerun) fail("--list-changed 는 --rerun 과 함께 쓰지 않는다");
+  if (onlyPhase === "none") {
+    console.log("재실행 대상 없음 (--only-phase none)");
+    return;
+  }
+  if (onlyPhase && !(onlyPhase in gates)) fail(`알 수 없는 단계: ${onlyPhase}`);
   const head = resolveRef(root, "HEAD");
   const since = sinceRef ? resolveRef(root, sinceRef) : null;
   if (sinceRef && !since) fail(`기준 ref 를 찾을 수 없다: ${sinceRef}`);
@@ -409,12 +424,15 @@ function cmdVerifySeals(root, gates, rerun, sinceRef, skipTag = null) {
     : null;
   const ctx = { root, gates, seals: view(root), tip: head };
   const problems = [];
+  const targets = [];
   let count = 0;
   for (const [phase, def] of Object.entries(gates)) {
     const seal = readSeal(ctx.seals, phase);
     if (!seal) continue;
+    if (onlyPhase && phase !== onlyPhase) continue;
     count++;
     const shouldRerun = rerun && (!changedSeals || changedSeals.has(`${SEAL_DIR}/${phase}.json`));
+    if (!seal.waived && (!changedSeals || changedSeals.has(`${SEAL_DIR}/${phase}.json`))) targets.push(phase);
     const bad = sealProblem(root, seal, phase, def) ?? (isAncestor(root, seal.head, head) ? null : "head 가 HEAD 의 조상 아님");
     if (bad) {
       problems.push(`${phase}: ${bad}`);
@@ -449,6 +467,18 @@ function cmdVerifySeals(root, gates, rerun, sinceRef, skipTag = null) {
     for (const p of problems) console.error(`  ${p}`);
     process.exit(1);
   }
+  if (onlyPhase && count === 0) {
+    console.log(`${onlyPhase}: 봉인 없음 — 재실행하지 않음`);
+    return;
+  }
+  if (onlyPhase && rerun && !targets.includes(onlyPhase)) {
+    console.log(`${onlyPhase}: 봉인이 ${sinceRef ?? "기준"} 이후 바뀌지 않음 — 재실행하지 않음`);
+    return;
+  }
+  if (listChanged) {
+    console.log(JSON.stringify(targets.length ? targets : ["none"]));
+    return;
+  }
   console.log(`봉인 ${count}개 검증${rerun ? ` (재실행 포함${skipTag ? `, requires ${skipTag} 건너뜀` : ""})` : ""}`);
 }
 
@@ -475,7 +505,8 @@ function cmdPhase(root, gates, phase, args) {
   const skipTag = args["skip-requires"] ?? null;
   const skipIds = new Set((args["skip-ids"] ?? "").split(",").filter(Boolean));
   if ((skipTag || skipIds.size) && args.seal) fail("--skip-requires·--skip-ids 로 건너뛴 실행으로는 봉인하지 않는다", 1);
-  const results = runChecks(root, phase, def, skipTag, skipIds);
+  if (args.shard && args.seal) fail("--shard 로 나눈 실행으로는 봉인하지 않는다", 1);
+  const results = runChecks(root, phase, def, skipTag, skipIds, shardOf(args.shard));
   for (const r of results) console.log(`${r.skipped ? "SKIP" : r.ok ? "PASS" : "FAIL"}  ${r.id.padEnd(10)} ${r.desc}  (${r.measured} / ${r.limit})`);
   const failed = results.filter((r) => !r.ok);
 
@@ -487,7 +518,9 @@ function cmdPhase(root, gates, phase, args) {
   }
 
   if (failed.length) {
-    console.error(`\n${phase}: ${failed.length}/${results.length} 실패${args.seal ? " — 봉인하지 않음" : ""}`);
+    // --shard 의 분모는 그 조각 검사 수다. 다른 조각으로 보낸 검사는 실패 수에 넣지 않는다
+    const denom = args.shard ? results.length - results.filter((r) => r.skipped).length : results.length;
+    console.error(`\n${phase}: ${failed.length}/${denom} 실패${args.seal ? " — 봉인하지 않음" : ""}`);
     process.exit(1);
   }
 
@@ -495,9 +528,21 @@ function cmdPhase(root, gates, phase, args) {
     writeSeal(root, phase, { waived: false, reason: null, checks: results.map(({ id, ok, measured, limit }) => ({ id, ok, measured, limit })) });
     console.log(`\n${phase} 봉인: ${SEAL_DIR}/${phase}.json — 커밋해서 main 에 합치면 ✅`);
   } else {
-    const skipped = results.filter((r) => r.skipped).length;
-    console.log(`\n${phase}: ${results.length - skipped}/${results.length} 통과${skipped ? `, ${skipped}개 건너뜀 (${skipTag ? `requires ${skipTag}` : "--skip-ids"})` : ""}`);
+    const skipped = results.filter((r) => r.skipped);
+    const passed = results.length - skipped.length;
+    if (args.shard) console.log(`\n${phase} shard ${args.shard}: ${passed}/${passed} 통과`);
+    else console.log(`\n${phase}: ${passed}/${results.length} 통과${skipped.length ? `, ${skipped.length}개 건너뜀 (${skipTag ? `requires ${skipTag}` : "--skip-ids"})` : ""}`);
   }
+}
+
+// "i/n" (1≤i≤n, n≥2). 형식이 틀리면 종료코드 2.
+function shardOf(spec) {
+  if (!spec) return null;
+  const m = /^([1-9]\d*)\/([1-9]\d*)$/.exec(spec);
+  const i = m ? Number(m[1]) : NaN;
+  const n = m ? Number(m[2]) : NaN;
+  if (!m || n < 2 || i > n) fail(`--shard 는 i/n 형식 (1≤i≤n, n≥2): ${JSON.stringify(spec)}`);
+  return { i, n };
 }
 
 function writeSeal(root, phase, { waived, reason, checks }) {
@@ -523,8 +568,8 @@ if (process.argv[1] && fs.realpathSync(process.argv[1]) === SELF) {
   } else {
     const gates = await loadGates(view(root));
     if (args.status) cmdStatus({ root, gates, seals: view(root), tip: defaultTip(root) }, args.json === true);
-    else if (args["verify-seals"]) cmdVerifySeals(root, gates, args.rerun === true, args.since, args["skip-requires"] ?? null);
+    else if (args["verify-seals"]) cmdVerifySeals(root, gates, args.rerun === true, args.since, args["skip-requires"] ?? null, { listChanged: args["list-changed"] === true, onlyPhase: args["only-phase"] ?? null });
     else if (args._[0]) cmdPhase(root, gates, args._[0], args);
-    else fail("사용법: gate <단계> [--seal|--explain|--waived <사유>] | --status [--json] | --assert-order [--base <ref>] [--head <ref>] | --verify-seals [--rerun]");
+    else fail("사용법: gate <단계> [--seal|--explain|--waived <사유>|--shard i/n] | --status [--json] | --assert-order [--base <ref>] [--head <ref>] | --verify-seals [--rerun|--list-changed|--only-phase <단계>]");
   }
 }

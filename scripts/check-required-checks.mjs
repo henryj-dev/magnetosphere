@@ -8,6 +8,10 @@
 //   [missing]  main 규칙의 required_status_checks 문맥 ⊇ 워크플로(.github/workflows/*.yml) 잡 표시 이름.
 //              표시 이름은 잡의 name (없으면 잡 id), name 의 ${{ matrix.<키> }} 는 그 matrix 값마다 펼친다.
 //              CI 에 넣은 잡이 필수 검사가 아니면 그 잡이 빨개도 PR 이 병합된다.
+//              예외: 집계 잡이 실패를 그대로 전달하는 매트릭스 잡은 표시 이름을 필수 검사로 요구하지 않는다.
+//              집계 잡은 if 가 always(), 잡·스텝 continue-on-error 없음, 잡 shell·스텝 if 없음,
+//              모든 run 스텝이 `test "${{ needs.<id>.result }}" = success` 이고 needs 의 모든 잡을 덮어야 한다.
+//              하나라도 아니면 예외를 적용하지 않아 매트릭스 이름을 그대로 요구한다 (기존 동작).
 //   [merge]    pull_request 규칙의 allowed_merge_methods == ["merge"]. 스쿼시·리베이스는 SHA 를 바꿔
 //              봉인 head 가 main 의 조상이 아니게 된다 (R2).
 //
@@ -44,12 +48,50 @@ if (!repo === !rulesFile) {
   process.exit(2);
 }
 
-/** 워크플로 잡 표시 이름 전부. name 의 ${{ matrix.<키> }} 는 matrix 목록 값마다 펼친다 */
+const ALWAYS = /^(always\(\)|\$\{\{\s*always\(\)\s*\}\})$/;
+
+/** 실패를 그대로 전달하는 집계 잡이면 그것이 덮는 needs 잡 이름, 아니면 null.
+ *  조건이 하나라도 느슨하면 예외를 적용하지 않는다 (매트릭스 이름을 그대로 요구). */
+function aggregates(def) {
+  const jobIf = typeof def?.if === "string" ? def.if.trim() : "";
+  if (!ALWAYS.test(jobIf)) return null;
+  if (def["continue-on-error"] !== undefined && def["continue-on-error"] !== false) return null;
+  if (def.defaults?.run?.shell) return null;
+  const needs = def?.needs === undefined ? [] : Array.isArray(def.needs) ? def.needs : [def.needs];
+  const steps = def?.steps ?? [];
+  if (!needs.length || !steps.length) return null;
+  const covered = [];
+  for (const s of steps) {
+    if (typeof s?.run !== "string") return null;
+    if (s.if !== undefined) return null;
+    if (s.shell) return null;
+    if (s["continue-on-error"] !== undefined && s["continue-on-error"] !== false) return null;
+    const m = /^test "\$\{\{ needs\.([A-Za-z0-9_-]+)\.result \}\}" = success$/.exec(s.run.trim());
+    if (!m) return null;
+    covered.push(m[1]);
+  }
+  // needs 의 모든 잡을 스텝이 덮어야 한다. 하나라도 빠지면 그 잡의 실패가 집계에 안 닿는다
+  if (!needs.every((n) => covered.includes(n))) return null;
+  return covered;
+}
+
+/** 워크플로 잡 표시 이름. name 의 ${{ matrix.<키> }} 는 matrix 목록 값마다 펼친다.
+ *  집계 잡이 needs 의 실패를 그대로 전달하는 매트릭스 잡은 뺀다 (조각 이름은 필수 검사가 되지 않는다) */
 function jobNames(dir) {
   const names = [];
+  const covered = new Set();
   for (const f of fs.readdirSync(dir).filter((f) => /\.ya?ml$/.test(f)).sort()) {
     const doc = parse(fs.readFileSync(path.join(dir, f), "utf8"));
-    for (const [id, def] of Object.entries(doc?.jobs ?? {})) {
+    const jobs = doc?.jobs ?? {};
+    for (const def of Object.values(jobs)) {
+      const agg = aggregates(def);
+      if (!agg) continue;
+      const needs = def?.needs === undefined ? [] : Array.isArray(def.needs) ? def.needs : [def.needs];
+      for (const n of needs) if (agg.includes(n) && jobs[n]?.strategy?.matrix) covered.add(`${f} ${n}`);
+    }
+    for (const [id, def] of Object.entries(jobs)) {
+      // 집계 잡이 덮으면 펼치기 전에 뺀다. 실행 중 출력(fromJSON)으로만 정해지는 matrix 는 펼칠 목록이 없다
+      if (covered.has(`${f} ${id}`)) continue;
       const name = typeof def?.name === "string" ? def.name : id;
       const keys = [...name.matchAll(/\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}/g)].map((m) => m[1]);
       let expanded = [name];
@@ -79,21 +121,22 @@ function loadRules() {
 const problems = [];
 let rules;
 let jobs;
+let required;
 try {
   rules = loadRules();
   if (!Array.isArray(rules)) throw new Error("규칙 응답이 배열이 아니다");
+  required = new Set(
+    rules
+      .filter((r) => r?.type === "required_status_checks")
+      .flatMap((r) => r.parameters?.required_status_checks ?? [])
+      .map((c) => c.context),
+  );
   jobs = jobNames(workflowsDir);
 } catch (e) {
   console.error(`check-required-checks: ${e.message}`);
   process.exit(1);
 }
 
-const required = new Set(
-  rules
-    .filter((r) => r?.type === "required_status_checks")
-    .flatMap((r) => r.parameters?.required_status_checks ?? [])
-    .map((c) => c.context),
-);
 for (const j of jobs) if (!required.has(j.name)) problems.push(`[missing] 필수 검사에 없는 잡: "${j.name}" (${j.where})`);
 
 const pr = rules.filter((r) => r?.type === "pull_request");

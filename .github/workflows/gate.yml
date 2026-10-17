@@ -11,6 +11,10 @@ permissions:
 jobs:
   gate:
     runs-on: ubuntu-latest
+    outputs:
+      # 재실행 대상 단계. 없으면 ["none"] (rerun 매트릭스가 한 번 돌고 --only-phase none 으로 바로 끝난다)
+      changed: ${{ steps.seals.outputs.changed }}
+      base: ${{ steps.order.outputs.base }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -22,7 +26,8 @@ jobs:
       - name: 게이트 장치 음성 대조
         run: node --test --test-reporter=tap "scripts/*.test.mjs"
       - name: 순서 위반 검사
-        # PR 은 대상 브랜치와 갈라진 뒤, push 는 직전 커밋 뒤의 변경을 본다. pre-push 훅을 건너뛴 push 도 여기서 잡는다.
+        id: order
+        # PR 은 대상 브랜치와 갈라진 뒤, push 는 직전 커밋 뒤의 변경을 본다. pre-push 훅을 건너뛴 push 도 여기서 잡힌다.
         run: |
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base="origin/${{ github.base_ref }}"
@@ -36,16 +41,57 @@ jobs:
           else
             node scripts/gate.mjs --assert-order
           fi
-          echo "GATE_BASE=$base" >> "$GITHUB_ENV"
-      - name: 봉인 검증 (바뀐 봉인은 봉인 커밋에서 검사를 다시 돌린다)
-        # 시험용 OmniRoute·Keycloak·docker DB 가 필요한 검사(requires: local-services)는 여기서 건너뛰고,
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+      - name: 봉인 검증 (바뀐 봉인 목록)
+        id: seals
+        # 구조만 확인한다. 다시 돌리는 것은 rerun 잡이 단계마다 나눠 한다.
+        # 시험용 OmniRoute·Keycloak·docker DB 가 필요한 검사(requires: local-services)는 재실행에서 건너뛰고,
         # S7 의 CI 매트릭스가 서비스를 띄워 다시 돈다.
-        # G-K0.31(check-required-checks)이 gh api 로 main 규칙을 읽는다. gh 는 토큰이 없으면 실행을 거부한다
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -n "$GATE_BASE" ]; then
-            node scripts/gate.mjs --verify-seals --rerun --since "$GATE_BASE" --skip-requires local-services
+          if [ -n "${{ steps.order.outputs.base }}" ]; then
+            node scripts/gate.mjs --verify-seals --since "${{ steps.order.outputs.base }}" --list-changed > "$RUNNER_TEMP/seals.txt"
           else
-            node scripts/gate.mjs --verify-seals --rerun --skip-requires local-services
+            node scripts/gate.mjs --verify-seals --list-changed > "$RUNNER_TEMP/seals.txt"
           fi
+          cat "$RUNNER_TEMP/seals.txt"
+          changed=$(tail -n 1 "$RUNNER_TEMP/seals.txt")
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+
+  # 봉인 재실행. 대상 단계마다 한 잡. 대상이 없으면 phase "none" 하나로 바로 끝난다 (gate.mjs 가 종료 0).
+  rerun:
+    name: 봉인 재실행 (${{ matrix.phase }})
+    needs: gate
+    runs-on: ubuntu-latest
+    # 봉인 커밋을 꺼내 설치하고 그 단계 검사를 다시 돌린다. 가장 긴 단계 잡(M2·M3, 60분)과 같게 둔다
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: ${{ fromJSON(needs.gate.outputs.changed) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      # 설치는 여기(HEAD)에서 하지 않는다. 재실행은 봉인 커밋을 따로 꺼내 그 작업 트리에서
+      # pnpm install --frozen-lockfile 을 하고, 검사는 node scripts/gate.mjs 뿐이라 HEAD 의 node_modules 를 쓰지 않는다.
+      - name: 봉인 재실행 (${{ matrix.phase }})
+        # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+        env:
+          # 재실행되는 검사 중 G-K0.31 등이 gh api 로 main 규칙을 읽는다. 토큰이 없으면 gh 가 실행을 거부한다
+          GH_TOKEN: ${{ github.token }}
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
+        run: node scripts/gate.mjs --verify-seals --rerun --only-phase ${{ matrix.phase }} --since "${{ needs.gate.outputs.base }}" --skip-requires local-services
+
+  # 집계. 표시 이름 "봉인 재실행" 은 필수 검사 이름 그대로다 (조각 잡 이름은 매트릭스가 펼친다).
+  rerun-result:
+    name: 봉인 재실행
+    needs: [gate, rerun]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.gate.result }}" = success
+      - run: test "${{ needs.rerun.result }}" = success

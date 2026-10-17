@@ -1,0 +1,19 @@
+# TC-CI.2.f 음성 대조: --shard 분모가 조각마다 다름
+# expect: stage-partition
+name: ci
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  p2-k3:
+    name: 키 상태 (K3 게이트, OmniRoute 3.8.51)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/2", "2/3"]
+    steps:
+      - name: K3 게이트
+        run: node scripts/gate.mjs K3 --explain --shard ${{ matrix.shard }}

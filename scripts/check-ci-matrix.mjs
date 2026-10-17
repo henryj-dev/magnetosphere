@@ -17,6 +17,8 @@
 //            K5 잡은 그 여섯을 --skip-ids 로 빼므로, 매트릭스 스텝이 빠지면 키 시나리오가 CI 에서 하나도 돌지 않는다 (K5.T3).
 //   stage    봉인 파일이 있는(면제 아닌) 단계 중 S1 을 뺀 모든 단계를 어떤 스텝이 `node scripts/gate.mjs <단계>` 로 돈다 [stage-missing]. --skip-requires 는 쓰지 않고
 //            [skip-requires], --skip-ids 로 뺄 수 있는 것은 매트릭스가 대신 도는 E2E 검사뿐이다 [skip-ids].
+//            같은 단계를 `--shard <식>` 으로 나누면 그 식의 matrix 값을 펼쳐 분모가 같고 분자 1..n 이 정확히 한 번씩이어야 하며,
+//            그 단계의 분할 없는 줄이 있으면 안 된다 [stage-partition].
 //            아직 봉인하지 않은 단계는 요구하지 않는다 — 그 단계 게이트는 아직 빨강이다. 봉인 파일을 커밋하는 순간부터
 //            단계 잡이 필수다 (2단계 실행판 K0.T2). --seal-dir <폴더> 로 봉인 폴더를 바꿀 수 있다 (기본 gates/seals, 음성 대조용).
 //   guard    게이트·E2E 명령이 조용히 빠지거나 실패가 삼켜지지 않는다. 그 명령을 가진 잡·스텝에
@@ -114,7 +116,7 @@ function hygiene(doc, name, add) {
 
 /** 명령(게이트·E2E)을 가진 스텝과 그 잡이 조용히 빠지거나 실패를 삼키지 않는지. 엄격히 맞는 명령 줄 목록을 돌려준다 */
 function guard(doc, add) {
-  const commands = []; // { job, line }
+  const commands = []; // { job, line, matrix }
   if (doc?.defaults?.run?.shell) add("swallow", `defaults.run.shell 로 셸을 바꾼다 (${doc.defaults.run.shell})`);
   for (const [job, def] of Object.entries(doc?.jobs ?? {})) {
     const steps = (def?.steps ?? []).filter((s) => typeof s?.run === "string" && (GATE_RE.test(s.run) || E2E_RE.test(s.run)));
@@ -139,7 +141,7 @@ function guard(doc, add) {
           add("swallow", `${label}: 명령 줄이 종료코드를 바꾼다 (${line})`);
           continue;
         }
-        commands.push({ job, line });
+        commands.push({ job, line, matrix: def.strategy?.matrix });
       }
     }
   }
@@ -207,9 +209,59 @@ function check(doc, name, expect, gates) {
       const bad = ids.filter((id) => !e2eIds.has(id));
       if (bad.length) add("skip-ids", `${h.job}: ${phase} 에서 매트릭스가 대신 돌지 않는 검사를 뺐다: ${bad.join(", ")}`);
     }
+    partition(phase, hits, add);
   }
   if (!commands.some((c) => /^node scripts\/gate\.mjs --root \S+ S1\b/.test(c.line))) add("s1", "S1 을 봉인 커밋 작업 트리에서 도는 명령 줄이 없다");
   return problems;
+}
+
+const SHARD_VALUE = /^[1-9]\d*\/[1-9]\d*$/;
+
+/** `--shard <식>` 으로 나눈 단계: 펼친 조각이 분모 하나로 1..n 을 정확히 한 번씩 덮고, 분할 없는 줄이 없다.
+ *  include·exclude 로 조각을 바꾸거나, i/n 이 아닌 값이 있으면 실패다 */
+function partition(phase, hits, add) {
+  const sharded = hits.filter((h) => /--shard\b/.test(h.m[1]));
+  if (!sharded.length) return;
+  const plain = hits.filter((h) => !/--shard\b/.test(h.m[1]));
+  if (plain.length) add("stage-partition", `${phase}: --shard 줄과 분할 없는 줄이 함께 있다 (${plain.map((h) => h.job).join(", ")})`);
+  const pieces = [];
+  let bad = false;
+  for (const h of sharded) {
+    if (h.matrix?.include || h.matrix?.exclude) {
+      add("stage-partition", `${phase}: ${h.job} 의 matrix.include·exclude 로 조각을 바꾼다`);
+      bad = true;
+    }
+    const expr = /--shard\s+((?:\$\{\{[^}]*\}\}|\S)+)/.exec(h.m[1])?.[1];
+    const literal = /^(\d+)\/(\d+)$/.exec(expr ?? "");
+    if (literal) {
+      pieces.push(literal[0]);
+      continue;
+    }
+    const ref = /^"?\$\{\{\s*matrix\.([A-Za-z0-9_-]+)\s*\}\}"?$/.exec(expr ?? "");
+    const values = ref ? h.matrix?.[ref[1]] : undefined;
+    if (!Array.isArray(values) || !values.every((v) => typeof v === "string")) {
+      add("stage-partition", `${phase}: ${h.job} 의 --shard 식(${expr ?? "없음"})을 펼칠 matrix 목록이 없다`);
+      bad = true;
+      continue;
+    }
+    const malformed = values.filter((v) => !SHARD_VALUE.test(v));
+    if (malformed.length) {
+      add("stage-partition", `${phase}: ${h.job} 의 --shard 값이 i/n 이 아니다 (${malformed.join(", ")})`);
+      bad = true;
+    }
+    pieces.push(...values);
+  }
+  const parsed = pieces.map((p) => /^(\d+)\/(\d+)$/.exec(p)).filter(Boolean);
+  if (bad || parsed.length !== pieces.length || !parsed.length) return;
+  const denoms = new Set(parsed.map((m) => m[2]));
+  if (denoms.size !== 1) {
+    add("stage-partition", `${phase}: --shard 분모가 다르다 (${[...denoms].join(", ")})`);
+    return;
+  }
+  const n = Number([...denoms][0]);
+  const nums = parsed.map((m) => Number(m[1])).sort((a, b) => a - b);
+  const want = Array.from({ length: n }, (_, i) => i + 1);
+  if (JSON.stringify(nums) !== JSON.stringify(want)) add("stage-partition", `${phase}: --shard 조각이 1/${n}..${n}/${n} 을 한 번씩이 아니다 (${pieces.join(", ")})`);
 }
 
 function load(file) {

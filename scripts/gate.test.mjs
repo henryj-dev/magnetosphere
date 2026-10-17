@@ -507,3 +507,92 @@ test("TC-K0.T1.e grep 검사의 ^·$ 는 줄의 시작·끝이다", () => {
   assert.match(r.out, /PASS\s+line .*\(1 \/ == 1\)/);
   assert.match(r.out, /PASS\s+end .*\(1 \/ == 1\)/);
 });
+
+// ---------- CI 분할: --shard 와 봉인 재검 분할 (TC-CI.2) ----------
+
+test("TC-CI.2.a --shard 조각의 합은 전체이고 조각끼리 겹치지 않는다", () => {
+  const checks = [0, 1, 2, 3, 4].map((n) => ({ id: `G${n}`, how: "cmd", cmd: `printf 'ran G${n}\\n'` }));
+  const dir = repo({ P: { needs: [], checks } });
+  const shards = ["1/3", "2/3", "3/3"].map((s) => gate(dir, "P", "--shard", s));
+  for (const r of shards) assert.equal(r.code, 0, r.out);
+  const ran = shards.flatMap((r) => [...r.out.matchAll(/^PASS\s+(G\d)/gm)].map((m) => m[1]));
+  assert.deepEqual(ran.sort(), ["G0", "G1", "G2", "G3", "G4"]);
+  assert.equal(new Set(ran).size, ran.length, "조각끼리 겹친다");
+  const skipped = shards.flatMap((r) => [...r.out.matchAll(/^SKIP\s+(G\d) .*\(--shard/gm)].map((m) => m[1]));
+  assert.equal(skipped.length, 10, `건너뛴 줄이 조각마다 나머지여야 한다\n${shards.map((r) => r.out).join("\n")}`);
+  // 조각 요약의 분모는 그 조각 검사 수(통과 수와 같다). 건너뛴 검사를 통과로 세지 않는다
+  // 실패 요약의 분모도 그 조각 검사 수다. 다른 조각으로 보낸 검사는 실패 수에 넣지 않는다
+  write(dir, "gates/gates.config.mjs", `export const GATES = ${JSON.stringify({ P: { needs: [], checks: checks.map((c, n) => ({ ...c, cmd: n === 0 ? "false" : "true" })) } })};\n`);
+  const broken = gate(dir, "P", "--shard", "1/3");
+  assert.notEqual(broken.code, 0, broken.out);
+  assert.match(broken.out, /P: 1\/2 실패/);
+  assert.match(shards[0].out, /P shard 1\/3: 2\/2 통과/);
+  assert.match(shards[1].out, /P shard 2\/3: 2\/2 통과/);
+  assert.match(shards[2].out, /P shard 3\/3: 1\/1 통과/);
+});
+
+test("TC-CI.2.b --shard 형식 오류는 종료코드 2, --seal 과 함께면 거부한다", () => {
+  const dir = repo({ P: { needs: [], checks: [ok("G0"), ok("G1")] } });
+  for (const bad of ["1", "0/2", "3/2", "1/1", "2/0", "x/3", "1/2/3"]) {
+    const r = gate(dir, "P", "--shard", bad);
+    assert.equal(r.code, 2, `${bad}: ${r.out}`);
+  }
+  const seal = gate(dir, "P", "--seal", "--shard", "1/2");
+  assert.notEqual(seal.code, 0, seal.out);
+  assert.equal(sealExists(dir, "P"), false, "조각 실행으로 봉인 파일이 생기면 안 된다");
+});
+
+test("TC-CI.2.c --verify-seals --list-changed 는 재실행 대상 단계를 JSON 한 줄로 낸다", () => {
+  const dir = repo({
+    A: { needs: [], checks: [ok("GA")] },
+    B: { needs: ["A"], checks: [ok("GB")] },
+  });
+  sealAndCommit(dir, "A");
+  const base = sh(dir, "git rev-parse HEAD");
+  sealAndCommit(dir, "B");
+
+  const none = gate(dir, "--verify-seals", "--list-changed", "--since", sh(dir, "git rev-parse HEAD"));
+  assert.equal(none.code, 0, none.out);
+  assert.equal(none.out.trim().split("\n").at(-1), '["none"]');
+
+  const changed = gate(dir, "--verify-seals", "--list-changed", "--since", base);
+  assert.equal(changed.code, 0, changed.out);
+  assert.equal(changed.out.trim().split("\n").at(-1), '["B"]', "면제 아닌 봉인이 바뀐 단계만");
+
+  const all = gate(dir, "--verify-seals", "--list-changed");
+  assert.equal(all.code, 0, all.out);
+  assert.equal(all.out.trim().split("\n").at(-1), '["A","B"]', "--since 없으면 봉인 있는 단계 전부");
+
+  const withRerun = gate(dir, "--verify-seals", "--rerun", "--list-changed");
+  assert.equal(withRerun.code, 2, withRerun.out);
+});
+
+test("TC-CI.2.d --verify-seals --rerun --only-phase 는 그 단계만 재실행한다", () => {
+  const dir = repo({
+    A: { needs: [], checks: [ok("GA")] },
+    B: { needs: ["A"], checks: [{ id: "GB", how: "cmd", cmd: "test -f done.txt" }] },
+  });
+  sealAndCommit(dir, "A");
+  const base = sh(dir, "git rev-parse HEAD");
+  const head = base;
+  write(dir, "gates/seals/B.json", JSON.stringify({ phase: "B", sealed: true, head, at: "x", waived: false, reason: null, checks: [{ id: "GB", ok: true }] }));
+  commit(dir, "forged B seal");
+
+  const none = gate(dir, "--verify-seals", "--rerun", "--only-phase", "none");
+  assert.equal(none.code, 0, none.out);
+  assert.match(none.out, /none/);
+
+  const other = gate(dir, "--verify-seals", "--rerun", "--only-phase", "A", "--since", base);
+  assert.equal(other.code, 0, `바뀌지 않은 단계는 재실행하지 않는다\n${other.out}`);
+  assert.match(other.out, /바뀌지 않음/);
+
+  const target = gate(dir, "--verify-seals", "--rerun", "--only-phase", "B", "--since", base);
+  assert.notEqual(target.code, 0, `대상 단계의 위조는 잡아야 한다\n${target.out}`);
+  assert.match(target.out, /FAIL\s+GB /);
+
+  // 봉인이 없는 단계는 구조 확인 대상이 없어 재실행 없이 통과한다
+  const dir2 = repo({ A: { needs: [], checks: [ok("GA")] }, B: { needs: ["A"], checks: [ok("GB")] } });
+  const noSeal = gate(dir2, "--verify-seals", "--rerun", "--only-phase", "B");
+  assert.equal(noSeal.code, 0, noSeal.out);
+  assert.match(noSeal.out, /봉인 없음/);
+});
