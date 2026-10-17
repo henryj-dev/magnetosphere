@@ -27,7 +27,12 @@
 //            run 본문에 set +e 가 없다 [swallow].
 //   s1       S1 은 확인용 코드가 S7.T2 에서 지워져 봉인 커밋에서만 돈다. `--root <봉인 커밋 작업 트리> S1` 스텝이 있다 [s1].
 //   위생     모든 워크플로: 모든 `uses:` 가 40자리 커밋 SHA [pin], 최상위 permissions 가 contents: read 하나 [permissions],
-//            push·pull_request 둘 다 걸려 있고 branches·paths 거르개가 없다 [trigger].
+//            push·pull_request 둘 다 걸려 있고 branches·paths·tags 거르개가 없다 [trigger]. 예외는 하나: push 가 정확히
+//            `branches: [main]` 하나뿐인 모양 (다른 값·여러 값·글롭·다른 거르개는 실패, pull_request 거르개는 늘 실패).
+//            같은 커밋을 push·pull_request 로 두 번 돌리는 중복을 없애고, main 에는 push 를 남겨 봉인 커밋 결과가 남는다.
+//            PR 브랜치는 pull_request 가 대상 브랜치와 합친 커밋을 검사한다. PR 전 브랜치 push·충돌 PR·태그 push 는
+//            CI 가 돌지 않는다 (pre-push 훅의 순서 검사가 남고, 충돌 PR 은 필수 검사가 없어 병합되지 않는다).
+//            그 밖의 거르개는 워크플로가 일부 변경에서 조용히 돌지 않게 한다.
 //            최상위 concurrency.cancel-in-progress 가 true 가 아니고, 식이면 main 을 뺀다 (github.ref != 'refs/heads/main') [concurrency].
 import fs from "node:fs";
 import path from "node:path";
@@ -95,6 +100,13 @@ function hygiene(doc, name, add) {
   for (const ev of ["push", "pull_request"]) if (!events.includes(ev)) add("trigger", `${name}: on.${ev} 가 없다`);
   if (on && typeof on === "object" && !Array.isArray(on)) {
     for (const [ev, cfg] of Object.entries(on)) {
+      // main 에만 거는 push: 정확히 { branches: ["main"] } 하나만 허용한다
+      if (ev === "push" && cfg && typeof cfg === "object" && "branches" in cfg) {
+        if (Object.keys(cfg).length !== 1 || JSON.stringify(cfg.branches) !== JSON.stringify(["main"])) {
+          add("trigger", `${name}: on.push 는 거르개가 없거나 정확히 branches: [main] 하나여야 한다 (${JSON.stringify(cfg)})`);
+        }
+        continue;
+      }
       for (const k of ["branches", "branches-ignore", "paths", "paths-ignore", "tags", "tags-ignore"]) {
         if (cfg && typeof cfg === "object" && k in cfg) add("trigger", `${name}: on.${ev}.${k} 거르개로 일부 변경에서 워크플로가 돌지 않는다`);
       }
