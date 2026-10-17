@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./mail": "./src/mail/index.ts",
     "./mail/smtp": "./src/mail/smtp.ts",
-    "./invite-context": "./src/invite-context.ts"
+    "./invite-context": "./src/invite-context.ts",
+    "./internal": "./src/internal.ts"
   },
   "scripts": {
     "test": "node scripts/test.mjs",

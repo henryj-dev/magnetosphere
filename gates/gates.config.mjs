@@ -845,7 +845,7 @@ export const GATES = {
     strictTests: true,
     outputs: [
       "apps/server/src/admin/**", "apps/server/test/admin/**", "apps/server/src/sessions/**", "apps/server/test/sessions/**",
-      "packages/auth/src/auth-version.ts", "packages/auth/src/safe-reset-adapter.ts",
+      "packages/auth/src/auth-version.ts", "packages/auth/src/safe-reset-adapter.ts", "packages/auth/src/internal.ts",
       "packages/auth/test/m4-session-version.test.ts", "packages/auth/test/m4-reset-delete.test.ts",
       "packages/db/migrations/sqlite/0005_m4_auth_version.sql", "packages/db/migrations/mysql/0005_m4_auth_version.sql", "packages/db/migrations/pg/0005_m4_auth_version.sql",
       "packages/db/migrations/sqlite/meta/0005_snapshot.json", "packages/db/migrations/mysql/meta/0005_snapshot.json", "packages/db/migrations/pg/meta/0005_snapshot.json",

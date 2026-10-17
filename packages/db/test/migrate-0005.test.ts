@@ -255,7 +255,7 @@ describe.each(selected)("%s", (kind) => {
         ? { type: "integer", notNull: true, defaultValue: "0" }
         : kind === "pg"
           ? { type: "integer", notNull: true, defaultValue: "0" }
-          : { type: "int", notNull: true, defaultValue: "0" };
+          : { type: kind === "mariadb" ? "int(11)" : "int", notNull: true, defaultValue: "0" };
       expect(await column(db, kind, "user", "auth_version")).toEqual(expected);
       expect(await column(db, kind, "session", "auth_version")).toEqual(expected);
       const [user] = await db.rows(`SELECT auth_version,signup_origin,email,email_verified,role,status FROM ${q}user${q} WHERE id='u-old'`);

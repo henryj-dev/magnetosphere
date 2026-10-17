@@ -2,12 +2,13 @@
 // 이메일 없는 초대는 링크를 쥔 사람이 아무 이메일로나 수락할 수 있어 공개 가입과 같은 위험이다 (M3.T2 보안 리뷰 H-1).
 // JWT에는 원문 해시 대신 회원·credential에 묶인 HMAC을 넣는다. DB의 조건부 UPDATE가 일회용 소비점이다.
 import { tryGetCurrentAuthEndpointContext } from "@better-auth/core/context";
+import { BASE_ERROR_CODES } from "@better-auth/core/error";
 import { APIError, createAuthEndpoint, getAuthoritativeSessionFromCtx, getSessionFromCtx } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
 import { parseUserOutput } from "better-auth/db";
 import { constantTimeEqual, signJWT, verifyJWT } from "better-auth/crypto";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
-import { activeAuthUser, validAuthVersion } from "./auth-version.ts";
+import { activeAuthUser, aliveAuthUser, validAuthVersion } from "./auth-version.ts";
 import { credentialWriter, observedAuthVersion } from "./safe-reset-adapter.ts";
 import type { User } from "better-auth";
 import type { AuthConfig, MailMessage } from "./index.ts";
@@ -23,7 +24,8 @@ type Context = any;
 const invalidProof = () => new APIError("UNAUTHORIZED", { code: "INVALID_CONFIRMATION", message: "인증 링크나 비밀번호를 확인해 주세요" });
 /** H1 확인 흐름을 타는 가입 경로 */
 const CONFIRMED_ORIGINS = ["public", "invite"];
-const staleLogin = () => new APIError("UNAUTHORIZED", { code: "INVALID_EMAIL_OR_PASSWORD", message: "Invalid email or password" });
+// core의 없는 메일/틀린 비밀번호와 같은 생성 경로를 쓴다. new APIError({code,message})는 본문 필드 순서가 달라 계정 존재가 드러난다 (M4.T3.invalid).
+const staleLogin = () => APIError.from("UNAUTHORIZED", BASE_ERROR_CODES.INVALID_EMAIL_OR_PASSWORD);
 
 /** 요청 전용 문맥에 id만 기록한다. 가입 트랜잭션 안에서 바깥 DB 연결을 읽지 않는다. */
 export function queueConfirmationMail(userId: string): void {
@@ -58,9 +60,10 @@ export function signupConfirmation(cfg: AuthConfig, deliver: (m: MailMessage) =>
   const matches = async (id: string, expected: string | null, version: unknown) => {
     if (!validAuthVersion(version)) return false;
     const { user, account } = await load(id);
-    if (!activeAuthUser(user) || user.authVersion !== version) return false;
-    // OAuth・旧NULL指紋セッションにcredentialの存在は要求しない。状態と版は必ず照合する。
-    return expected === null || (typeof expected === "string" && !!account?.password && constantTimeEqual(await fingerprint(id, account), expected));
+    if (!aliveAuthUser(user) || user.authVersion !== version) return false;
+    // active의 OAuth·기존 NULL 지문은 유지한다. pending은 인증된 credential 문자열 지문만 허용한다.
+    if (activeAuthUser(user)) return expected === null || (typeof expected === "string" && !!account?.password && constantTimeEqual(await fingerprint(id, account), expected));
+    return user.status === "pending" && !!user.emailVerified && typeof expected === "string" && !!account?.password && constantTimeEqual(await fingerprint(id, account), expected);
   };
   const validSession = async (row: any) => !!row && validAuthVersion(row.authVersion) && row.expiresAt > new Date() && matches(row.userId, row.credentialFingerprint ?? null, row.authVersion);
   const proof = async (token: unknown) => {
@@ -205,11 +208,8 @@ export function signupConfirmation(cfg: AuthConfig, deliver: (m: MailMessage) =>
         const { user, account } = await load(session.userId);
         // 설치된 core는 password.verify 성공 뒤 여기 온다. wrong password/없는 mail은 이 훅을 타지 않는다.
         if (!snapshot || snapshot.id !== session.userId || !validAuthVersion(snapshot.version) || !validAuthVersion(user?.authVersion) || user.authVersion !== snapshot.version || user.deletedAt || user.status === "deleted" || !account?.password || typeof snapshot.fingerprint !== "string" || !constantTimeEqual(await fingerprint(user.id, account), snapshot.fingerprint)) throw staleLogin();
-        if (user.status === "pending" || user.status === "suspended") {
-          const code = user.status === "pending" ? "ACCOUNT_PENDING" : "ACCOUNT_SUSPENDED";
-          throw new APIError("FORBIDDEN", { code, message: code.toLowerCase() });
-        }
-        if (!activeAuthUser(user)) throw staleLogin();
+        if (user.status === "suspended") throw new APIError("FORBIDDEN", { code: "ACCOUNT_SUSPENDED", message: "account_suspended" });
+        if (!(await matches(session.userId, snapshot.fingerprint, snapshot.version))) throw staleLogin();
         return { data: { ...session, credentialFingerprint: snapshot.fingerprint, authVersion: snapshot.version } };
       }
       // OAuth/link-account는 canonical findOne의 최초 version만 쓴다. 생성 직전 현재 version으로 다시 바인딩하지 않는다.

@@ -9,11 +9,13 @@ import { AUTH_SCHEMA_OPTIONS } from "@magnetosphere/db/src/auth-options.ts";
 import { countSignup, decideSignup, loadSignupInputs, VERIFY_EMAIL_EXPIRES_S, type SignupInputs } from "@magnetosphere/db/src/signup.ts";
 import { currentInvite } from "./invite-context.ts";
 import { queueConfirmationMail, signupConfirmation } from "./signup-confirmation.ts";
+import { bindSelfDeleteProof, type SelfDeleteCredentialProve } from "./internal.ts";
 import { resetPasswordMessage } from "./mail/messages.ts";
 import type { MailMessage, Mailer } from "./mail/types.ts";
 import { CLIENT_IP_HEADER, ipAddressOptions, rateLimitOptions, withClientIp, type ClientIp } from "./rate-limit.ts";
 
 export type { Mailer, MailMessage } from "./mail/types.ts";
+export type { SelfDeleteCredentialProof } from "./internal.ts";
 export { CLIENT_IP_HEADER, RATE_LIMIT_RULES, resolveClientIp, type ClientIp } from "./rate-limit.ts";
 
 // @better-auth/sso 1.7.7 이 공개 경로로 여는 관리 엔드포인트 전부 (dist/index.mjs 의 createAuthEndpoint 경로).
@@ -293,26 +295,15 @@ export function authOptions(cfg: AuthConfig, confirmation = signupConfirmation(c
  * Better Auth 의 auth.handler 는 내보내지 않는다. 그것을 서버에 바로 붙이면(toNodeHandler(auth) 등) 클라이언트가
  * x-magnetosphere-client-ip 를 지어 넣어 요청 수 제한을 통째로 우회한다. api 는 서버 안 호출용(auth.api)이다.
  */
-export interface SelfDeleteCredentialProof {
-  authVersion: number;
-  accountId: string;
-  /** 서버 내부 CAS proof. HTTP·JSON·logger·오류 cause에 넣지 않는다. */
-  passwordHash: string;
-  /** DB session.credentialFingerprint 원값. NULL을 현재 HMAC으로 바꾸지 않는다. T2 CAS는 NULL이면 IS NULL, string이면 동등 비교. */
-  observedSessionFingerprint: string | null;
-  /** 현재 credential의 HMAC. 저장된 NULL fingerprint를 이 값으로 재바인딩하지 않는다. */
-  currentCredentialFingerprint: string;
-}
 export function createAuth(cfg: AuthConfig) {
   const confirmation = signupConfirmation(cfg, deliverer(cfg));
   const auth = betterAuth(authOptions(cfg, confirmation));
-  return {
-    handler: withClientIp(auth.handler, cfg.clientIp),
-    api: auth.api,
-    // 서버 내부 경로. HTTP endpoint나 auth.api에 추가하지 않는다.
-    selfDeleteCredentialProof: async (input: { userId: string; sessionId: string; password: string }): Promise<SelfDeleteCredentialProof | null> => {
-      const context = await auth.$context;
-      return confirmation.selfDeleteCredentialProof(input, context.password.verify.bind(context.password));
-    },
+  const result = { handler: withClientIp(auth.handler, cfg.clientIp), api: auth.api };
+  // 서버 내부 proof는 같은 인스턴스의 문맥을 쓰고 원본 반환 객체에만 등록한다.
+  const prove: SelfDeleteCredentialProve = async (input) => {
+    const context = await auth.$context;
+    return confirmation.selfDeleteCredentialProof(input, context.password.verify.bind(context.password));
   };
+  bindSelfDeleteProof(result, prove);
+  return result;
 }

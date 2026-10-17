@@ -56,15 +56,30 @@ describe("TC-M4.T3.f 현재 DB 상태에 따라 회원 route guard 를 닫는다
   it.each(["pending", "suspended", "deleted", "unknown"])("가짜 %s 관리자 세션은 관리 API 의 기존 forbidden 403 을 유지한다", async (status) => {
     const admin = await addUser(e.h, { role: "admin", status });
     const target = await addUser(e.h, { status: "pending" });
+    const before = {
+      users: await e.h.db.select().from(e.h.schema.user),
+      settings: await e.h.db.select().from(e.h.schema.appSettings),
+      keys: await e.h.db.select().from(e.h.schema.apiKeys),
+      audits: await e.h.db.select().from(e.h.schema.auditLog),
+    };
+    // fakeAuth는 현재 DB 상태와 무관하게 id를 반환한다. 실제 SDK 쿠키 무효화와 별개인 DB 권한 계약이다.
     for (const [method, path, body] of [
       ["GET", "/api/admin/users", undefined],
       ["PATCH", `/api/admin/users/${target}`, { maxKeys: 3 }],
       ["POST", `/api/admin/users/${target}/approve`, undefined],
       ["DELETE", `/api/admin/users/${target}`, undefined],
+      ["GET", "/api/admin/settings/signup", undefined],
+      ["PATCH", "/api/admin/settings/signup", { signupMode: "closed", updatedAt: { signupMode: null } }],
     ] as const) {
       const r = await call(e, method, path, { user: admin, body });
       expect([r.status, r.json]).toEqual([403, { error: "forbidden" }]);
     }
+    expect({
+      users: await e.h.db.select().from(e.h.schema.user),
+      settings: await e.h.db.select().from(e.h.schema.appSettings),
+      keys: await e.h.db.select().from(e.h.schema.apiKeys),
+      audits: await e.h.db.select().from(e.h.schema.auditLog),
+    }).toEqual(before);
     expect(e.om.calls).toEqual([]);
   });
 

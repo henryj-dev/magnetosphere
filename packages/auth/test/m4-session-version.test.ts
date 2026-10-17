@@ -3,11 +3,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { betterAuth } from "better-auth";
 import { hashPassword, verifyPassword } from "better-auth/crypto";
 import { eq, sql } from "drizzle-orm";
-import { authOptions, createAuth } from "../src/index.ts";
+import { authOptions, CLIENT_IP_HEADER, createAuth } from "../src/index.ts";
+import * as authRoot from "../src/index.ts";
+import { bindSelfDeleteProof, selfDeleteCredentialProofOf } from "../src/internal.ts";
 import { validAuthVersion } from "../src/auth-version.ts";
 import { AUTH_VERSION_MAX } from "@magnetosphere/db/src/schema/common.ts";
 import { OPEN, type TestDb } from "./db.ts";
-import { makeAuthConfig } from "./helpers.ts";
+import { makeAuthConfig, randomIp } from "./helpers.ts";
 import { apiReply, mail, OPS, PASSWORD } from "./signup-policy/rig.ts";
 
 const BASE = "http://localhost:3000";
@@ -49,17 +51,54 @@ describe.each(kinds)("%s M4.T3 session status/version", (kind) => {
 
   it("M4.T3.a: pending/suspended는 올바른 비밀번호 뒤에만 상태 오류, deleted/없는 메일/틀린 비밀번호는 같은 응답", async () => {
     const responses: Awaited<ReturnType<typeof apiReply>>[] = [];
+    const httpResponses: { status: number; body: string }[] = [];
     for (const status of ["active", "pending", "suspended"] as const) {
       const x = await add(`state-${status}`, status);
       responses.push(await apiReply(signIn(x.email, "wrong-password-123")));
-      const result = await apiReply(signIn(x.email));
-      if (status === "active") expect(result.status).toBe(200);
-      else { expect(result.status).toBe(403); expect(result.code).toBe(`account_${status}`); expect(await OPS.sessionsOf(h.db, h.schema, x.email)).toBe(0); }
+      const wrong = await auth.handler(new Request(`${BASE}/api/auth/sign-in/email`, { method: "POST", headers: { origin: BASE, "content-type": "application/json" }, body: JSON.stringify({ email: x.email, password: "wrong-password-123" }) }));
+      expect(wrong.headers.getSetCookie()).toEqual([]);
+      httpResponses.push({ status: wrong.status, body: await wrong.text() });
+      const signing = signIn(x.email);
+      const result = await apiReply(signing);
+      if (status === "suspended") {
+        expect(result.status).toBe(403);
+        expect(result.code).toBe("account_suspended");
+        const rejected = await auth.handler(new Request(`${BASE}/api/auth/sign-in/email`, { method: "POST", headers: { origin: BASE, "content-type": "application/json" }, body: JSON.stringify({ email: x.email, password: PASSWORD }) }));
+        expect(rejected.status).toBe(403);
+        expect((await rejected.json() as any).code).toBe("ACCOUNT_SUSPENDED");
+        expect(rejected.headers.getSetCookie()).toEqual([]);
+        expect(await OPS.sessionsOf(h.db, h.schema, x.email)).toBe(0);
+      }
+      else {
+        expect(result.status).toBe(200);
+        const signed = await signing;
+        expect(typeof signed.response.token).toBe("string");
+        expect(signed.headers.getSetCookie()).toHaveLength(1);
+        expect((await api().getSession({ headers: new Headers({ cookie: cookie(signed.headers) }) }))?.user.id).toBe(x.id);
+        expect(await OPS.sessionsOf(h.db, h.schema, x.email)).toBe(1);
+        const http = await auth.handler(new Request(`${BASE}/api/auth/sign-in/email`, { method: "POST", headers: { origin: BASE, "content-type": "application/json" }, body: JSON.stringify({ email: x.email, password: PASSWORD }) }));
+        expect(http.status).toBe(200);
+        expect(typeof (await http.json() as any).token).toBe("string");
+        expect(http.headers.getSetCookie()).toHaveLength(1);
+        const headers = new Headers({ cookie: cookie(http.headers) });
+        expect((await api().getSession({ headers }))?.user.id).toBe(x.id);
+        const httpSession = await auth.handler(new Request(`${BASE}/api/auth/get-session`, { headers }));
+        expect(httpSession.status).toBe(200);
+        expect((await httpSession.json() as any)?.user.id).toBe(x.id);
+        expect(await OPS.sessionsOf(h.db, h.schema, x.email)).toBe(2);
+      }
     }
     const removed = await add("deleted");
     await transition(removed.id, { status: "deleted", deletedAt: new Date() });
-    responses.push(await apiReply(signIn(removed.email)), await apiReply(signIn(mail("missing"))));
+    const missing = mail("missing");
+    responses.push(await apiReply(signIn(removed.email)), await apiReply(signIn(missing)));
+    for (const email of [removed.email, missing]) {
+      const rejected = await auth.handler(new Request(`${BASE}/api/auth/sign-in/email`, { method: "POST", headers: { origin: BASE, "content-type": "application/json" }, body: JSON.stringify({ email, password: PASSWORD }) }));
+      expect(rejected.headers.getSetCookie()).toEqual([]);
+      httpResponses.push({ status: rejected.status, body: await rejected.text() });
+    }
     expect(responses.map((value) => ({ status: value.status, body: value.body }))).toEqual(Array.from({ length: responses.length }, () => ({ status: 401, body: responses[0].body })));
+    expect(httpResponses).toEqual(Array.from({ length: httpResponses.length }, () => ({ status: 401, body: httpResponses[0].body })));
   });
 
   it("M4.T3.b: 정상 로그인 둘과 다른 회원 변경은 오탐 없이 성공한다", async () => {
@@ -89,7 +128,8 @@ describe.each(kinds)("%s M4.T3 session status/version", (kind) => {
           options.hooks.after = Object.assign(async (ctx: any) => { await pause.wait(); return after(ctx); }, after);
         }
         const instance = betterAuth(options);
-        const pending = instance.handler(new Request(`${BASE}/api/auth/sign-in/email`, { method: "POST", headers: { origin: BASE, "content-type": "application/json" }, body: JSON.stringify({ email: x.email, password: PASSWORD }) }));
+        // withClientIp를 거치지 않는 원본 handler라 IP를 직접 싣는다. 없으면 8개가 한 칸(/sign-in/* 60초 5회)을 나눠 429로 경계 전에 끝난다.
+        const pending = instance.handler(new Request(`${BASE}/api/auth/sign-in/email`, { method: "POST", headers: { origin: BASE, "content-type": "application/json", [CLIENT_IP_HEADER]: randomIp() }, body: JSON.stringify({ email: x.email, password: PASSWORD }) }));
         await pause.reached;
         try {
           await transition(x.id, aba === "status" ? { status: "suspended" } : { role: "admin" });
@@ -163,7 +203,8 @@ describe.each(kinds)("%s M4.T3 session status/version", (kind) => {
         expect(await api().getSession({ headers: new Headers({ cookie: cookie(changed.headers) }) })).not.toBeNull();
       } else {
         expect(changed.response.token).toBeNull();
-        expect(changed.headers.getSetCookie()).toEqual([]);
+        // before 훅이 응답을 대신하고 쿠키를 쓰지 않으면 core는 headers를 undefined로 돌려준다 (dispatch: responseHeaders 미생성).
+        expect(changed.headers?.getSetCookie() ?? []).toEqual([]);
         expect(await api().getSession({ headers })).not.toBeNull();
       }
     });
@@ -241,7 +282,16 @@ describe.each(kinds)("%s M4.T3 session status/version", (kind) => {
     const session = (await h.db.select().from((h.schema as any).session).where(eq((h.schema as any).session.userId, x.id)))[0];
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      const proof = await auth.selfDeleteCredentialProof({ userId: x.id, sessionId: session.id, password: PASSWORD });
+      expect(Object.keys(authRoot).sort()).toEqual(["CLIENT_IP_HEADER", "MIN_SECRET_LENGTH", "RATE_LIMIT_RULES", "SSO_DISABLED_PATHS", "authOptions", "createAuth", "resolveClientIp"].sort());
+      expect(Reflect.ownKeys(auth).sort()).toEqual(["api", "handler"]);
+      const prove = selfDeleteCredentialProofOf(auth);
+      expect(() => selfDeleteCredentialProofOf({})).toThrowError(new Error("Self-delete proof is not registered"));
+      expect(() => selfDeleteCredentialProofOf({ ...auth })).toThrowError(new Error("Self-delete proof is not registered"));
+      const replacement = vi.fn(prove);
+      expect(() => bindSelfDeleteProof(auth, replacement)).toThrowError(new Error("Self-delete proof is already registered"));
+      expect(selfDeleteCredentialProofOf(auth)).toBe(prove);
+      expect(replacement).not.toHaveBeenCalled();
+      const proof = await prove({ userId: x.id, sessionId: session.id, password: PASSWORD });
       expect(proof?.authVersion).toBe(0);
       expect(proof?.observedSessionFingerprint).toBe(session.credentialFingerprint);
       expect(proof?.currentCredentialFingerprint).toBe(session.credentialFingerprint);
@@ -251,7 +301,7 @@ describe.each(kinds)("%s M4.T3 session status/version", (kind) => {
       expect(JSON.stringify(errors.mock.calls)).not.toContain(proof!.passwordHash);
       expect(Object.keys(auth.api).some((name) => name.toLowerCase().includes("selfdelete"))).toBe(false);
       expect((await auth.handler(new Request(`${BASE}/api/auth/self-delete-credential-proof`, { method: "POST", headers: { cookie: cookie(signed.headers), origin: BASE, "content-type": "application/json" }, body: JSON.stringify({ userId: x.id, sessionId: session.id, password: PASSWORD }) }))).status).toBe(404);
-      for (const bad of [{ userId: x.id, sessionId: session.id, password: "wrong-password-123" }, { userId: "missing", sessionId: session.id, password: PASSWORD }]) expect(await auth.selfDeleteCredentialProof(bad)).toBeNull();
+      for (const bad of [{ userId: x.id, sessionId: session.id, password: "wrong-password-123" }, { userId: "missing", sessionId: session.id, password: PASSWORD }]) expect(await prove(bad)).toBeNull();
     } finally { errors.mockRestore(); }
   });
 
