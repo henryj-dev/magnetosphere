@@ -1,5 +1,6 @@
-// TC-M4.T2·T4 삭제·자기 탈퇴 단언. 작성만 승인됐고 실행하지 않는다.
+// TC-M4.T2·T4 삭제·자기 탈퇴 단언. TC-M4.T2.d 삭제 뒤 재설정 토큰 단언은 delete.db.test.ts 가 네 DB 에서도 쓴다. 작성만 승인됐고 실행하지 않는다.
 // 가입·로그인·재설정은 설치된 Better Auth handler 를 그대로 쓰고, 삭제 라우트만 독립 Hono 에서 확인한다.
+import { createHash } from "node:crypto";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { expect, vi } from "vitest";
@@ -78,6 +79,79 @@ async function resetToken(rig: HttpRig, email: string) {
   return new URL(sent!.text.match(/https?:\/\/\S+/)![0]).pathname.split("/").at(-1)!;
 }
 
+// 조회 순서는 DB 마다 다르므로 id 순으로 맞춰 비교한다.
+const byId = (list: any[]) => [...list].sort((x, y) => String(x.id).localeCompare(String(y.id)));
+// 실패 출력에 비밀번호 해시·세션 token·재설정 token 원문이 찍히지 않게 id 와 행 전체의 해시만 비교한다.
+const digest = (list: any[]) => byId(list).map((row: any) => ({ id: row.id, hash: createHash("sha256").update(JSON.stringify(row)).digest("hex") }));
+const TABLES = ["users", "accounts", "sessions", "verifications"] as const;
+
+/** 삭제 대상 밖 회원의 user·account·session·verification 행. 삭제·재설정 시도 앞뒤로 그대로인지 비교한다 */
+async function ownedBy(rig: Rig, ids: string[]) {
+  const all = await rows(rig);
+  return {
+    users: byId(all.users.filter((row: any) => ids.includes(row.id))),
+    accounts: byId(all.accounts.filter((row: any) => ids.includes(row.userId))),
+    sessions: byId(all.sessions.filter((row: any) => ids.includes(row.userId))),
+    verifications: byId(all.verifications.filter((row: any) => ids.includes(row.value) || ids.includes(row.identifier))),
+  };
+}
+
+/**
+ * TC-M4.T2.d: 삭제 전에 받아 두고 쓰지 않은 재설정 토큰을 삭제 뒤에 쓴다.
+ * 400 INVALID_TOKEN 이어야 하고, 그 시도가 credential account·세션을 다시 만들거나 회원 행·남의 행을 바꾸면 안 된다.
+ * Better Auth 재설정은 credential account 가 없으면 새로 만드는 경로가 있어, 토큰 정리가 빠지면 삭제 회원이 되살아난다.
+ */
+async function resetAfterDelete(rig: Rig, member: { id: string; email: string }, token: string, passwords: string[], others: { ids: string[]; before: Awaited<ReturnType<typeof ownedBy>>; tokens: string[] }) {
+  const deleted = await rows(rig);
+  const deletedUser = deleted.users.find((row: any) => row.id === member.id);
+  expect(deletedUser).toMatchObject({ status: "deleted", email: `deleted-${member.id}@invalid`, name: "", image: null });
+  expect(deleted.verifications.some((row: any) => row.identifier === `reset-password:${token}`)).toBe(false);
+  const revived = "revived-password-123";
+  const attempt = await rig.call("POST", "/api/auth/reset-password", { body: { token, newPassword: revived } });
+  expect([attempt.status, attempt.json?.code]).toEqual([400, "INVALID_TOKEN"]);
+  const after = await rows(rig);
+  expect(after.accounts.filter((row: any) => row.userId === member.id).length, "삭제 회원 credential 수").toBe(0);
+  expect(after.sessions.filter((row: any) => row.userId === member.id).length, "삭제 회원 세션 수").toBe(0);
+  expect(after.users.find((row: any) => row.id === member.id)).toEqual(deletedUser);
+  // 실패한 재설정은 어느 회원의 user·account·session·verification 행도 쓰지 않는다.
+  for (const table of TABLES) expect(digest(after[table]), `재설정 실패 뒤 ${table} 행 해시`).toEqual(digest(deleted[table]));
+  // 옛 이메일로는 삭제 전 비밀번호든 되살리려던 새 비밀번호든 로그인되지 않는다.
+  for (const password of [...passwords, revived]) {
+    const signIn = await rig.call("POST", "/api/auth/sign-in/email", { body: { email: member.email, password } });
+    expect(signIn.status, "삭제 회원 옛 이메일 로그인").toBe(401);
+  }
+  expect((await rows(rig)).sessions.filter((row: any) => row.userId === member.id).length, "로그인 시도 뒤 삭제 회원 세션 수").toBe(0);
+  // 대상 밖 회원은 삭제 전 값 그대로이고, 그 회원이 받아 둔 재설정 토큰도 지워지지 않았다.
+  const othersAfter = await ownedBy(rig, others.ids);
+  for (const table of TABLES) expect(digest(othersAfter[table]), `대상 밖 회원 ${table} 행 해시`).toEqual(digest(others.before[table]));
+  for (const kept of others.tokens) expect(after.verifications.some((row: any) => row.identifier === `reset-password:${kept}`), "대상 밖 회원 재설정 토큰 행").toBe(true);
+}
+
+/** TC-M4.T2.d 를 네 DB 에서 단독으로 돌린다. 키가 없는 회원이라 관리 API 를 부르지 않는다 (sync none) */
+export async function tcM4T2dResetAfterDelete(rig: Rig) {
+  await installed(rig);
+  const admin = await login(rig, "admin");
+  const member = await realMember(rig, "t2d-member");
+  const other = await realMember(rig, "t2d-other");
+  const token = await resetToken(rig, member.email);
+  const otherToken = await resetToken(rig, other.email);
+  const issued = await rows(rig);
+  expect(issued.verifications.some((row: any) => row.identifier === `reset-password:${token}` && row.value === member.id)).toBe(true);
+  expect(issued.verifications.some((row: any) => row.identifier === `reset-password:${otherToken}` && row.value === other.id)).toBe(true);
+  expect(issued.accounts.filter((row: any) => row.userId === member.id).length, "삭제 전 회원 credential 수").toBe(1);
+  const othersBefore = await ownedBy(rig, [other.id]);
+  expect(othersBefore.users.length, "대상 밖 회원 수").toBe(1);
+  expect(othersBefore.accounts.length, "대상 밖 회원 credential 수").toBe(1);
+  expect(othersBefore.sessions.length).toBeGreaterThan(0);
+  const app = mount(rig, null);
+  const deleted = await call(app, "DELETE", `/api/admin/users/${member.id}`, { cookie: admin.cookie });
+  expect({ status: deleted.status, json: deleted.json }).toEqual({ status: 200, json: { deleted: true, sync: "none" } });
+  await resetAfterDelete(rig, member, token, [PASSWORD], { ids: [other.id], before: othersBefore, tokens: [otherToken] });
+  // 양성 대조: 같은 경로에서 대상 밖 회원의 삭제 전 토큰은 그대로 쓸 수 있다. 400 이 경로 자체의 고장이 아님을 보인다.
+  const otherReset = await rig.call("POST", "/api/auth/reset-password", { body: { token: otherToken, newPassword: "other-replacement-123" } });
+  expect(otherReset.status).toBe(200);
+}
+
 export async function tcM4DeleteAndSelf(rig: Rig) {
   await installed(rig);
   const admin = await login(rig, "admin");
@@ -105,6 +179,14 @@ export async function tcM4DeleteAndSelf(rig: Rig) {
   await rig.h.db.insert(s.verification).values({ id: otherVerification, identifier: `reset-password:${crypto.randomUUID()}`, value: other.id, expiresAt: new Date(Date.now() + 60_000), createdAt: new Date(), updatedAt: new Date() });
   const unrelated = crypto.randomUUID();
   await rig.h.db.insert(s.verification).values({ id: unrelated, identifier: `other-member:${other.id}`, value: member.id, expiresAt: new Date(Date.now() + 60_000), createdAt: new Date(), updatedAt: new Date() });
+  // TC-M4.T2.d: 삭제 전에 받아 두고 쓰지 않은 재설정 토큰. 대상 밖 회원 것도 하나 받아 지워지지 않는지 본다.
+  const lateToken = await resetToken(rig, member.email);
+  const otherToken = await resetToken(rig, other.email);
+  expect(lateToken === token, "삭제 전 재설정 토큰이 앞서 쓴 토큰과 같다").toBe(false);
+  const lateIssued = await rows(rig);
+  expect(lateIssued.verifications.some((row: any) => row.identifier === `reset-password:${lateToken}` && row.value === member.id), "삭제 전 재설정 토큰 행").toBe(true);
+  const othersBefore = await ownedBy(rig, [other.id]);
+  expect(othersBefore.verifications.some((row: any) => row.identifier === `reset-password:${otherToken}`)).toBe(true);
 
   const client = { setKeyActive: vi.fn(async () => {}), deleteKey: vi.fn(async () => {}) };
   const app = mount(rig, () => client);
@@ -134,6 +216,7 @@ export async function tcM4DeleteAndSelf(rig: Rig) {
   expect(JSON.parse(queued.payload)).toEqual({ keyId, omnirouteKeyId });
   expect(after.audits.filter((row: any) => row.action === "member.delete" && row.target === member.id)).toHaveLength(1);
   expect(JSON.stringify(after.audits)).not.toContain(member.email);
+  await resetAfterDelete(rig, member, lateToken, [PASSWORD, "replacement-password-123"], { ids: [other.id], before: othersBefore, tokens: [otherToken] });
 
   const wrong = await call(app, "DELETE", "/api/me", { cookie: other.cookie, body: { password: "wrong-password-123" } });
   expect(wrong.status).toBe(403);

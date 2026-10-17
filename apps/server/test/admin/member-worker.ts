@@ -1,12 +1,160 @@
-// TC-M4.T1.d1 전용 Worker. 운영 앱에 연결하지 않는다.
+// TC-M4.T1.d1·TC-M4.T1.c·TC-M4.T1.d 전용 Worker. 운영 앱에 연결하지 않는다.
 // DB·생성 스키마·로컬 wrangler 실행 승인은 별도다. 시험 장치는 이 파일 안의 Proxy·trigger 에만 둔다.
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { connectWorkers, type WorkersEnv } from "@magnetosphere/runtime/workers";
 import { AUTH_VERSION_MAX, MemberConflictError, mutateMember, type MemberMutation } from "../../src/admin/guard-sql.ts";
 
+const RACE_ROUNDS = 20;
+const RACE_BARRIER_MS = 5_000;
+type RaceKind = "approveReject" | "roleRole" | "suspendSuspend";
+
+/**
+ * 같은 Worker 요청 안에서 두 mutateMember 를 동시에 돌려 실제 D1 batch 끼리 경쟁시킨다.
+ * 결과를 대신 만들지 않는다. batch 앞 장벽은 두 요청이 모두 사전 읽기를 마칠 때까지 기다리게만 하고,
+ * 장벽 회차에서는 CAS·감사 guard 만이 승패를 가른다. 나머지 회차는 장벽 없이 자연 순서로 겹친다.
+ */
+async function race(env: WorkersEnv, group: string | null): Promise<Response> {
+  const kinds: RaceKind[] | null = group === "approveReject" ? ["approveReject"] : group === "lastAdmin" ? ["roleRole", "suspendSuspend"] : null;
+  if (!kinds) return Response.json({ error: "kind 는 approveReject 또는 lastAdmin 이다" }, { status: 400 });
+  if (!env.DB) return Response.json({ error: "D1 fixture 바인딩이 없다" }, { status: 503 });
+  const h = await connectWorkers(env);
+  if (!h.schema.user.authVersion || !h.schema.session.authVersion) return Response.json({ error: "authVersion 생성 스키마가 아직 준비되지 않았다" }, { status: 503 });
+  const now = new Date("2026-10-13T00:00:00.000Z");
+  const u = h.schema.user;
+  const s = h.schema.session;
+  const rounds: unknown[] = [];
+  for (const kind of kinds) for (let round = 0; round < RACE_ROUNDS; round++) {
+    const a = crypto.randomUUID();
+    const b = crypto.randomUUID();
+    const target = crypto.randomUUID();
+    const sa = crypto.randomUUID();
+    const sb = crypto.randomUUID();
+    const targetSession = crypto.randomUUID();
+    const account = crypto.randomUUID();
+    const verification = crypto.randomUUID();
+    const users = kind === "approveReject" ? [a, b, target] : [a, b];
+    try {
+      await h.db.insert(u).values([
+        { id: a, name: "a", email: `${a}@example.com`, emailVerified: true, role: "admin", status: "active", authVersion: 0, createdAt: now, updatedAt: now },
+        { id: b, name: "b", email: `${b}@example.com`, emailVerified: true, role: "admin", status: "active", authVersion: 0, createdAt: now, updatedAt: now },
+        ...(kind === "approveReject" ? [{ id: target, name: "target", email: `${target}@example.com`, emailVerified: true, role: "member", status: "pending", authVersion: 0, createdAt: now, updatedAt: now }] : []),
+      ]);
+      await h.db.insert(s).values([
+        { id: sa, expiresAt: new Date(now.getTime() + 60_000), token: crypto.randomUUID(), createdAt: now, updatedAt: now, userId: a, authVersion: 0 },
+        { id: sb, expiresAt: new Date(now.getTime() + 60_000), token: crypto.randomUUID(), createdAt: now, updatedAt: now, userId: b, authVersion: 0 },
+        ...(kind === "approveReject" ? [{ id: targetSession, expiresAt: new Date(now.getTime() + 60_000), token: crypto.randomUUID(), createdAt: now, updatedAt: now, userId: target, authVersion: 0 }] : []),
+      ]);
+      if (kind === "approveReject") {
+        await h.db.insert(h.schema.account).values({ id: account, accountId: target, providerId: "credential", userId: target, createdAt: now, updatedAt: now });
+        await h.db.insert(h.schema.verification).values({ id: verification, identifier: `reset-password:${verification}`, value: target, expiresAt: new Date(now.getTime() + 60_000), createdAt: now, updatedAt: now });
+      }
+      const full = async () => ({
+        users: await h.db.select().from(u).where(inArray(u.id, users)),
+        sessions: await h.db.select().from(s).where(inArray(s.userId, users)),
+        accounts: await h.db.select().from(h.schema.account).where(inArray(h.schema.account.userId, users)),
+        verifications: await h.db.select().from(h.schema.verification).where(eq(h.schema.verification.id, verification)),
+        audits: await h.db.select().from(h.schema.auditLog).where(inArray(h.schema.auditLog.target, users)),
+        activeAdmins: (await h.db.select({ id: u.id }).from(u).where(and(eq(u.role, "admin"), eq(u.status, "active")))).length,
+      });
+      type Full = Awaited<ReturnType<typeof full>>;
+      // token 등은 응답으로 내보내지 않는다. 전체 행 비교는 Worker 안에서 id 별 같음 여부로만 알린다.
+      const safe = (rows: Full) => ({
+        users: rows.users.map((r: any) => ({ id: r.id, role: r.role, status: r.status, authVersion: r.authVersion })),
+        sessions: rows.sessions.map((r: any) => ({ id: r.id, userId: r.userId, authVersion: r.authVersion })),
+        accounts: rows.accounts.map((r: any) => ({ id: r.id, userId: r.userId })),
+        verifications: rows.verifications.map((r: any) => ({ id: r.id })),
+        audits: rows.audits.map((r: any) => ({ id: r.id, action: r.action, actorId: r.actorId, target: r.target })),
+        activeAdmins: rows.activeAdmins,
+      });
+      const request = (actorId: string, actorSessionId: string, targetId: string, action: MemberMutation["action"], role?: "member"): MemberMutation => ({
+        actorId, actorSessionId, targetId, action, role, now,
+        audit: { actorId, action: action === "role" ? "member.role" : `member.${action}`, target: targetId, detail: { probe: true }, ip: null, now },
+      });
+      const pair = kind === "approveReject"
+        ? [request(a, sa, target, "approve"), request(b, sb, target, "reject")]
+        : kind === "roleRole"
+          ? [request(a, sa, b, "role", "member"), request(b, sb, a, "role", "member")]
+          : [request(a, sa, b, "suspend"), request(b, sb, a, "suspend")];
+      // 요청 시작 순서를 회차마다 바꾸고, 장벽 회차와 자연 회차를 두 회씩 번갈아 둔다.
+      const inputs = round % 2 ? [pair[1], pair[0]] : pair;
+      const barrier = round % 4 < 2;
+      const before = await full();
+      let arrived = 0;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const batch: string[] = inputs.map(() => "none");
+      const handle = (i: number) => ({
+        ...h,
+        db: new Proxy(h.db, {
+          get(db, key) {
+            if (key === "batch") return async (statements: any[]) => {
+              batch[i] = "waiting";
+              if (barrier) {
+                if (++arrived === inputs.length) release();
+                let timer: ReturnType<typeof setTimeout> | undefined;
+                const timeout = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error("race_barrier_timeout")), RACE_BARRIER_MS)));
+                try {
+                  await Promise.race([gate, timeout]);
+                } catch (e) {
+                  batch[i] = "barrier_timeout";
+                  throw e;
+                } finally {
+                  clearTimeout(timer);
+                }
+              }
+              try {
+                const result = await db.batch(statements as any);
+                batch[i] = "ok";
+                return result;
+              } catch (e) {
+                const messages: string[] = [];
+                for (let cause: any = e, depth = 0; cause && depth < 8; cause = cause.cause, depth++) messages.push(String(cause.message ?? ""));
+                batch[i] = /NOT NULL constraint failed: audit_log\.action/.test(messages.join(" ")) ? "guard" : "other";
+                throw e;
+              }
+            };
+            const value = Reflect.get(db, key, db);
+            return typeof value === "function" ? value.bind(db) : value;
+          },
+        }),
+      });
+      const settled = await Promise.allSettled(inputs.map((input, i) => mutateMember(handle(i), input)));
+      const after = await full();
+      const same: Record<string, boolean> = {};
+      for (const table of ["users", "sessions", "accounts", "verifications"] as const) {
+        for (const row of before[table] as any[]) {
+          const next = (after[table] as any[]).find((r) => r.id === row.id);
+          if (next) same[row.id] = JSON.stringify(next) === JSON.stringify(row);
+        }
+      }
+      rounds.push({
+        kind, round, barrier,
+        results: inputs.map((input, i) => ({
+          action: input.action, actorId: input.actorId, actorSessionId: input.actorSessionId, targetId: input.targetId, batch: batch[i],
+          error: settled[i].status === "fulfilled" ? null : (settled[i] as PromiseRejectedResult).reason instanceof MemberConflictError ? (settled[i] as PromiseRejectedResult).reason.code : "unexpected_error",
+        })),
+        ids: { a, b, target, sa, sb, targetSession, account, verification },
+        before: safe(before), after: safe(after), same,
+      });
+    } finally {
+      // 단언 실패·예외로 회차가 끊겨도 다음 회차의 활성 관리자 수에 이 회차 fixture 가 섞이지 않게 정리한다.
+      await h.db.delete(h.schema.auditLog).where(inArray(h.schema.auditLog.target, users));
+      await h.db.delete(h.schema.verification).where(eq(h.schema.verification.id, verification));
+      await h.db.delete(h.schema.account).where(inArray(h.schema.account.userId, users));
+      await h.db.delete(s).where(inArray(s.userId, users));
+      await h.db.delete(u).where(inArray(u.id, users));
+    }
+  }
+  return Response.json({ rounds });
+}
+
 export default {
   async fetch(req: Request, env: WorkersEnv): Promise<Response> {
-    if (new URL(req.url).pathname !== "/__test/member-rollback" || req.method !== "POST") return new Response("not found", { status: 404 });
+    const url = new URL(req.url);
+    // startWranglerDev 준비 확인용. DB 를 읽거나 쓰지 않고 Worker 가 떴는지만 알린다.
+    if (url.pathname === "/healthz" && req.method === "GET") return new Response("ok");
+    if (url.pathname === "/__test/member-race" && req.method === "POST") return race(env, url.searchParams.get("kind"));
+    if (url.pathname !== "/__test/member-rollback" || req.method !== "POST") return new Response("not found", { status: 404 });
     if (!env.DB) return Response.json({ error: "D1 fixture 바인딩이 없다" }, { status: 503 });
     const binding = env.DB as any;
     let nativeError = "";

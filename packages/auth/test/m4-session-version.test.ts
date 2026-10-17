@@ -14,11 +14,28 @@ import { apiReply, mail, OPS, PASSWORD } from "./signup-policy/rig.ts";
 
 const BASE = "http://localhost:3000";
 const kinds = (process.env.MG_TEST_DBS ?? "sqlite").split(",") as (keyof typeof OPEN)[];
+const BARRIER_MS = 15_000;
+const BOUNDARIES = ["verify", "before-insert", "after-insert", "final-response"] as const;
+const timeout = (message: string, set: (timer: ReturnType<typeof setTimeout>) => void) => new Promise<never>((_, reject) => { set(setTimeout(() => reject(new Error(message)), BARRIER_MS)); });
+// 경계에서 멈춘 요청은 release 또는 15초 뒤 실패로 반드시 끝난다. 시험은 finally 에서 release 한다.
 function barrier() {
   let arrive!: () => void, release!: () => void;
   const reached = new Promise<void>((resolve) => { arrive = resolve; });
   const resumed = new Promise<void>((resolve) => { release = resolve; });
-  return { reached, release, wait: async () => { arrive(); await resumed; } };
+  const wait = async () => {
+    arrive();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try { await Promise.race([resumed, timeout("barrier 해제 대기 시간 초과", (t) => { timer = t; })]); }
+    finally { clearTimeout(timer); }
+  };
+  return { reached, release, wait };
+}
+// 요청이 경계 전에 끝나거나 15초 안에 경계에 오지 않으면 바로 실패한다.
+async function reach(pause: ReturnType<typeof barrier>, pending: Promise<unknown>) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const early = pending.then(() => { throw new Error("요청이 경계에 닿기 전에 끝났다"); }, () => { throw new Error("요청이 경계에 닿기 전에 실패했다"); });
+  try { await Promise.race([pause.reached, early, timeout("경계 도달 대기 시간 초과", (t) => { timer = t; })]); }
+  finally { clearTimeout(timer); }
 }
 const cookie = (headers: Headers) => headers.getSetCookie().map((value) => value.split(";")[0]).join("; ");
 
@@ -109,29 +126,53 @@ describe.each(kinds)("%s M4.T3 session status/version", (kind) => {
     expect(await OPS.sessionsOf(h.db, h.schema, x.email)).toBe(2);
   });
 
-  for (const boundary of ["verify", "before-insert", "after-insert", "final-response"] as const) {
+  /** 운영 createAuth 와 같은 authOptions(cfg)의 원본 handler 로그인을 boundary 에서 멈춘다. 해제는 호출한 시험의 finally 에서 한다 */
+  const raceSignIn = (email: string, boundary: (typeof BOUNDARIES)[number], pause: ReturnType<typeof barrier>) => {
+    const options = authOptions(cfg);
+    if (boundary === "verify") (options.emailAndPassword as any).password = { hash: hashPassword, verify: async (input: any) => { const valid = await verifyPassword(input); await pause.wait(); return valid; } };
+    if (boundary === "before-insert") {
+      const before = options.databaseHooks.session.create.before;
+      options.databaseHooks.session.create.before = async (session: any, ctx: any) => { const checked = await before(session, ctx); await pause.wait(); return checked; };
+    }
+    if (boundary === "after-insert") {
+      const after = options.databaseHooks.session.create.after;
+      options.databaseHooks.session.create.after = async (session: any, ctx: any) => { await pause.wait(); await after(session, ctx); };
+    }
+    if (boundary === "final-response") {
+      const after = options.hooks.after;
+      options.hooks.after = Object.assign(async (ctx: any) => { await pause.wait(); return after(ctx); }, after);
+    }
+    const instance = betterAuth(options);
+    // withClientIp를 거치지 않는 원본 handler라 IP를 직접 싣는다. 없으면 경계 시험들이 한 칸(/sign-in/* 60초 5회)을 나눠 429로 경계 전에 끝난다.
+    return instance.handler(new Request(`${BASE}/api/auth/sign-in/email`, { method: "POST", headers: { origin: BASE, "content-type": "application/json", [CLIENT_IP_HEADER]: randomIp() }, body: JSON.stringify({ email, password: PASSWORD }) }));
+  };
+
+  for (const boundary of BOUNDARIES) {
+    it(`M4.T3.c/e/g: ${boundary} 경계 중 정지가 유지되면 쿠키·세션 없이 거부하고 다시 로그인해도 정지 응답이다`, async () => {
+      const x = await add(`${boundary}-held`), pause = barrier();
+      const pending = raceSignIn(x.email, boundary, pause);
+      try {
+        await reach(pause, pending);
+        await transition(x.id, { status: "suspended" });
+      } finally { pause.release(); }
+      const response = await pending;
+      // 경계 전 관찰 version 이 바뀌었으므로 정지 여부와 상관없이 같은 401 로 닫힌다
+      expect(response.status).toBe(401);
+      expect(((await response.json()) as any).code).toBe("INVALID_EMAIL_OR_PASSWORD");
+      expect(response.headers.getSetCookie()).toEqual([]);
+      expect(await OPS.sessionsOf(h.db, h.schema, x.email)).toBe(0);
+      expect(await user(x.id)).toMatchObject({ status: "suspended", authVersion: 1 });
+      const again = await apiReply(signIn(x.email));
+      expect([again.status, again.code]).toEqual([403, "account_suspended"]);
+      expect(await OPS.sessionsOf(h.db, h.schema, x.email)).toBe(0);
+    });
+
     for (const aba of ["status", "role"] as const) {
       it(`M4.T3.c/e/g: ${boundary} 경계 ${aba} ABA도 옛 세션/쿠키를 거부한다`, async () => {
         const x = await add(`${boundary}-${aba}`), pause = barrier();
-        const options = authOptions(cfg);
-        if (boundary === "verify") (options.emailAndPassword as any).password = { hash: hashPassword, verify: async (input: any) => { const valid = await verifyPassword(input); await pause.wait(); return valid; } };
-        if (boundary === "before-insert") {
-          const before = options.databaseHooks.session.create.before;
-          options.databaseHooks.session.create.before = async (session: any, ctx: any) => { const checked = await before(session, ctx); await pause.wait(); return checked; };
-        }
-        if (boundary === "after-insert") {
-          const after = options.databaseHooks.session.create.after;
-          options.databaseHooks.session.create.after = async (session: any, ctx: any) => { await pause.wait(); await after(session, ctx); };
-        }
-        if (boundary === "final-response") {
-          const after = options.hooks.after;
-          options.hooks.after = Object.assign(async (ctx: any) => { await pause.wait(); return after(ctx); }, after);
-        }
-        const instance = betterAuth(options);
-        // withClientIp를 거치지 않는 원본 handler라 IP를 직접 싣는다. 없으면 8개가 한 칸(/sign-in/* 60초 5회)을 나눠 429로 경계 전에 끝난다.
-        const pending = instance.handler(new Request(`${BASE}/api/auth/sign-in/email`, { method: "POST", headers: { origin: BASE, "content-type": "application/json", [CLIENT_IP_HEADER]: randomIp() }, body: JSON.stringify({ email: x.email, password: PASSWORD }) }));
-        await pause.reached;
+        const pending = raceSignIn(x.email, boundary, pause);
         try {
+          await reach(pause, pending);
           await transition(x.id, aba === "status" ? { status: "suspended" } : { role: "admin" });
           await transition(x.id, aba === "status" ? { status: "active" } : { role: "member" });
         } finally { pause.release(); }
@@ -143,6 +184,38 @@ describe.each(kinds)("%s M4.T3 session status/version", (kind) => {
       });
     }
   }
+
+  it("M4.T3.pending: 인증된 pending 은 로그인·세션만 되고 비밀번호 변경·자기 탈퇴 증명은 거부하며 NULL 지문 세션은 무효다", async () => {
+    const x = await add("pending", "pending"), signed = await signIn(x.email);
+    expect(signed.headers.getSetCookie()).toHaveLength(1);
+    const headers = new Headers({ cookie: cookie(signed.headers) });
+    expect((await api().getSession({ headers }))?.user.id).toBe(x.id);
+    for (const revokeOtherSessions of [undefined, false, true]) {
+      const res = await auth.handler(new Request(`${BASE}/api/auth/change-password`, { method: "POST", headers: { cookie: cookie(signed.headers), origin: BASE, "content-type": "application/json" }, body: JSON.stringify({ currentPassword: PASSWORD, newPassword: "m4-pending-password-123", ...(revokeOtherSessions === undefined ? {} : { revokeOtherSessions }) }) }));
+      expect(res.status).toBe(401);
+      expect(((await res.json()) as any).code).toBe("INVALID_EMAIL_OR_PASSWORD");
+      expect(res.headers.getSetCookie()).toEqual([]);
+    }
+    const s = h.schema as any;
+    const [account] = await h.db.select().from(s.account).where(eq(s.account.userId, x.id));
+    expect(await verifyPassword({ hash: account.password, password: PASSWORD })).toBe(true);
+    expect(await user(x.id)).toMatchObject({ status: "pending", authVersion: 0 });
+    const [row] = await h.db.select().from(s.session).where(eq(s.session.userId, x.id));
+    expect(await selfDeleteCredentialProofOf(auth)({ userId: x.id, sessionId: row.id, password: PASSWORD })).toBeNull();
+    // 거부는 현재 pending 세션을 지우지 않는다
+    expect((await api().getSession({ headers }))?.user.id).toBe(x.id);
+    expect(await OPS.sessionsOf(h.db, h.schema, x.email)).toBe(1);
+    // pending 은 credential 문자열 지문만 허용한다. 기존 NULL 지문·OAuth 꼴 세션은 active 와 달리 무효다
+    for (const state of ["legacy", "oauth"] as const) {
+      const y = await add(`pending-${state}`, "pending"), other = await signIn(y.email);
+      const otherHeaders = new Headers({ cookie: cookie(other.headers) });
+      await h.db.update(s.session).set({ credentialFingerprint: null }).where(eq(s.session.userId, y.id));
+      if (state === "oauth") await h.db.delete(s.account).where(eq(s.account.userId, y.id));
+      expect((await apiReply(api().listUserAccounts({ headers: otherHeaders }))).status).toBe(401);
+      expect(await api().getSession({ headers: otherHeaders })).toBeNull();
+      expect(await OPS.sessionsOf(h.db, h.schema, y.email)).toBe(0);
+    }
+  });
 
   it("M4.T3.f: NULL 지문/OAuth도 상태와 version을 authoritative getSession/core 보호 API에서 검사한다", async () => {
     for (const state of ["normal", "suspended", "version", "invalid-session"] as const) {
@@ -263,8 +336,8 @@ describe.each(kinds)("%s M4.T3 session status/version", (kind) => {
       const pause = barrier(), raced = await fixture(`oauth-aba-${aba}`, pause);
       // helper 자체는 쿠키를 발급하지 않는다. 이 시험은 생성 경계 증거이며 callback 응답 쿠키 방어 증거가 아니다.
       const pending = apiReply(raced.invoke());
-      await pause.reached;
       try {
+        await reach(pause, pending);
         await transition(raced.x.id, aba === "role" ? { role: "admin" } : { status: "suspended" });
         await transition(raced.x.id, aba === "role" ? { role: "member" } : { status: "active" });
       } finally { pause.release(); }

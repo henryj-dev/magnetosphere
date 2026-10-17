@@ -438,6 +438,30 @@ jobs:
       - name: M3 재초대 이메일 정확 비교 (MySQL·MariaDB)
         run: node scripts/check-m3-email-db.mjs
 
+  p3-m4:
+    name: 회원 관리 (M4 게이트, 다섯 DB·OmniRoute 3.8.51)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # 회원 관리 뮤텍스·CAS(G-M4.2)는 서버 test:db 실행기가, 세션·재설정 경쟁(G-M4.6·8)은 packages/auth 시험이 테스트 DB 를 docker compose 로 띄운다.
+    # D1(G-M4.3)은 시험 Worker(wrangler dev, test/admin/member-wrangler.jsonc)로, 0005 업그레이드(G-M4.4)는 packages/db test:migrate 가 다섯 DB 로 돈다.
+    # 정지 직후 거부 계약(G-M4.17, TC-M4.T5.c)은 pnpm test:contract 실행기가 계약 환경 OmniRoute(20170)와 자체 가짜 상위 서버를 띄우고
+    # setup.mjs 로 준비한 뒤 돈다. 그래서 이 잡에 compose·setup 단계를 따로 두지 않는다. 로컬은 arm64, CI(ubuntu-latest)는 amd64 에서 돈다.
+    # G-M4.16 은 gh api 로 main 규칙을 읽는다.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: M4 게이트
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/gate.mjs M4 --explain
+
   s1-seal:
     name: 확인 항목 (S1 게이트, 봉인 커밋에서)
     runs-on: ubuntu-latest

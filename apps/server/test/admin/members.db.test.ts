@@ -1,8 +1,8 @@
-// TC-M4.T1.db 회원 관리 뮤텍스·CAS. 이 파일은 작성만 승인됐고 실행하지 않는다.
+// TC-M4.T1.db 회원 관리 뮤텍스·CAS, TC-M4.T1.c 승인·거절 경쟁, TC-M4.T1.d 서로 강등·정지 경쟁. 이 파일은 작성만 승인됐고 실행하지 않는다.
 // exact DB 이름·생성/삭제 가드·RUN/HEAD/SHA/EXIT 승인은 실행 전에 별도로 받아야 한다.
 // MySQL/MariaDB 는 mutex + PK 잠금 count, PG 는 mutex + READ COMMITTED count,
 // SQLite 는 직렬 transaction 으로 마지막 관리자 판정을 CAS 까지 보호한다. D1 은 members.workers.test.ts 의 단일 CAS count guard 로 검증한다.
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { connectNode } from "@magnetosphere/runtime/node";
@@ -11,6 +11,9 @@ import { createTestDb, enabledDbs, LABEL, type DbKind, type TestDb } from "../..
 import { MEMBER_MUTEX, MemberConflictError, mutateMember, type MemberMutation } from "../../src/admin/guard-sql.ts";
 
 const NOW = new Date("2026-10-13T00:00:00.000Z");
+// 실패 출력에 세션 token·비밀번호 해시·재설정 identifier 원문이 찍히지 않게, 그 칸은 같음 비교만 되는 해시로 바꿔 둔다.
+const SECRET_FIELDS = ["token", "password", "accessToken", "refreshToken", "idToken", "identifier"];
+const masked = (list: any[]) => list.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, SECRET_FIELDS.includes(key) && value != null ? createHash("sha256").update(String(value)).digest("hex") : value])));
 
 describe.each(enabledDbs())("%s", (kind: DbKind) => {
   let t: TestDb;
@@ -48,7 +51,7 @@ describe.each(enabledDbs())("%s", (kind: DbKind) => {
   });
   const capture = async (ids: string[]) => ({
     users: await h.db.select().from(h.schema.user).where(inArray(h.schema.user.id, ids)).orderBy(asc(h.schema.user.id)),
-    sessions: await h.db.select().from(h.schema.session).where(inArray(h.schema.session.userId, ids)).orderBy(asc(h.schema.session.id)),
+    sessions: masked(await h.db.select().from(h.schema.session).where(inArray(h.schema.session.userId, ids)).orderBy(asc(h.schema.session.id))),
     audits: await h.db.select().from(h.schema.auditLog).where(inArray(h.schema.auditLog.target, ids)).orderBy(asc(h.schema.auditLog.id)),
   });
 
@@ -104,6 +107,97 @@ describe.each(enabledDbs())("%s", (kind: DbKind) => {
       expect(new Date(mutex.lockedUntil).toISOString()).toBe(MEMBER_MUTEX.lockedUntil.toISOString());
     }
   }, 120_000);
+
+  // TC-M4.T1.c: 서로 다른 두 관리자가 같은 pending 회원을 동시에 승인·거절한다. 요청 순서는 회마다 바꾼다.
+  it.each(Array.from({ length: 10 }, (_, round) => round))(`TC-M4.T1.c ${LABEL[kind]}: pending 회원 승인·거절 동시 경쟁 %i 회는 하나만 성공하고 최종 행·감사가 승자와 맞다`, async (round) => {
+    const a = await add("admin");
+    const b = await add("admin");
+    const sa = await session(a);
+    const sb = await session(b);
+    const target = await add("member", "pending");
+    const targetSid = await session(target);
+    const account = randomUUID();
+    const verification = randomUUID();
+    await h.db.insert(h.schema.account).values({ id: account, accountId: target, providerId: "credential", userId: target, createdAt: NOW, updatedAt: NOW });
+    await h.db.insert(h.schema.verification).values({ id: verification, identifier: `reset-password:${verification}`, value: target, expiresAt: new Date(NOW.getTime() + 60_000), createdAt: NOW, updatedAt: NOW });
+    const owned = async () => ({
+      accounts: masked(await h.db.select().from(h.schema.account).where(eq(h.schema.account.userId, target))),
+      verifications: masked(await h.db.select().from(h.schema.verification).where(eq(h.schema.verification.id, verification))),
+    });
+    const initial = await capture([a, b, target]);
+    const initialOwned = await owned();
+    expect(initial.users.find((u: any) => u.id === target)).toMatchObject({ role: "member", status: "pending", authVersion: 0 });
+    expect(initial.sessions.map((s: any) => s.id).sort()).toEqual([sa, sb, targetSid].sort());
+    expect(initialOwned.accounts).toHaveLength(1);
+    expect(initialOwned.verifications).toHaveLength(1);
+    expect(initial.audits).toHaveLength(0);
+    const approve = request(a, sa, target, "approve");
+    const reject = request(b, sb, target, "reject");
+    const inputs = round % 2 ? [reject, approve] : [approve, reject];
+    const settled = await Promise.allSettled(inputs.map((input, i) => mutateMember(i ? peer : h, input)));
+    expect(settled.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const winner = settled.findIndex((result) => result.status === "fulfilled");
+    const winning = inputs[winner];
+    const lost = settled[1 - winner] as PromiseRejectedResult;
+    expect(lost.reason).toBeInstanceOf(MemberConflictError);
+    // Node 네 DB 는 mutex(SQLite 는 쓰기 transaction)로 직렬이라 진 쪽은 승자 커밋 뒤의 행을 읽는다.
+    // 승인 뒤 거절은 active 에서 전이 불가(409 invalid_transition), 거절 뒤 승인은 대상 행 없음(not_found, 라우트 404)이다.
+    expect(lost.reason.code).toBe(winning.action === "approve" ? "invalid_transition" : "not_found");
+    const final = await capture([a, b, target]);
+    const finalOwned = await owned();
+    // 두 관리자 행·세션은 어느 쪽이 이겨도 그대로다.
+    for (const id of [a, b]) expect(final.users.find((u: any) => u.id === id)).toEqual(initial.users.find((u: any) => u.id === id));
+    expect(final.sessions).toEqual(initial.sessions.filter((s: any) => s.userId !== target));
+    if (winning.action === "approve") {
+      expect(final.users.find((u: any) => u.id === target)).toMatchObject({ role: "member", status: "active", authVersion: 1 });
+      expect(finalOwned).toEqual(initialOwned);
+    } else {
+      expect(final.users.find((u: any) => u.id === target)).toBeUndefined();
+      expect(finalOwned.accounts).toHaveLength(0);
+      expect(finalOwned.verifications).toHaveLength(0);
+    }
+    // 거절로 지운 행에 승인이 다시 쓰거나(행 0 갱신을 성공으로 봄) 감사가 둘 남지 않는다.
+    expect(final.audits.map((e: any) => ({ actorId: e.actorId, action: e.action, target: e.target }))).toEqual([{ actorId: winning.actorId, action: winning.audit.action, target }]);
+  }, 120_000);
+
+  // TC-M4.T1.d: 최초 관리자가 아닌 활성 관리자 둘이 서로를 같은 동작으로 동시에 강등·정지한다. 문서 횟수대로 각 20 회다.
+  const mutual = async (round: number, action: "role" | "suspend") => {
+    const a = await add("admin");
+    const b = await add("admin");
+    const sa = await session(a);
+    const sb = await session(b);
+    const initial = await capture([a, b]);
+    expect(initial.users.map((u: any) => ({ role: u.role, status: u.status, bootstrap: u.isBootstrapAdmin, version: u.authVersion }))).toEqual([
+      { role: "admin", status: "active", bootstrap: false, version: 0 },
+      { role: "admin", status: "active", bootstrap: false, version: 0 },
+    ]);
+    expect(initial.sessions).toHaveLength(2);
+    expect(initial.audits).toHaveLength(0);
+    const ab = request(a, sa, b, action, action === "role" ? "member" : undefined);
+    const ba = request(b, sb, a, action, action === "role" ? "member" : undefined);
+    const inputs = round % 2 ? [ba, ab] : [ab, ba];
+    const settled = await Promise.allSettled(inputs.map((input, i) => mutateMember(i ? peer : h, input)));
+    expect(settled.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const winner = settled.findIndex((result) => result.status === "fulfilled");
+    const winning = inputs[winner];
+    const lost = settled[1 - winner] as PromiseRejectedResult;
+    expect(lost.reason).toBeInstanceOf(MemberConflictError);
+    // 직렬로 뒤에 선 쪽은 이미 강등·정지된 actor 라 requireActor 가 관리자 수 판정보다 먼저 403 forbidden 으로 막는다.
+    expect(lost.reason.code).toBe("forbidden");
+    const final = await capture([a, b]);
+    const admins = await h.db.select({ id: h.schema.user.id }).from(h.schema.user).where(and(eq(h.schema.user.role, "admin"), eq(h.schema.user.status, "active")));
+    expect(admins).toEqual([{ id: winning.actorId }]);
+    expect(final.users.find((u: any) => u.id === winning.actorId)).toEqual(initial.users.find((u: any) => u.id === winning.actorId));
+    expect(final.users.find((u: any) => u.id === winning.targetId)).toMatchObject({
+      role: action === "role" ? "member" : "admin",
+      status: action === "suspend" ? "suspended" : "active",
+      authVersion: 1,
+    });
+    expect(final.sessions).toEqual(initial.sessions.filter((s: any) => s.userId === winning.actorId));
+    expect(final.audits.map((e: any) => ({ actorId: e.actorId, action: e.action, target: e.target }))).toEqual([{ actorId: winning.actorId, action: winning.audit.action, target: winning.targetId }]);
+  };
+  it.each(Array.from({ length: 20 }, (_, round) => round))(`TC-M4.T1.d ${LABEL[kind]}: 서로 동시 강등 %i 회는 활성 관리자 하나와 승자 감사 하나만 남긴다`, (round) => mutual(round, "role"), 120_000);
+  it.each(Array.from({ length: 20 }, (_, round) => round))(`TC-M4.T1.d ${LABEL[kind]}: 서로 동시 정지 %i 회는 활성 관리자 하나와 승자 감사 하나만 남긴다`, (round) => mutual(round, "suspend"), 120_000);
 
   it(`TC-M4.T1.db ${LABEL[kind]}: 유효 actor 가 마지막 관리자를 제거하려면 last_admin409로 아무것도 쓰지 않는다`, async () => {
     const actor = await add("admin");

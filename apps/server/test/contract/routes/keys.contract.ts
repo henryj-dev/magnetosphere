@@ -5,6 +5,8 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { hashPassword } from "better-auth/crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+// @ts-expect-error 시험 도우미는 타입 선언이 없는 .mjs 다
+import { isBudgetBlocked } from "../../../../../tests/contract/budget-block.mjs";
 import { createClient, loginWithPassword, type OmniRouteClient } from "@magnetosphere/omniroute";
 import { createNodeRuntime, listen, type NodeRuntime } from "@magnetosphere/runtime/node";
 import { createApp, type Services } from "../../../src/app.ts";
@@ -187,5 +189,35 @@ describe("TC-K4.T5.b 남은 한도 0 인 회원은 발급이 막히고 OmniRoute
     expect(created, "createKey 를 부르지 않았다").toEqual([]);
     expect(await mine(), "OmniRoute 에 키가 늘지 않았다").toBe(before);
     expect((await api(app, "GET", "/api/me/keys", m.cookie)).json.keys).toEqual([]);
+  });
+});
+
+describe("TC-M4.T5.c 정지 직후 첫 요청이 거부된다 (계약, 로컬 arm64·CI amd64)", () => {
+  it("회원 키 /v1/messages 200 → 설치 관리자가 POST /api/admin/users/:id/suspend → 기다림 없이 다음 요청 403 permission_denied (예산 차단 아님)", { timeout: 120_000 }, async () => {
+    const m = await member(app, 5);
+    const issued = await api(app, "POST", "/api/me/keys", m.cookie);
+    // 발급 응답에는 원문 키가 있어 실패 메시지에 본문을 싣지 않는다
+    expect(issued.status, "회원 키 발급").toBe(201);
+    const secret = issued.json.secret as string;
+    const keyId = issued.json.key.id as string;
+    const ork = await orkOf(app, keyId);
+    cleanupKeys.push(ork);
+    expect((await infer(secret, "anthropic")).status, "정지 전").toBe(200);
+
+    // 설치가 만든 최초 관리자로 로그인한다 (실제 Better Auth 세션)
+    const login = await post(app.base, "/api/auth/sign-in/email", { email: ADMIN.email, password: ADMIN.password });
+    expect(login.status, "관리자 로그인").toBe(200);
+    const adminCookie = login.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+    const res = await post(app.base, `/api/admin/users/${m.id}/suspend`, {}, adminCookie);
+    const body = (await res.json().catch(() => null)) as any;
+    // sync synced: 큐·점검·타이머가 아니라 정지 응답 안에서 OmniRoute 에 반영됐다
+    expect([res.status, body?.user?.status, body?.sync], "회원 정지 응답").toEqual([200, "suspended", "synced"]);
+
+    const next = await infer(secret, "anthropic");
+    expect(isBudgetBlocked(next.status, next.json), `정지 뒤 첫 요청이 예산 차단이다 (${next.status})`).toBe(false);
+    expect(permissionDenied(next), `정지 뒤 첫 요청 (${next.status})`).toBe(true);
+    expect((await app.om.listKeys()).find((k) => k.id === ork)?.isActive, "OmniRoute 에서 꺼졌다").toBe(false);
+    const [row] = await app.s.db.db.select().from(app.s.db.schema.apiKeys).where(eq(app.s.db.schema.apiKeys.id, keyId));
+    expect([row.state, row.disabledReason, row.syncState]).toEqual(["disabled", "user_status", "synced"]);
   });
 });

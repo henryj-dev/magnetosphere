@@ -1,0 +1,12 @@
+{
+  // M4.T3 세션 상태·버전의 D1 시험 Worker. 배포하지 않는다. 운영과 같은 서버 앱(createApp + buildServices)을 로컬 D1 위에 올리고,
+  // 로그인 경계 정지만 같은 옵션(authOptions)으로 만든 원본 Better Auth handler 로 연다 (m4-session-worker.ts).
+  // 마이그레이션은 시험이 임시 디렉터리에 wrangler d1 migrations apply --local 로 적용한다. 이름은 다른 시험 Worker 와 겹치지 않는다.
+  "name": "mg-server-m4-session-test",
+  "main": "./m4-session-worker.ts",
+  "compatibility_date": "2026-07-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "mg-server-m4-session-test", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "../../../../packages/db/migrations/sqlite" }
+  ]
+}
