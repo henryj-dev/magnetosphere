@@ -9,6 +9,7 @@ import { selfDeleteRoutes } from "../../src/admin/self-delete.ts";
 import { KEY_DELETE_DELAY_MS } from "../../src/queue/index.ts";
 import { sameOrigin } from "../../src/routes/guard.ts";
 import { installed, login, type CallOpts, type HttpRig } from "../signup/checks.ts";
+import { verificationLink } from "../signup/confirmation-checks.ts";
 import { body, mail, PASSWORD } from "../../../../packages/auth/test/signup-policy/rig.ts";
 import type { ServerRig } from "../signup/env.ts";
 
@@ -61,6 +62,9 @@ async function realMember(rig: Rig, label: string) {
   const email = mail(label);
   const joined = await rig.signUp(body(email));
   expect(joined.status).toBe(200);
+  // 공개 가입은 미인증이라 로그인 403이다. 설치된 H1 확인(메일 링크 + 가입 비밀번호)을 거친다.
+  const { token } = await verificationLink(rig, email);
+  expect((await rig.call("POST", "/api/auth/signup-confirmation", { body: { token, password: PASSWORD } })).status).toBe(200);
   const signed = await rig.call("POST", "/api/auth/sign-in/email", { body: { email, password: PASSWORD } });
   expect(signed.status).toBe(200);
   const user = (await rows(rig)).users.find((row: any) => row.email === email);
@@ -147,7 +151,14 @@ export async function tcM4DeleteAndSelf(rig: Rig) {
   await rig.h.db.update(s.user).set({ isBootstrapAdmin: true }).where(eq(s.user.id, admin.id));
   expect((await call(app, "DELETE", "/api/me", { cookie: admin.cookie, body: { password: PASSWORD } })).status).toBe(409);
   await rig.h.db.update(s.user).set({ isBootstrapAdmin: false }).where(eq(s.user.id, admin.id));
-  expect((await call(app, "DELETE", `/api/admin/users/${admin.id}`, { cookie: admin.cookie })).json.error).toBe("last_admin");
+  // installed()의 설치 관리자와 login()의 관리자 둘이 활성이다. 자기 삭제는 self 규칙 밖이라(설계 6장 관리자 보호) 나머지를 잠시 정지해 마지막 활성 관리자로 만든다.
+  const otherAdmins = (await rows(rig)).users.filter((row: any) => row.role === "admin" && row.status === "active" && row.id !== admin.id).map((row: any) => row.id as string);
+  expect(otherAdmins.length).toBeGreaterThan(0);
+  for (const id of otherAdmins) await rig.h.db.update(s.user).set({ status: "suspended" }).where(eq(s.user.id, id));
+  const lastAdmin = await call(app, "DELETE", `/api/admin/users/${admin.id}`, { cookie: admin.cookie });
+  expect({ status: lastAdmin.status, json: lastAdmin.json }).toEqual({ status: 409, json: { error: "last_admin" } });
+  expect((await rows(rig)).users.find((row: any) => row.id === admin.id)).toMatchObject({ role: "admin", status: "active" });
+  for (const id of otherAdmins) await rig.h.db.update(s.user).set({ status: "active" }).where(eq(s.user.id, id));
 
   const pending = await realMember(rig, "delete-pending-proof");
   const oldVersion = (await rows(rig)).users.find((row: any) => row.id === pending.id).authVersion as number;

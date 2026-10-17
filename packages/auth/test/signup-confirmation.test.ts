@@ -44,6 +44,9 @@ describe.each(kinds)("%s H1 auth.api", (kind) => {
     const token = new URL(message.text.match(/https?:\/\/\S+/)![0]).pathname.split("/").at(-1);
     return api().resetPassword({ body: { token, newPassword } });
   };
+  // 기본 설정(signup_requires_approval)의 공개 가입은 확인 뒤에도 pending이고, 비밀번호 변경은 active만 한다 (M4 Q-A).
+  // 변경 계약 시험은 관리자 승인을 마친 회원으로 준비한다. 로그인 전에 바꾸므로 세션·버전은 건드리지 않는다.
+  const approve = async (id: string) => { await h.db.update((h.schema as any).user).set({ status: "active" }).where(eq((h.schema as any).user.id, id)); };
   const credential = async (id: string) => (await h.db.select().from((h.schema as any).account).where(eq((h.schema as any).account.userId, id)))[0];
   const readAuthVersion = async (id: string): Promise<number> => {
     const rows: unknown = await h.db.select({ authVersion: sql<unknown>`${sql.identifier("auth_version")}` }).from(h.schema.user).where(sql`${sql.identifier("id")} = ${id}`).limit(1);
@@ -189,6 +192,7 @@ describe.each(kinds)("%s H1 auth.api", (kind) => {
   it("H1.RACE.change-verify-reset: 현재 비밀번호 검증 중 재설정은 뒤늦은 변경으로 덮어쓰지 못한다", async () => {
     const x = await signup("change-verify-reset");
     await api().confirmSignupEmail({ body: { token: x.token, password: PASSWORD } });
+    await approve(x.id);
     const login = await api().signInEmail({ body: { email: x.email, password: PASSWORD }, returnHeaders: true });
     const cookie = login.headers.getSetCookie().map((v: string) => v.split(";")[0]).join("; ");
     const original = await credential(x.id);
@@ -215,6 +219,7 @@ describe.each(kinds)("%s H1 auth.api", (kind) => {
   it("H1.RACE.change-insert-reset: 변경 직후 재설정은 새 credential에 옛 요청 세션을 재바인딩하지 않는다", async () => {
     const x = await signup("change-insert-reset");
     await api().confirmSignupEmail({ body: { token: x.token, password: PASSWORD } });
+    await approve(x.id);
     const login = await api().signInEmail({ body: { email: x.email, password: PASSWORD }, returnHeaders: true });
     const cookie = login.headers.getSetCookie().map((v: string) => v.split(";")[0]).join("; ");
     const pause = barrier();
@@ -240,6 +245,7 @@ describe.each(kinds)("%s H1 auth.api", (kind) => {
   it("H1.CHANGE: 본문 검증·CSRF·기존 세션 유지·새 세션 응답 계약을 보존한다", async () => {
     const x = await signup("change-contract");
     await api().confirmSignupEmail({ body: { token: x.token, password: PASSWORD } });
+    await approve(x.id);
     const login = await api().signInEmail({ body: { email: x.email, password: PASSWORD }, returnHeaders: true });
     const cookie = login.headers.getSetCookie().map((v: string) => v.split(";")[0]).join("; ");
     const headers = new Headers({ cookie });
@@ -339,6 +345,7 @@ describe.each(kinds)("%s H1 auth.api", (kind) => {
     faults.confirmation = 0;
     faults.credential = 0;
     await api().confirmSignupEmail({ body: { token: x.token, password: PASSWORD } });
+    await approve(x.id);
     const login = await api().signInEmail({ body: { email: x.email, password: PASSWORD }, returnHeaders: true });
     const cookie = login.headers.getSetCookie().map((v: string) => v.split(";")[0]).join("; ");
     const changeLog = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -396,6 +403,7 @@ describe.each(kinds)("%s H1 auth.api", (kind) => {
   it("H1.CHANGE.concurrent: 같은 현재 비밀번호의 동시 변경은 하나만 성공한다", async () => {
     const x = await signup("change-concurrent");
     await api().confirmSignupEmail({ body: { token: x.token, password: PASSWORD } });
+    await approve(x.id);
     const login = await api().signInEmail({ body: { email: x.email, password: PASSWORD }, returnHeaders: true });
     const headers = new Headers({ cookie: login.headers.getSetCookie().map((v: string) => v.split(";")[0]).join("; ") });
     let n = 0;
@@ -419,6 +427,7 @@ describe.each(kinds)("%s H1 auth.api", (kind) => {
   it("H1.ERROR.keep: 유지 세션 UPDATE 오류도 HTTP·로그·cause에 해시를 전달하지 않는다", async () => {
     const x = await signup("keep-error");
     await api().confirmSignupEmail({ body: { token: x.token, password: PASSWORD } });
+    await approve(x.id);
     const login = await api().signInEmail({ body: { email: x.email, password: PASSWORD }, returnHeaders: true });
     const cookie = login.headers.getSetCookie().map((v: string) => v.split(";")[0]).join("; ");
     const hash = (await credential(x.id)).password;
