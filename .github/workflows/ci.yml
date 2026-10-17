@@ -215,6 +215,8 @@ jobs:
       - name: K0 게이트
         env:
           GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
         run: node scripts/gate.mjs K0 --explain
       - name: 분석 API 측정값 (확인 15번, G-K0.18 이 남긴 파일)
         run: cat "$RUNNER_TEMP/bench-analytics.json"
@@ -238,6 +240,8 @@ jobs:
       - name: K1 게이트
         env:
           GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
         run: node scripts/gate.mjs K1 --explain
 
   p2-k2:
@@ -259,6 +263,8 @@ jobs:
       - name: K2 게이트
         env:
           GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
         run: node scripts/gate.mjs K2 --explain
 
   p2-k3:
@@ -280,6 +286,8 @@ jobs:
       - name: K3 게이트
         env:
           GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
         run: node scripts/gate.mjs K3 --explain
 
   p2-k4:
@@ -301,6 +309,8 @@ jobs:
       - name: K4 게이트
         env:
           GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
         run: node scripts/gate.mjs K4 --explain
 
   p2-k5:
@@ -323,6 +333,8 @@ jobs:
       - name: K5 게이트 (G-K5.3~8 은 e2e 매트릭스가 같은 명령으로 돈다)
         env:
           GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
         run: node scripts/gate.mjs K5 --explain --skip-ids G-K5.3,G-K5.4,G-K5.5,G-K5.6,G-K5.7,G-K5.8
 
   p2-k6:
@@ -344,6 +356,8 @@ jobs:
       - name: K6 게이트
         env:
           GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
         run: node scripts/gate.mjs K6 --explain
 
   p3-m0:
@@ -365,6 +379,8 @@ jobs:
       - name: M0 게이트
         env:
           GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
         run: node scripts/gate.mjs M0 --explain
 
   p3-m1:
@@ -387,6 +403,8 @@ jobs:
       - name: M1 게이트
         env:
           GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
         run: node scripts/gate.mjs M1 --explain
 
   p3-m2:
@@ -410,6 +428,8 @@ jobs:
       - name: M2 게이트
         env:
           GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
         run: node scripts/gate.mjs M2 --explain
 
   p3-m3:
@@ -432,6 +452,8 @@ jobs:
       - name: M3 게이트
         env:
           GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
         run: node scripts/gate.mjs M3 --explain
       # TC-M3.T1.j·k 는 기존 M3 게이트 선택자(TC-M3.T1.[ghi])에 들어가지 않는다. 게이트·필수 검사 이름은 그대로 두고,
       # MySQL·MariaDB 에서만 같은 잡의 다음 단계로 돈다. 종료코드 0 과 통과 수 4 를 함께 확인한다.
@@ -460,6 +482,8 @@ jobs:
       - name: M4 게이트
         env:
           GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
         run: node scripts/gate.mjs M4 --explain
 
   s1-seal:

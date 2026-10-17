@@ -51,7 +51,9 @@ function repo(impl) {
 }
 
 function checkRed(dir) {
-  const r = spawnSync(process.execPath, [SCRIPT, "--root", dir, "--check", "G1", "--since", "seal:A"], { encoding: "utf8" });
+  // CI 잡 env 의 작업 트리 캐시(CHECK_RED_CACHE_DIR)를 물려받지 않는다. 이 시험은 캐시 없는 기본 동작을 본다
+  const { CHECK_RED_CACHE_DIR, ...env } = process.env;
+  const r = spawnSync(process.execPath, [SCRIPT, "--root", dir, "--check", "G1", "--since", "seal:A"], { encoding: "utf8", env });
   return { code: r.status, out: `${r.stdout}${r.stderr}` };
 }
 

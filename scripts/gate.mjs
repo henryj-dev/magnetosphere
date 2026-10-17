@@ -427,9 +427,9 @@ function cmdVerifySeals(root, gates, rerun, sinceRef, skipTag = null) {
       try {
         // 설치가 실패하면 검사를 돌리지 않고 바로 보고한다. 설치 실패를 넘기면 검사 여러 개가 엉뚱한 이유로 실패해 원인이 가려진다
         if (fs.existsSync(path.join(dir, "pnpm-lock.yaml"))) {
-          const inst = run(dir, "pnpm install --frozen-lockfile");
+          const inst = run(dir, "pnpm install --frozen-lockfile --prefer-offline");
           if (inst.code !== 0) {
-            problems.push(`${phase}: 봉인 커밋 ${seal.head.slice(0, 7)} 설치 실패 (pnpm install --frozen-lockfile 종료코드 ${inst.code})\n${inst.output.split("\n").slice(-30).join("\n")}`);
+            problems.push(`${phase}: 봉인 커밋 ${seal.head.slice(0, 7)} 설치 실패 (pnpm install --frozen-lockfile --prefer-offline 종료코드 ${inst.code})\n${inst.output.split("\n").slice(-30).join("\n")}`);
             continue;
           }
         }
