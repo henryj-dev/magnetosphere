@@ -1,0 +1,10 @@
+{
+  // TC-M6.T5.a D1 시험 전용 (invite-anon-worker.ts). 배포하지 않는다. 마이그레이션은 시험이 wrangler d1 migrations apply --local 로 적용한다.
+  "name": "mg-server-invite-anon-test",
+  "main": "./invite-anon-worker.ts",
+  "compatibility_date": "2026-07-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "mg-server-invite-anon-test", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "../../../../packages/db/migrations/sqlite" }
+  ]
+}

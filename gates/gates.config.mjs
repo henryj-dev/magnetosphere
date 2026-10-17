@@ -907,6 +907,19 @@ export const GATES = {
     waivable: false,
     strictTests: true,
     outputs: [],
-    checks: [],
+    checks: [
+      // G-M6.1~11 은 실행판 GATE 표(docs/plan/phase3-todo.md)의 자리다. M6 후속(TC-M6.T5)은 G-M6.12 부터 둔다.
+      // expectPassed 는 정적 목록 기준이다 (describe.each 의 DB 수 × it 수)
+      // M6.T5 회원 삭제의 초대 정리·0006 소급 익명화 (U1)
+      { id: "G-M6.12", how: "test", requires: ["local-services"], desc: "TC-M6.T5.a 삭제 트랜잭션의 초대 익명화·미사용 초대 철회·실패 시 되돌림 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-M6.T5.a" --db sqlite,mysql,mariadb,pg', expectPassed: 8 },
+      { id: "G-M6.13", how: "test", requires: ["local-services"], desc: "TC-M6.T5.a 실제 D1 batch 초대 익명화·실패 시 되돌림 (D1)", cmd: 'pnpm -C apps/server test:workers test/admin/invite-anon.workers.test.ts -t "TC-M6.T5.a D1"', expectPassed: 2 },
+      { id: "G-M6.14", how: "test", requires: ["local-services"], desc: "TC-M6.T5.b 0006 업그레이드 소급 익명화 (다섯 DB)", cmd: 'pnpm -C packages/db test:migrate -t "TC-M6.T5.b" --db sqlite,mysql,mariadb,pg,d1', expectPassed: 5 },
+      // M6.T5 인증 후속: rotate 보상 (U3)·없는 메일 로그인 같은 경로 (L3). 선언 16 = DB 당 (c 2 + d 2) × 4
+      { id: "G-M6.15", how: "test", requires: ["local-services"], desc: "TC-M6.T5.c rotate 실패 보상·TC-M6.T5.d 없는 메일 로그인 같은 경로 (Node DB 넷)", cmd: 'MG_TEST_DBS=sqlite,mysql,mariadb,pg pnpm -C packages/auth test -t "TC-M6\\.T5\\.c|TC-M6\\.T5\\.d"', expectPassed: 16 },
+      // M6.T5 손상된 auth_version (L4). SQLite 만 integer 칸에 소수·문자열을 저장할 수 있어 기본 시험에서 돈다
+      { id: "G-M6.16", how: "test", desc: "TC-M6.T5.e 손상된 auth_version 은 stale_member, 정확히 상한은 version_exhausted", cmd: 'pnpm -C apps/server test test/admin/version-of.test.ts -t "TC-M6.T5.e"', expectPassed: 5 },
+      // M6.T5 세션 주기 정리 (L1). 새 cron 없이 1분 queueJob 에서 돈다. 선언 12 = DB 당 3 × 4
+      { id: "G-M6.17", how: "test", requires: ["local-services"], desc: "TC-M6.T5.f 만료·삭제 회원 세션 정리·500행 묶음·펜싱·queueJob 연결 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-M6.T5.f" --db sqlite,mysql,mariadb,pg', expectPassed: 12 },
+    ],
   },
 };

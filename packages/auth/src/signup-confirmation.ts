@@ -26,6 +26,10 @@ const invalidProof = () => new APIError("UNAUTHORIZED", { code: "INVALID_CONFIRM
 const CONFIRMED_ORIGINS = ["public", "invite"];
 // core의 없는 메일/틀린 비밀번호와 같은 생성 경로를 쓴다. new APIError({code,message})는 본문 필드 순서가 달라 계정 존재가 드러난다 (M4.T3.invalid).
 const staleLogin = () => APIError.from("UNAUTHORIZED", BASE_ERROR_CODES.INVALID_EMAIL_OR_PASSWORD);
+// 없는 메일 로그인도 있는 메일과 같은 읽기 2번·HMAC 1번을 거치게 하는 고정 계정 (M6 후속 L3). 결과는 버린다.
+// id 는 칼럼 길이(varchar 36)에 맞춘 nil UUID 다. 회원 id 는 무작위 UUID v4 라 이 값과 겹치지 않는다.
+const DUMMY_LOGIN_ID = "00000000-0000-0000-0000-000000000000";
+const DUMMY_LOGIN_ACCOUNT = { id: DUMMY_LOGIN_ID, providerId: "credential", accountId: DUMMY_LOGIN_ID, password: "magnetosphere:login-snapshot-dummy" };
 
 /** 요청 전용 문맥에 id만 기록한다. 가입 트랜잭션 안에서 바깥 DB 연결을 읽지 않는다. */
 export function queueConfirmationMail(userId: string): void {
@@ -151,7 +155,12 @@ export function signupConfirmation(cfg: AuthConfig, deliver: (m: MailMessage) =>
     async loginSnapshot(ctx: Context) {
       if (ctx.path !== "/sign-in/email") return;
       const [user] = await db.select().from(u).where(eq(u.email, ctx.body?.email ?? "")).limit(1);
-      if (!user) return;
+      if (!user) {
+        // 있는 메일과 같은 load 2번·HMAC 1번을 하고 결과는 버린다. 응답과 LOGIN 문맥은 그대로 비운다 (M6 후속 L3)
+        await load(DUMMY_LOGIN_ID);
+        await fingerprint(DUMMY_LOGIN_ID, DUMMY_LOGIN_ACCOUNT);
+        return;
+      }
       const { account } = await load(user.id);
       // 비밀번호 검증 전에는 존재/상태/잘못된 DB 버전에 따른 오류를 반환하지 않는다.
       ctx.context[LOGIN] = { id: user.id, version: user.authVersion, fingerprint: account?.password ? await fingerprint(user.id, account) : null };
@@ -180,20 +189,38 @@ export function signupConfirmation(cfg: AuthConfig, deliver: (m: MailMessage) =>
       // absent/false도 타 세션은 항상 삭제한다. 현재 세션 하나만 새 지문·버전으로 유지한다.
       ctx.context[CHANGE] = { id: user.id, fingerprint: expected, version };
       let token = null;
-      if (revokeOtherSessions) {
-        const created = await ctx.context.internalAdapter.createSession(user.id);
-        if (!created) throw staleLogin();
-        token = created.token;
-        if (!(await matches(user.id, expected, version))) {
+      let created: any = null;
+      // rotate 로 만든 세션은 실패하면 지운다. 쿠키·토큰을 내보내지 않았으므로 보상 삭제가 실패해도 응답은 staleLogin 하나다 (M6 후속 U3)
+      const discardCreated = async () => {
+        if (!created) return;
+        try {
           await db.delete(s).where(eq(s.id, created.id));
-          throw staleLogin();
+        } catch {
+          // 남은 행은 내보내지 않은 token 의 세션이다. 원래 오류는 전달하지 않는다
         }
-        const versionedUser: User & { authVersion: number } = { ...session.user, authVersion: version };
-        await setSessionCookie(ctx, { session: created, user: versionedUser });
-      }
-      if (!(await matches(user.id, expected, version))) {
-        ctx.context.responseHeaders?.delete("set-cookie");
+      };
+      // 새 세션을 만든 뒤에는 어떤 실패(판정 false, matches 의 DB 오류, setSessionCookie 예외)든 쿠키를 지우고 그 세션을 보상 삭제한다.
+      // 원래 오류에는 세션 token 이 들어갈 수 있어 전달하지 않는다
+      let completed = false;
+      try {
+        if (revokeOtherSessions) {
+          created = await ctx.context.internalAdapter.createSession(user.id);
+          if (!created) throw staleLogin();
+          token = created.token;
+          if (!(await matches(user.id, expected, version))) throw staleLogin();
+          const versionedUser: User & { authVersion: number } = { ...session.user, authVersion: version };
+          await setSessionCookie(ctx, { session: created, user: versionedUser });
+        }
+        if (!(await matches(user.id, expected, version))) throw staleLogin();
+        completed = true;
+      } catch (error) {
+        if (!created) throw error;
         throw staleLogin();
+      } finally {
+        if (!completed && created) {
+          ctx.context.responseHeaders?.delete("set-cookie");
+          await discardCreated();
+        }
       }
       return ctx.json({ token, user: parseUserOutput(ctx.context.options, { ...session.user, authVersion: version }) });
     },

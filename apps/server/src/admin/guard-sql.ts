@@ -1,5 +1,6 @@
 // 회원 관리 원자 쓰기 (3단계 실행판 M4.T1·T2·T4). 상태·역할 변경과 삭제·자기 탈퇴 모두 이 함수 하나를 지난다.
 // 삭제는 user 를 익명화하고 account·session·소유 verification 을 같은 원자 단위에서 정리한다.
+// 같은 원자 단위에서 그 회원이 수락한 초대의 email 도 익명값으로 바꾸고, 삭제 전 이메일로 남은 미사용·미철회 초대는 철회한다 (M6 후속 U1).
 //
 // 직렬화
 //   - Node pg·MySQL·MariaDB: 초대 뮤텍스와 다른 job_leases 고정 행(member_management_mutex)을 트랜잭션 밖에서 먼저 만든다.
@@ -20,8 +21,8 @@
 //   - actor/target/관리자 수 조건을 user UPDATE/DELETE 하나에 묶는다.
 //   - 바로 다음 문장은 항상 평가되는 audit INSERT 이고, action 에 CASE WHEN changes() = 1 THEN 검증 action ELSE NULL END 를 넣는다.
 //   - 0행이면 NOT NULL 제약으로 batch 전체가 롤백된다. 거절로 target 이 사라져도 guard 는 user 존재에 기대지 않는다.
-//   - 순서는 CAS → 즉시 감사 guard → account/session/verification 정리다. 그 사이에 다른 쓰기를 넣지 않는다.
-import { and, asc, count, eq, getTableName, gt, inArray, isNull, like, or, sql, type SQL } from "drizzle-orm";
+//   - 순서는 CAS → 즉시 감사 guard → account/verification/초대/session 정리다. 그 사이에 다른 쓰기를 넣지 않는다.
+import { and, asc, count, eq, getTableName, gt, inArray, isNotNull, isNull, like, or, sql, type SQL } from "drizzle-orm";
 import type { SelfDeleteCredentialProof } from "@magnetosphere/auth";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import { auditRow, type AuditEntry } from "../audit/index.ts";
@@ -101,9 +102,10 @@ function authVersion(table: any) {
   return table.authVersion ?? sql`${sql.identifier(getTableName(table))}.${sql.identifier("auth_version")}`;
 }
 
+/** DB 가 준 버전이 0..상한 안 정수가 아니면 손상된 행이다. 상한 도달(version_exhausted)과 구분해 stale_member 로 거절한다 (M6 후속 L4) */
 function versionOf(row: { authVersion?: unknown }): number {
   const value = Number(row.authVersion ?? 0);
-  if (!Number.isSafeInteger(value) || value < 0 || value > AUTH_VERSION_MAX) throw new MemberConflictError("version_exhausted");
+  if (!Number.isSafeInteger(value) || value < 0 || value > AUTH_VERSION_MAX) throw new MemberConflictError("stale_member");
   return value;
 }
 
@@ -201,11 +203,57 @@ function ownedVerification(v: any, userId: string, previousEmail: string | null)
   return previousEmail === null ? owned : or(owned, eq(v.identifier, previousEmail));
 }
 
-async function cleanupOwned(h: DbHandle, db: any, userId: string, previousEmail: string | null, action: MemberAction = "reject"): Promise<void> {
+/** 삭제한 회원의 익명 이메일. user 와 그 회원이 수락한 초대에 같은 값을 쓴다 (0006 소급도 같은 꼴) */
+const anonymousEmail = (userId: string) => `deleted-${userId}@invalid`;
+
+/**
+ * 삭제 때 바꿀 초대 조건 둘. used_by 는 남기고 email 만 지운다.
+ *   - accepted: 그 회원이 수락한 초대(used_by = id). email 을 익명값으로 바꾼다.
+ *   - pending: 삭제 전 이메일로 보낸 미사용·미철회 초대. 관리자 취소와 같이 revoked_at 만 채운다 (만료 여부와 관계없이).
+ * 초대 이메일은 normalizeInviteEmail(trim·소문자·NFC)로 저장되므로 원래 값과 그 정규화 값을 함께 본다.
+ * MySQL 의 email 기본 정렬은 대소문자를 무시하므로 초대 재발급과 같이 바이트로 비교한다.
+ */
+function inviteCleanup(h: DbHandle, userId: string, previousEmail: string | null) {
+  const t = h.schema.invites;
+  const accepted = and(eq(t.usedBy, userId), isNotNull(t.email));
+  const emails = previousEmail === null ? [] : [...new Set([previousEmail, previousEmail.trim().toLowerCase().normalize("NFC")])];
+  const sameEmail = or(...emails.map((e) => (h.provider === "mysql" ? sql`${t.email} = cast(${e} as binary)` : eq(t.email, e))));
+  const pending = emails.length === 0 ? undefined : and(sameEmail, isNull(t.usedAt), isNull(t.revokedAt));
+  return { accepted, pending };
+}
+
+/** D1 batch 용 초대 UPDATE 문장. 실행하지 않는다 */
+function inviteCleanupStatements(h: DbHandle, db: any, userId: string, previousEmail: string | null, now: Date): any[] {
+  const t = h.schema.invites;
+  const c = inviteCleanup(h, userId, previousEmail);
+  return [...(c.pending ? [db.update(t).set({ revokedAt: now }).where(c.pending)] : []), db.update(t).set({ email: anonymousEmail(userId) }).where(c.accepted)];
+}
+
+/**
+ * Node 트랜잭션 안 초대 정리. MySQL 은 초대 취소(admin.ts revokeWhere)와 같이 잠그지 않는 읽기로 id 를 고르고
+ * id 마다 같은 조건으로 UPDATE 한다. email·used_by 에는 인덱스가 없어 조건 UPDATE 가 표 전체를 잠그지 않게 한다.
+ */
+async function cleanupInvites(h: DbHandle, db: any, userId: string, previousEmail: string | null, now: Date): Promise<void> {
+  if (h.provider !== "mysql") {
+    for (const statement of inviteCleanupStatements(h, db, userId, previousEmail, now)) await statement;
+    return;
+  }
+  const t = h.schema.invites;
+  const c = inviteCleanup(h, userId, previousEmail);
+  const writes: [SQL | undefined, Record<string, unknown>][] = [[c.pending, { revokedAt: now }], [c.accepted, { email: anonymousEmail(userId) }]];
+  for (const [cond, set] of writes) {
+    if (!cond) continue;
+    const ids: string[] = (await db.select({ id: t.id }).from(t).where(cond)).map((r: { id: string }) => r.id);
+    for (const id of ids) await db.update(t).set(set).where(and(eq(t.id, id), cond));
+  }
+}
+
+async function cleanupOwned(h: DbHandle, db: any, userId: string, previousEmail: string | null, action: MemberAction = "reject", now: Date = new Date()): Promise<void> {
   const a = h.schema.account;
   const v = h.schema.verification;
   if (action === "reject" || action === "delete") await db.delete(a).where(eq(a.userId, userId));
   await db.delete(v).where(ownedVerification(v, userId, previousEmail));
+  if (action === "delete") await cleanupInvites(h, db, userId, previousEmail, now);
   await revokeSessionsStatement(h, db, userId);
 }
 
@@ -251,7 +299,7 @@ function mutationStatements(h: DbHandle, db: any, input: MemberMutation, before:
   if (to === "row_deleted") return { removesLast, cas: db.delete(u).where(cond), cleanup: true };
   const nextVersion = before.authVersion + 1;
   const set = input.action === "delete"
-    ? { status: "deleted", deletedAt: input.now, email: `deleted-${before.id}@invalid`, name: "", image: null, authVersion: nextVersion, updatedAt: input.now }
+    ? { status: "deleted", deletedAt: input.now, email: anonymousEmail(before.id), name: "", image: null, authVersion: nextVersion, updatedAt: input.now }
     : { status: to, role: input.action === "role" ? input.role : before.role, authVersion: nextVersion, updatedAt: input.now };
   return { removesLast, cas: db.update(u).set(set).where(cond), cleanup: input.action === "delete", nextVersion };
 }
@@ -284,7 +332,7 @@ async function mutateLocked(h: DbHandle, tx: any, input: MemberMutation): Promis
   if ((await changed(h, plan.cas, h.schema.user.id)) !== 1) return rejectIfStale(h, input, before, plan.removesLast ? "last_admin" : "stale_member", tx);
   const { auditStatement } = await import("../audit/index.ts");
   await auditStatement(h, input.audit, tx);
-  if (plan.cleanup) await cleanupOwned(h, tx, before.id, before.email, input.action);
+  if (plan.cleanup) await cleanupOwned(h, tx, before.id, before.email, input.action, input.now);
   else await revokeSessionsStatement(h, tx, before.id);
   return { to: judged.to, from: before, authVersion: plan.cleanup ? null : (plan.nextVersion ?? null) };
 }
@@ -312,6 +360,8 @@ export async function mutateMember(h: DbHandle, input: MemberMutation): Promise<
     const statements = [plan.cas, guardedAuditStatement(h, input.audit)];
     if (plan.cleanup && (input.action === "reject" || input.action === "delete")) statements.push(h.db.delete(h.schema.account).where(eq(h.schema.account.userId, before.id)));
     if (plan.cleanup) statements.push(h.db.delete(h.schema.verification).where(ownedVerification(h.schema.verification, before.id, before.email)));
+    // 초대 정리도 같은 batch 다. 감사 guard 뒤에 두므로 CAS 0행이면 이 UPDATE 들도 함께 되돌려진다
+    if (plan.cleanup && input.action === "delete") statements.push(...inviteCleanupStatements(h, h.db, before.id, before.email, input.now));
     statements.push(revokeSessionsStatement(h, h.db, before.id));
     try {
       await h.db.batch(statements);
@@ -332,7 +382,7 @@ export async function mutateMember(h: DbHandle, input: MemberMutation): Promise<
   return locking ? h.db.transaction(body, MEMBER_TX) : h.db.transaction(body);
 }
 
-/** 후속 삭제 구현이 계정·검증·세션 정리 순서만 재사용할 수 있게 연다. 삭제의 익명화 쓰기는 여기 없다 */
+/** 후속 삭제 구현이 계정·검증·(삭제면) 초대·세션 정리 순서만 재사용할 수 있게 연다. user 익명화 쓰기는 여기 없다 */
 export const memberCleanupStatements = cleanupOwned;
 
 /** 자기 자신 조건과 빈 세션 조건이 SQL 에서 빠지지 않는지 시험이 확인하는 내부 조건 */

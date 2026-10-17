@@ -43,6 +43,13 @@
       "when": 1791870653293,
       "tag": "0005_m4_auth_version",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "5",
+      "when": 1792195201123,
+      "tag": "0006_m6_invite_anonymize",
+      "breakpoints": true
     }
   ]
 }
