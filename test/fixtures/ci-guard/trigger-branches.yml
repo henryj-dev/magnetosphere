@@ -1,9 +1,9 @@
-# TC-S7.T1.c 음성 대조: on.push.branches 거르개
+# TC-S7.T1.c 음성 대조: on.push.branches 에 main 외 값이 있다 (허용은 정확히 branches: [main] 하나)
 # expect: trigger
 name: ci
 on:
   push:
-    branches: [main]
+    branches: [main, "release/**"]
   pull_request:
 permissions:
   contents: read
