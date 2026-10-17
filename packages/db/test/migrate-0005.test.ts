@@ -213,7 +213,8 @@ function fixture(dir: string, dialect: "sqlite" | "mysql" | "pg"): string {
   cpSync(migrations(dialect), old, { recursive: true });
   const journalFile = path.join(old, "meta/_journal.json");
   const journal = JSON.parse(readFileSync(journalFile, "utf8"));
-  if (journal.entries.at(-1).tag !== "0005_m4_auth_version") throw new Error(`0005 journal 태그가 아니다: ${journal.entries.at(-1)?.tag}`);
+  // 0005 뒤 마이그레이션(0006~)이 더해져도 0005 자리를 본다. 0004 까지만 남기는 아래 slice 는 그대로다
+  if (journal.entries[5]?.tag !== "0005_m4_auth_version") throw new Error(`0005 journal 태그가 아니다: ${journal.entries[5]?.tag}`);
   for (const e of journal.entries.slice(5)) rmSync(path.join(old, `${e.tag}.sql`));
   journal.entries = journal.entries.slice(0, 5);
   writeFileSync(journalFile, JSON.stringify(journal));

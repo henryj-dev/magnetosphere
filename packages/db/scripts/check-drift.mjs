@@ -26,6 +26,15 @@ const GENERATE = {
   pg: [kit.generateDrizzleJson, kit.generateMigration],
 };
 const norm = (sql) => sql.replace(/\s+/g, " ").trim();
+// 스키마를 바꾸지 않는 손 작성 데이터 마이그레이션(drizzle-kit generate --custom 꼴). 스냅숏이 직전과 같아 다시 만든 SQL 은 비고,
+// 커밋된 SQL 은 주석 줄을 빼면 UPDATE 문만 있어야 한다. 이름으로 하나씩 허용한다 — 다른 마이그레이션의 손 수정은 그대로 잡는다.
+const DATA_ONLY = new Set(["0006_m6_invite_anonymize"]);
+const stripComments = (sql) => sql.split("\n").filter((line) => !/^\s*--/.test(line)).join("\n");
+function dataOnly(entry, expected, raw) {
+  if (!DATA_ONLY.has(entry.tag) || expected.length !== 0) return false;
+  const statements = raw.split("--> statement-breakpoint").map((s) => norm(stripComments(s))).filter(Boolean);
+  return statements.length > 0 && statements.every((s) => /^UPDATE\s/i.test(s) && !/;\s*\S/.test(s));
+}
 
 // 커밋된 SQL 이 스냅숏에서 다시 만든 SQL 과 다른 마이그레이션 목록
 async function sqlMismatches(name) {
@@ -37,7 +46,12 @@ async function sqlMismatches(name) {
   for (const entry of journal.entries) {
     const snap = JSON.parse(readFileSync(path.join(dir, "meta", `${String(entry.idx).padStart(4, "0")}_snapshot.json`), "utf8"));
     const expected = (await generate(prev, snap)).map(norm);
-    const actual = readFileSync(path.join(dir, `${entry.tag}.sql`), "utf8").split("--> statement-breakpoint").map(norm).filter(Boolean);
+    const raw = readFileSync(path.join(dir, `${entry.tag}.sql`), "utf8");
+    if (dataOnly(entry, expected, raw)) {
+      prev = snap;
+      continue;
+    }
+    const actual = raw.split("--> statement-breakpoint").map(norm).filter(Boolean);
     const at = expected.findIndex((x, i) => x !== actual[i]);
     if (at >= 0 || actual.length !== expected.length) {
       const i = at >= 0 ? at : Math.min(expected.length, actual.length);
