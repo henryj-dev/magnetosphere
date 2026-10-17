@@ -8,24 +8,16 @@
 //   GET  /api/setup/omniroute → { omniroute } 저장된 토큰이 있으면 connected
 //   PUT  /api/setup/omniroute { token } → 200 { omniroute: "connected" } | 400 invalid_token·scope_not_write | 502 omniroute_unreachable
 //   세션 없음 401, 관리자 아님 403, JSON 이 아닌 본문 415 (교차 출처 form 전송을 받지 않는다)
-import { eq } from "drizzle-orm";
 import { Hono, type Context } from "hono";
 import type { Services } from "../app.ts";
+import { sessionAdmin } from "../routes/guard.ts";
 import { adminExists, consumeSetupAttempt, ensureSetupToken, runSetup } from "./index.ts";
 import { bootstrapOmniRoute, omniRouteStatus, saveManualToken } from "./omniroute.ts";
 
-/** 요청의 Better Auth 세션 사용자가 관리자면 그 id. 세션이 없으면 401, 관리자가 아니면 403 응답 */
+/** 공용 활성 관리자 판정. 세션·회원 없음 401, 역할·상태 거부 403 */
 async function requireAdmin(c: Context, s: Services): Promise<string | Response> {
-  const probe = new Request(new URL("/api/auth/get-session", c.req.url), { headers: { cookie: c.req.header("cookie") ?? "" } });
-  const res = await s.auth.handler(probe);
-  const session = res.ok ? ((await res.json().catch(() => null)) as { user?: { id?: unknown } } | null) : null;
-  const userId = session?.user?.id;
-  if (typeof userId !== "string") return c.json({ error: "unauthorized" }, 401);
-  // 역할은 세션 응답이 아니라 DB 에서 읽는다
-  const u = s.db.schema.user;
-  const [row] = await s.db.db.select({ role: u.role }).from(u).where(eq(u.id, userId));
-  if (row?.role !== "admin") return c.json({ error: "forbidden" }, 403);
-  return userId;
+  const admin = await sessionAdmin(c, s);
+  return admin instanceof Response ? admin : admin.id;
 }
 
 /** Workers 인데 SETUP_TOKEN 이 없고 아직 관리자가 없으면 503 응답 (S6 보안 리뷰 M2). 인증 없는 요청이라 로그는 남기지 않는다 */

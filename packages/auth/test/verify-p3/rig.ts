@@ -34,7 +34,7 @@ export function nodeRig(h: TestDb): Rig {
     outbox: async () => (await settle(), outbox),
     log: async () => log,
     cookieCache: async (s) => auth(s).options.session?.cookieCache ?? null,
-    apiPaths: async () => Object.entries(auth("plain").api).map(([k, ep]: [string, any]) => ep.path ?? `(server) ${k}`),
+    apiPaths: async () => Object.entries(auth("sdkRaw").api).map(([k, ep]: [string, any]) => ep.path ?? `(server) ${k}`),
   };
 }
 

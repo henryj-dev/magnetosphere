@@ -62,7 +62,7 @@ export default {
     if (url.pathname === "/__test/state") return Response.json({ outbox, log });
     if (url.pathname === "/__test/cookie-cache") return Response.json({ cookieCache: auth(scenarioOf(url.searchParams.get("s"))).options.session?.cookieCache ?? null });
     if (url.pathname === "/__test/paths") {
-      const api = auth("plain").api as Record<string, { path?: string }>;
+      const api = auth("sdkRaw").api as Record<string, { path?: string }>;
       return Response.json({ paths: Object.entries(api).map(([k, ep]) => ep.path ?? `(server) ${k}`) });
     }
     return new Response("not found", { status: 404 });

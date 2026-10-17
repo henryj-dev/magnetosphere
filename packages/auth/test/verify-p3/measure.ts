@@ -62,9 +62,9 @@ async function attempt(rig: Rig, scenario: Scenario, e: string, extra: Record<st
 }
 
 /** 지금 구성으로 이미 있는 회원 하나 (인증 메일 1통이 나간다) */
-async function existingMember(rig: Rig, tag: string) {
+async function existingMember(rig: Rig, tag: string, scenario: Scenario | null = null) {
   const e = email(tag);
-  const r = await client(rig.handler("plain")).post("/sign-up/email", signUpBody(e));
+  const r = await client(rig.handler(scenario ?? "plain")).post("/sign-up/email", signUpBody(e));
   if (r.status !== 200 || !(await rig.op("user", e))) throw new Error(`이미 있는 회원을 만들지 못했다: ${r.status} ${JSON.stringify(r.json)}`);
   return e;
 }
@@ -149,8 +149,8 @@ export async function v29Als(rig: Rig) {
 // ---------------- V30 ----------------
 
 /** 인증된 회원 하나 (지금 구성으로 가입하고 인증만 DB 로 켠다) */
-async function verifiedMember(rig: Rig, tag: string) {
-  const e = await existingMember(rig, tag);
+async function verifiedMember(rig: Rig, tag: string, scenario: Scenario | null = null) {
+  const e = await existingMember(rig, tag, scenario);
   await rig.op("setUser", e, { emailVerified: true });
   return e;
 }
@@ -165,13 +165,13 @@ const sessionOf = async (c: ReturnType<typeof client>) => (await c.get("/get-ses
 
 /** TC-M0.T3.a 세션 행을 지운 뒤 첫 요청 */
 export async function v30Delete(rig: Rig) {
-  const e = await verifiedMember(rig, "v30-del");
-  const { c, r } = await signedIn(rig, "plain", e);
+  const e = await verifiedMember(rig, "v30-del", "sdkRaw");
+  const { c, r } = await signedIn(rig, "sdkRaw", e);
   const before = await sessionOf(c);
   await rig.op("deleteSessionsOf", e);
   const firstRequestAfterDelete = await sessionOf(c);
   return {
-    cookieCacheEnabled: ((await rig.cookieCache("plain")) as { enabled?: boolean } | null)?.enabled === true,
+    cookieCacheEnabled: ((await rig.cookieCache("sdkRaw")) as { enabled?: boolean } | null)?.enabled === true,
     signInStatus: r.status,
     sessionBeforeDelete: before?.user?.email === e,
     firstRequestAfterDelete,
@@ -197,18 +197,18 @@ async function resetPassword(rig: Rig, scenario: Scenario, e: string, newPasswor
 
 /** TC-M0.T3.b 비밀번호 변경·재설정 뒤 다른 세션 */
 export async function v30Password(rig: Rig) {
-  const e = await verifiedMember(rig, "v30-change");
-  const a = await signedIn(rig, "plain", e);
-  const b = await signedIn(rig, "plain", e);
+  const e = await verifiedMember(rig, "v30-change", "sdkRaw");
+  const a = await signedIn(rig, "sdkRaw", e);
+  const b = await signedIn(rig, "sdkRaw", e);
   const changed = await a.c.post("/change-password", { currentPassword: PASSWORD, newPassword: "changed-horse-battery-1" });
   const otherSessionsAfterPasswordChange = (await sessionOf(b.c))?.user?.email === e;
 
   const sessionsAfterReset: Record<"off" | "on", number> = { off: -1, on: -1 };
   const resetStatus: Record<"off" | "on", number> = { off: -1, on: -1 };
   for (const [key, scenario] of [["off", "resetKeep"], ["on", "resetRevoke"]] as const) {
-    const r = await verifiedMember(rig, `v30-reset-${key}`);
-    await signedIn(rig, "plain", r);
-    await signedIn(rig, "plain", r);
+    const r = await verifiedMember(rig, `v30-reset-${key}`, "sdkRaw");
+    await signedIn(rig, "sdkRaw", r);
+    await signedIn(rig, "sdkRaw", r);
     const before = await rig.op("sessionsOf", r);
     if (before !== 2) throw new Error(`세션 둘을 만들지 못했다: ${before}`);
     resetStatus[key] = (await resetPassword(rig, scenario, r, `reset-horse-battery-${key}`)).status;
@@ -221,9 +221,9 @@ export async function v30Password(rig: Rig) {
 
 /** TC-M0.T4.a session.create.before 가 정지 회원의 로그인을 거부할 때 */
 export async function v31Reject(rig: Rig) {
-  const active = await verifiedMember(rig, "v31-active");
-  const suspended = await verifiedMember(rig, "v31-suspended");
-  const pending = await verifiedMember(rig, "v31-pending");
+  const active = await verifiedMember(rig, "v31-active", "sdkRaw");
+  const suspended = await verifiedMember(rig, "v31-suspended", "sdkRaw");
+  const pending = await verifiedMember(rig, "v31-pending", "sdkRaw");
   await rig.op("setUser", suspended, { status: "suspended" });
   await rig.op("setUser", pending, { status: "pending" });
   const ok = await signedIn(rig, "sessionGuard", active);
@@ -245,13 +245,13 @@ export async function v31Reject(rig: Rig) {
 /** TC-M0.T4.b 재설정·인증 링크가 세션을 만드는지, session.create.after 가 방금 만든 세션을 지울 수 있는지 */
 export async function v31Paths(rig: Rig) {
   // 재설정: 정지 회원이 링크로 비밀번호를 바꾼다
-  const reset = await verifiedMember(rig, "v31-reset");
+  const reset = await verifiedMember(rig, "v31-reset", "sdkRaw");
   await rig.op("setUser", reset, { status: "suspended" });
   const resetRes = await resetPassword(rig, "sessionGuard", reset, "reset-horse-battery-v31");
   const resetCreatesSession = setsSessionCookie(resetRes) || (await rig.op("sessionsOf", reset)) > 0;
 
   // 인증 링크: 가입 메일의 링크를 정지 상태에서 연다
-  const verify = await existingMember(rig, "v31-verify");
+  const verify = await existingMember(rig, "v31-verify", "sdkRaw");
   await rig.op("setUser", verify, { status: "suspended" });
   const mail = (await rig.outbox()).filter((m) => m.to === verify).at(-1);
   const link = mail && linkIn(mail.text);
@@ -262,12 +262,12 @@ export async function v31Paths(rig: Rig) {
   const confirmRes = await client(rig.handler("sessionGuard")).post("/signup-confirmation", { token: new URL(link).searchParams.get("token"), password: PASSWORD });
   const confirmCreatesSession = setsSessionCookie(confirmRes) || (await rig.op("sessionsOf", verify)) > 0;
   const verifiedAfterProof = (await rig.op("user", verify))?.emailVerified;
-  const recovery = await existingMember(rig, "v31-recovery");
+  const recovery = await existingMember(rig, "v31-recovery", "sdkRaw");
   const recoveryRes = await resetPassword(rig, "sessionGuard", recovery, "recovered-horse-battery-v31");
   const recoveryCreatesSession = setsSessionCookie(recoveryRes) || (await rig.op("sessionsOf", recovery)) > 0;
 
   // after 훅이 방금 만든 세션을 지운다
-  const racer = await verifiedMember(rig, "v31-after");
+  const racer = await verifiedMember(rig, "v31-after", "sdkRaw");
   const { c, r } = await signedIn(rig, "sessionAfterDelete", racer);
   const rowsAfter = await rig.op("sessionsOf", racer);
   const sessionAfter = await sessionOf(c);
@@ -338,13 +338,13 @@ function effectOf(a: Awaited<ReturnType<typeof snapshot>>, b: Awaited<ReturnType
 
 /** TC-M0.T5.a 설치 뒤(관리자 있음) 로그인한 회원이 부르는 경로마다 상태코드와 효과 */
 export async function v32Paths(rig: Rig) {
-  const e = await verifiedMember(rig, "v32-member");
+  const e = await verifiedMember(rig, "v32-member", "sdkRaw");
   await rig.op("addAdmin");
   const other = email("v32-other");
-  const a = await signedIn(rig, "plain", e);
-  const b = await signedIn(rig, "plain", e);
-  await signedIn(rig, "plain", e);
-  await signedIn(rig, "plain", e);
+  const a = await signedIn(rig, "sdkRaw", e);
+  const b = await signedIn(rig, "sdkRaw", e);
+  await signedIn(rig, "sdkRaw", e);
+  await signedIn(rig, "sdkRaw", e);
   const cookieB = [...b.c.jar].find(([k]) => k.endsWith("session_token"))?.[1];
   const tokenB = decodeURIComponent(cookieB ?? "").split(".")[0];
   const paths: { path: string; status: number; effect: string }[] = [];

@@ -1,5 +1,5 @@
 // 회원·관리자 API 공용 검사 (계획서 v5.7 4.5·4.6·7장, K4.T4).
-//   - CSRF: /api/me/*·/api/admin/* 의 GET·HEAD 아닌 요청은 Origin 이 BETTER_AUTH_URL 출처와 같아야 한다. Origin 이 없어도 403.
+//   - CSRF: /api/me·/api/me/*·/api/admin/*·/api/setup·/api/setup/* 의 GET·HEAD 아닌 요청은 정확한 Origin 을 요구한다. Origin 이 없어도 403.
 //     세션 쿠키가 SameSite=Lax 라도 같은 사이트의 다른 하위 도메인 페이지는 쿠키를 실어 보낼 수 있다 (7장 "변경 API 는 CSRF 보호").
 //   - 세션: Better Auth get-session 으로 회원 id 만 얻고, 역할·상태·한도는 DB 에서 읽는다 (세션 응답의 값을 믿지 않는다).
 //   - 요청 수 제한: 키 발급·재발급은 회원당 1시간 10회, 클라이언트 IP 당 1시간 30회 (계획서 v5.6 Q4). 저장소는 rate_limit 테이블이라
@@ -32,8 +32,8 @@ export function sameOrigin(services: () => Promise<Services>): MiddlewareHandler
   };
 }
 
-/** 요청의 세션 회원. 세션이 없거나 DB 에 회원이 없으면 401 응답 */
-export async function sessionMember(c: Context, s: Services): Promise<Member | Response> {
+/** 회원·관리자 공용 조회. authoritative 인증 응답이 없거나 DB 에 회원이 없으면 401 */
+async function readSessionMember(c: Context, s: Services): Promise<Member | Response> {
   const probe = new Request(new URL("/api/auth/get-session", c.req.url), { headers: { cookie: c.req.header("cookie") ?? "" } });
   const res = await s.auth.handler(probe);
   const session = res.ok ? ((await res.json().catch(() => null)) as { user?: { id?: unknown } } | null) : null;
@@ -41,6 +41,14 @@ export async function sessionMember(c: Context, s: Services): Promise<Member | R
   if (typeof userId !== "string") return c.json({ error: "unauthorized" }, 401);
   const member = await readMember(s.db, userId);
   if (!member) return c.json({ error: "unauthorized" }, 401);
+  return member;
+}
+
+/** 일반 회원 API. 인증이 반환한 회원도 현재 DB 상태가 active 가 아니면 접근을 막는다 */
+export async function sessionMember(c: Context, s: Services): Promise<Member | Response> {
+  const member = await readSessionMember(c, s);
+  if (member instanceof Response) return member;
+  if (member.status !== "active") return c.json({ error: "member_inactive" }, 403);
   return member;
 }
 
@@ -63,7 +71,8 @@ export async function readMember(h: DbHandle, userId: string): Promise<Member | 
 
 /** 관리자 세션. 역할은 DB 에서 읽는다. 세션 없음 401, 관리자가 아니거나 활성 상태가 아니면 403 응답 */
 export async function sessionAdmin(c: Context, s: Services): Promise<Member | Response> {
-  const m = await sessionMember(c, s);
+  // 일반 회원의 member_inactive 오류와 분리해 기존 관리자 API 의 forbidden 계약을 유지한다.
+  const m = await readSessionMember(c, s);
   if (m instanceof Response) return m;
   if (m.role !== "admin" || m.status !== "active") return c.json({ error: "forbidden" }, 403);
   return m;

@@ -2,11 +2,15 @@
 // 이메일 없는 초대는 링크를 쥔 사람이 아무 이메일로나 수락할 수 있어 공개 가입과 같은 위험이다 (M3.T2 보안 리뷰 H-1).
 // JWT에는 원문 해시 대신 회원·credential에 묶인 HMAC을 넣는다. DB의 조건부 UPDATE가 일회용 소비점이다.
 import { tryGetCurrentAuthEndpointContext } from "@better-auth/core/context";
+import { BASE_ERROR_CODES } from "@better-auth/core/error";
 import { APIError, createAuthEndpoint, getAuthoritativeSessionFromCtx, getSessionFromCtx } from "better-auth/api";
 import { setSessionCookie } from "better-auth/cookies";
 import { parseUserOutput } from "better-auth/db";
 import { constantTimeEqual, signJWT, verifyJWT } from "better-auth/crypto";
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { activeAuthUser, aliveAuthUser, validAuthVersion } from "./auth-version.ts";
+import { credentialWriter, observedAuthVersion } from "./safe-reset-adapter.ts";
+import type { User } from "better-auth";
 import type { AuthConfig, MailMessage } from "./index.ts";
 import { VERIFY_EMAIL_EXPIRES_S } from "@magnetosphere/db/src/signup.ts";
 import { verifyEmailMessage } from "./mail/messages.ts";
@@ -20,7 +24,8 @@ type Context = any;
 const invalidProof = () => new APIError("UNAUTHORIZED", { code: "INVALID_CONFIRMATION", message: "인증 링크나 비밀번호를 확인해 주세요" });
 /** H1 확인 흐름을 타는 가입 경로 */
 const CONFIRMED_ORIGINS = ["public", "invite"];
-const staleLogin = () => new APIError("UNAUTHORIZED", { code: "INVALID_EMAIL_OR_PASSWORD", message: "다시 로그인해 주세요" });
+// core의 없는 메일/틀린 비밀번호와 같은 생성 경로를 쓴다. new APIError({code,message})는 본문 필드 순서가 달라 계정 존재가 드러난다 (M4.T3.invalid).
+const staleLogin = () => APIError.from("UNAUTHORIZED", BASE_ERROR_CODES.INVALID_EMAIL_OR_PASSWORD);
 
 /** 요청 전용 문맥에 id만 기록한다. 가입 트랜잭션 안에서 바깥 DB 연결을 읽지 않는다. */
 export function queueConfirmationMail(userId: string): void {
@@ -51,15 +56,16 @@ export function signupConfirmation(cfg: AuthConfig, deliver: (m: MailMessage) =>
     const bytes = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message)));
     return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
   };
-  const activeUser = async (id: string) => {
-    const [user] = await db.select().from(u).where(eq(u.id, id)).limit(1);
-    return !!user && user.emailVerified && !user.deletedAt;
-  };
-  const validSession = async (row: any) => !!row && (row.credentialFingerprint ? matches(row.userId, row.credentialFingerprint) : activeUser(row.userId));
-  const matches = async (id: string, expected: string) => {
+  const writeCredential = credentialWriter(cfg);
+  const matches = async (id: string, expected: string | null, version: unknown) => {
+    if (!validAuthVersion(version)) return false;
     const { user, account } = await load(id);
-    return !!user && user.emailVerified && !user.deletedAt && !!account?.password && constantTimeEqual(await fingerprint(id, account), expected);
+    if (!aliveAuthUser(user) || user.authVersion !== version) return false;
+    // active의 OAuth·기존 NULL 지문은 유지한다. pending은 인증된 credential 문자열 지문만 허용한다.
+    if (activeAuthUser(user)) return expected === null || (typeof expected === "string" && !!account?.password && constantTimeEqual(await fingerprint(id, account), expected));
+    return user.status === "pending" && !!user.emailVerified && typeof expected === "string" && !!account?.password && constantTimeEqual(await fingerprint(id, account), expected);
   };
+  const validSession = async (row: any) => !!row && validAuthVersion(row.authVersion) && row.expiresAt > new Date() && matches(row.userId, row.credentialFingerprint ?? null, row.authVersion);
   const proof = async (token: unknown) => {
     if (typeof token !== "string" || token.length > 4096) throw invalidProof();
     const p = await verifyJWT<any>(token, cfg.secret);
@@ -105,6 +111,19 @@ export function signupConfirmation(cfg: AuthConfig, deliver: (m: MailMessage) =>
 
   return {
     plugin: { id: "signup-confirmation", endpoints: { getSignupConfirmation: getConfirmation, confirmSignupEmail: confirmEmail } },
+    /** HTTP/auth.api 엔드포인트가 아니다. createAuth가 서버 내부 self-delete proof로만 노출한다. */
+    async selfDeleteCredentialProof(input: { userId: string; sessionId: string; password: string }, verify: (input: { hash: string; password: string }) => Promise<boolean>) {
+      if (typeof input?.userId !== "string" || typeof input?.sessionId !== "string" || typeof input?.password !== "string" || input.password.length > 128) return null;
+      const { user, account } = await load(input.userId);
+      const [session] = await db.select().from(s).where(and(eq(s.id, input.sessionId), eq(s.userId, input.userId))).limit(1);
+      // role member/admin 둘 다 허용한다. bootstrap·마지막 관리자 보호는 삭제 primitive가 판정한다.
+      if (!activeAuthUser(user) || !["member", "admin"].includes(user.role) || !account?.password || !(await validSession(session))) return null;
+      const currentCredentialFingerprint = await fingerprint(user.id, account);
+      // 저장된 string fingerprint만 현재 HMAC과 비교한다. NULL은 재바인딩하지 않고 그대로 반환한다.
+      if ((session.credentialFingerprint !== null && !constantTimeEqual(session.credentialFingerprint, currentCredentialFingerprint)) || !(await verify({ hash: account.password, password: input.password }))) return null;
+      // passwordHash는 서버 내부 CAS proof 값이다. 호출자는 HTTP/JSON/logger/cause에 넣지 않는다.
+      return { authVersion: user.authVersion, accountId: account.id, passwordHash: account.password, observedSessionFingerprint: session.credentialFingerprint, currentCredentialFingerprint };
+    },
     async sendQueuedMail(ctx: Context) {
       const id = ctx.context[MAIL_USER];
       delete ctx.context[MAIL_USER];
@@ -134,7 +153,8 @@ export function signupConfirmation(cfg: AuthConfig, deliver: (m: MailMessage) =>
       const [user] = await db.select().from(u).where(eq(u.email, ctx.body?.email ?? "")).limit(1);
       if (!user) return;
       const { account } = await load(user.id);
-      if (account?.password) ctx.context[LOGIN] = { id: user.id, fingerprint: await fingerprint(user.id, account) };
+      // 비밀번호 검증 전에는 존재/상태/잘못된 DB 버전에 따른 오류를 반환하지 않는다.
+      ctx.context[LOGIN] = { id: user.id, version: user.authVersion, fingerprint: account?.password ? await fingerprint(user.id, account) : null };
     },
     async changePassword(ctx: Context) {
       if (ctx.path !== "/change-password") return;
@@ -146,63 +166,62 @@ export function signupConfirmation(cfg: AuthConfig, deliver: (m: MailMessage) =>
       if (newPassword.length > ctx.context.password.config.maxPasswordLength || currentPassword.length > ctx.context.password.config.maxPasswordLength) throw bad("PASSWORD_TOO_LONG");
       const session = await getAuthoritativeSessionFromCtx(ctx);
       if (!session?.session) throw staleLogin();
+      const [currentSession] = await db.select().from(s).where(and(eq(s.token, session.session.token), eq(s.userId, session.user.id))).limit(1);
       const { user, account } = await load(session.user.id);
-      if (!user?.emailVerified || user.deletedAt || !account?.password) throw staleLogin();
+      // getSession의returned:false 출력에는authVersion이 없다. 원본세션을 다시 읽고검증한다.
+      if (!activeAuthUser(user) || !account?.password || !(await validSession(currentSession))) throw staleLogin();
+      session.session = currentSession;
       const oldFingerprint = await fingerprint(user.id, account);
       if (session.session.credentialFingerprint && !constantTimeEqual(session.session.credentialFingerprint, oldFingerprint)) throw staleLogin();
-      const keptSessions = revokeOtherSessions ? [] : await db.select({ id: s.id, fingerprint: s.credentialFingerprint }).from(s).where(and(eq(s.userId, user.id), or(eq(s.credentialFingerprint, oldFingerprint), isNull(s.credentialFingerprint))));
       const password = await ctx.context.password.hash(newPassword);
       if (!(await ctx.context.password.verify({ hash: account.password, password: currentPassword }))) throw bad("INVALID_PASSWORD");
-      const samePassword = provider === "mysql" ? sql`binary ${a.password} = binary ${account.password}` : eq(a.password, account.password);
-      // reset이 세션을 지우거나 credential을 바꾼 뒤에는 오래된 검증 결과로 덮어쓰지 않는다.
-      const alive = sql`exists (select 1 from ${s} where ${s.id} = ${session.session.id} and ${s.userId} = ${user.id})`;
-      const update = db.update(a).set({ password, updatedAt: new Date() }).where(and(credentialWhere(user.id), eq(a.id, account.id), samePassword, alive));
-      let changed: number;
-      try {
-        changed = provider === "mysql" ? (await update)[0].affectedRows : (await update.returning({ id: a.id })).length;
-      } catch {
-        throw new APIError("INTERNAL_SERVER_ERROR", { code: "PASSWORD_CHANGE_FAILED", message: "비밀번호를 바꾸지 못했어요" });
-      }
-      if (changed !== 1) throw staleLogin();
       const expected = await fingerprint(user.id, { ...account, password });
-      ctx.context[CHANGE] = { id: user.id, fingerprint: expected };
+      const version = await writeCredential({ userId: user.id, version: user.authVersion, password, account, session: session.session, mode: "change", fingerprint: expected, rotate: revokeOtherSessions === true });
+      // absent/false도 타 세션은 항상 삭제한다. 현재 세션 하나만 새 지문·버전으로 유지한다.
+      ctx.context[CHANGE] = { id: user.id, fingerprint: expected, version };
       let token = null;
       if (revokeOtherSessions) {
-        await ctx.context.internalAdapter.deleteUserSessions(user.id);
         const created = await ctx.context.internalAdapter.createSession(user.id);
         if (!created) throw staleLogin();
         token = created.token;
-        if (!(await matches(user.id, expected))) {
+        if (!(await matches(user.id, expected, version))) {
           await db.delete(s).where(eq(s.id, created.id));
           throw staleLogin();
         }
-        await setSessionCookie(ctx, { session: created, user: session.user });
-      } else {
-        try {
-          // 변경 전에 존재했고 옛 credential에 속한 세션만 유지한다. 늦은 로그인이나 다른 변경의 세션은 재바인딩하지 않는다.
-          if (keptSessions.length) await db.update(s).set({ credentialFingerprint: expected }).where(and(or(...keptSessions.map((row: any) => and(eq(s.id, row.id), row.fingerprint === null ? isNull(s.credentialFingerprint) : eq(s.credentialFingerprint, row.fingerprint)))), eq(s.userId, user.id), sql`exists (select 1 from ${a} where ${a.id} = ${account.id} and ${provider === "mysql" ? sql`binary ${a.password} = binary ${password}` : eq(a.password, password)})`));
-        } catch {
-          throw new APIError("INTERNAL_SERVER_ERROR", { code: "PASSWORD_CHANGE_FAILED", message: "비밀번호를 바꾸지 못했어요" });
-        }
+        const versionedUser: User & { authVersion: number } = { ...session.user, authVersion: version };
+        await setSessionCookie(ctx, { session: created, user: versionedUser });
       }
-      if (!(await matches(user.id, expected))) throw staleLogin();
-      return ctx.json({ token, user: parseUserOutput(ctx.context.options, session.user) });
+      if (!(await matches(user.id, expected, version))) {
+        ctx.context.responseHeaders?.delete("set-cookie");
+        throw staleLogin();
+      }
+      return ctx.json({ token, user: parseUserOutput(ctx.context.options, { ...session.user, authVersion: version }) });
     },
     async sessionBefore(session: any, ctx: Context) {
       if (ctx?.path === "/change-password") {
         const snapshot = ctx.context[CHANGE];
-        if (!snapshot || snapshot.id !== session.userId || !(await matches(session.userId, snapshot.fingerprint))) throw staleLogin();
-        return { data: { ...session, credentialFingerprint: snapshot.fingerprint } };
+        if (!snapshot || snapshot.id !== session.userId || !(await matches(session.userId, snapshot.fingerprint, snapshot.version))) throw staleLogin();
+        return { data: { ...session, credentialFingerprint: snapshot.fingerprint, authVersion: snapshot.version } };
       }
-      if (ctx?.path !== "/sign-in/email") return;
-      const snapshot = ctx.context[LOGIN];
-      if (!snapshot || snapshot.id !== session.userId || !(await matches(session.userId, snapshot.fingerprint))) throw staleLogin();
-      return { data: { ...session, credentialFingerprint: snapshot.fingerprint } };
+      if (ctx?.path === "/sign-in/email") {
+        const snapshot = ctx.context[LOGIN];
+        const { user, account } = await load(session.userId);
+        // 설치된 core는 password.verify 성공 뒤 여기 온다. wrong password/없는 mail은 이 훅을 타지 않는다.
+        if (!snapshot || snapshot.id !== session.userId || !validAuthVersion(snapshot.version) || !validAuthVersion(user?.authVersion) || user.authVersion !== snapshot.version || user.deletedAt || user.status === "deleted" || !account?.password || typeof snapshot.fingerprint !== "string" || !constantTimeEqual(await fingerprint(user.id, account), snapshot.fingerprint)) throw staleLogin();
+        if (user.status === "suspended") throw new APIError("FORBIDDEN", { code: "ACCOUNT_SUSPENDED", message: "account_suspended" });
+        if (!(await matches(session.userId, snapshot.fingerprint, snapshot.version))) throw staleLogin();
+        return { data: { ...session, credentialFingerprint: snapshot.fingerprint, authVersion: snapshot.version } };
+      }
+      // OAuth/link-account는 canonical findOne의 최초 version만 쓴다. 생성 직전 현재 version으로 다시 바인딩하지 않는다.
+      const version = observedAuthVersion(session.userId);
+      const { user, account } = await load(session.userId);
+      if (version === undefined || !activeAuthUser(user) || user.authVersion !== version || (account?.password && typeof session.credentialFingerprint === "string" && !constantTimeEqual(await fingerprint(user.id, account), session.credentialFingerprint))) throw staleLogin();
+      return { data: { ...session, authVersion: version } };
     },
-    async sessionAfter(session: any) {
-      if (!session?.credentialFingerprint) return;
-      if (!(await matches(session.userId, session.credentialFingerprint))) {
+    async sessionAfter(session: any, ctx: Context) {
+      if (!(await validSession(session))) {
         await db.delete(s).where(eq(s.id, session.id));
+        ctx?.context?.responseHeaders?.delete("set-cookie");
         throw staleLogin();
       }
     },
@@ -229,9 +248,9 @@ export function signupConfirmation(cfg: AuthConfig, deliver: (m: MailMessage) =>
       throw staleLogin();
     },
     async guardSignInResponse(ctx: Context) {
-      if (ctx.path !== "/sign-in/email" || ctx.context.returned instanceof Error) return;
-      const snapshot = ctx.context[LOGIN];
-      if (!snapshot || !(await matches(snapshot.id, snapshot.fingerprint))) {
+      if (!["/sign-in/email", "/change-password"].includes(ctx.path) || ctx.context.returned instanceof Error) return;
+      const snapshot = ctx.context[ctx.path === "/change-password" ? CHANGE : LOGIN];
+      if (!snapshot || !(await matches(snapshot.id, snapshot.fingerprint, snapshot.version))) {
         const token = ctx.context.returned?.token;
         if (token) await db.delete(s).where(eq(s.token, token));
         ctx.context.responseHeaders?.delete("set-cookie");

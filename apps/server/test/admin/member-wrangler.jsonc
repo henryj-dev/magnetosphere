@@ -1,0 +1,10 @@
+{
+  // M4.T1 D1 시험 전용. 작성만 승인됐으며 기동·마이그레이션·배포는 실행하지 않는다.
+  "name": "mg-server-members-test",
+  "main": "./member-worker.ts",
+  "compatibility_date": "2026-07-29",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    { "binding": "DB", "database_name": "mg-server-members-test", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "../../../../packages/db/migrations/sqlite" }
+  ]
+}

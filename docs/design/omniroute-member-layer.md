@@ -8,6 +8,7 @@
 상태: 초안 v5.8 (설계 검토 1회 + S1 확인 + S2 리뷰 + S4 보안 리뷰 + K0 확인 + 3단계 M0 확인 반영)
 
 변경 이력
+- 2026-10-15 후속 결정: Q7 의 `pending` 로그인 차단을 이메일 인증·현재 non-null credential 지문·`authVersion` 일치 조건부 허용으로 보완한다 (4.5). 아래 v5.8 변경 이력은 당시 결정 그대로 남긴다. 키 권한·`activeAuthUser`·비밀번호 변경·자기 탈퇴·OAuth/NULL 지문 허용 범위는 넓히지 않는다.
 - v5.8: 3단계 M0 확인(`../verify/` V29~V32)과 3단계 질문 결정(모두 추천안, 2026-10-11) 반영. Q1 설치 뒤 공개 가입 일괄 차단은 보안 고침 #13 으로 이미 들어감. Q2 3단계는 API 만, 로그인·가입·초대 수락 화면은 4단계 앞머리 (6장). Q3 초대는 `invite_only`·`open`·`domain_allowlist`에서만. Q4 초대는 한 번만, 만료 기본 7일·최대 30일, 이메일 지정 초대는 그 이메일로만, 취소 가능. Q5 이메일 지정 초대 수락 = 인증됨, 메일 없는 설치는 이메일 없는 링크 불가. Q6 승인은 자기 가입에만. Q7 `pending`·`suspended` 로그인 차단. Q8 상태 전이 넷, 거절 = 행 삭제. Q9 삭제 회원은 행을 남기고 개인정보·토큰을 지움. Q10 자기 탈퇴. Q11 역할 둘 그대로. Q12 최초·마지막 활성·자기 자신 관리자 보호. Q13 하루 상한은 실제로 생긴 자기 가입만 커밋 뒤 셈. Q14 도메인 정확히 일치·이메일 변경 막음. Q15 메일 = `mail_settings` 행, fail-closed. Q16 가입 때 기본 한도 복사, 설정 API 는 null 을 받지 않음. Q17 3단계 상태 변경을 모두 감사 기록 (개인정보 없음·무기한). Q18 켜진 IdP 가 없으면 `sso_only` 저장 거부. Q19 정책 거부는 403·사유 코드. Q20 설치 뒤 메일 설정 API. 확인 결과로 가입 거부 사유는 이메일을 찾기 전 `hooks.before`에 두고 생성 훅은 뒷받침 (V29), 세션 행 삭제는 바로 걸림 (V30), 로그인 차단은 `session.create.before` (V31), 이메일 변경·회원 삭제 경로는 기본으로 닫힘 (V32). V29 가 막은 것 둘: D1 은 Better Auth 트랜잭션을 켜면 가입·재설정·OAuth/SSO JIT 가 500 (3단계 전 고침 PR #15 (`fix/d1-transaction`) 이 D1 에서 끈다), Node SQLite 는 동시 가입이 `SQLITE_BUSY`로 깨짐 (3단계 M2 가 고친다) (3.2). 5.9 의 낡은 문장(사용량 데이터를 DB 에 두지 않음)을 `usage_daily`에 맞춤.
 - v5.7: 확인 15번 결정(선택지 B). 1분 분배는 오늘(UTC) 창만 분석으로 부르고, 지난 날 몫은 `usage_daily`에 키·날짜별로 저장한다. 날이 바뀐 첫 분배가 어제를 확정 저장하고, 하루 한 번 이번 달 1일~어제를 다시 불러 대조한다(차이는 `alert.usage_drift`). 측정 기준은 오늘 창 p95 ≤ 2초·회원 하나 ≤ 1초·대조 ≤ 임대 55초 (5.3·5.4·5.9·8장).
 - v5.6: K0 확인(`../verify/` V12·V13·V15·V18·V19·V20)과 설계 공백 결정 반영. Q1 남은 한도가 0 이면 키를 끈다(`disabled_reason` `limit`, 한도가 다시 생기면 자동으로 켬, 목표 상태 입력에 남은 한도). Q2 재시도 간격 1분·2분·10분·30분 (실행기 최소 주기 1분). Q3 4번째 재시도 실패 → 작업 `failed`·키 `sync_state` `failed`, 정합성 점검이 계속 다시 맞추고 `failed` 30분이 지나면 "오래 실패". Q4 키 발급 요청 수 제한 회원당 1시간 10회·IP 당 1시간 30회 (429). Q5 1분 분배가 달 바뀜을 스스로 판단 (월간 cron 없음). Q6 "관리자에게 알린다" = `audit_log` action `alert.<종류>`. 확인 결과로 재발급은 `regenerate` 대신 새 키 발급 + 옛 키 삭제, 삭제는 끄고 60초가 지난 뒤 `DELETE` (V18·V19), 쿼터 풀 공동 예산은 쓰지 않고 분배 유지 (V12), 월 기준은 UTC (V20). 확인 15번(분석 API 성능)은 기준을 넘어 5.3 의 1분 분배 분석 호출 방식이 아직 열려 있다.
@@ -268,13 +269,17 @@ DB 지원 원칙
 - **세션 무효화**: 다음 경우에 해당 회원의 모든 세션 행을 지운다. Better Auth 쿠키 캐시(`session.cookieCache`)는 켜지 않는다. 꺼져 있으면 세션 행을 지운 다음 요청부터 세션이 없다. 켜면 지운 세션이 캐시 수명 동안 살아 있다 (V30).
   - 역할 변경, 정지, 탈퇴
   - IdP 삭제·비활성화 (그 IdP로 만든 세션)
-  - 비밀번호 변경 (현재 세션 제외). Better Auth `/change-password`는 클라이언트가 `revokeOtherSessions`를 보낼 때만 다른 세션을 지우므로 서버가 강제한다 (V30)
-  - 비밀번호 재설정 (모든 세션). `revokeSessionsOnPasswordReset`을 켠다. 꺼져 있으면(지금) 재설정 뒤에도 세션이 그대로다 (V30)
-- 로그인과 정지가 겹치면 `databaseHooks.session.create.after`에서 방금 만든 세션 행을 지운다. 그 응답의 쿠키는 바로 쓸모없어진다 (V31).
+  - 비밀번호 변경 (현재 세션 제외). 역사적 SDK+H1 측정은 `revokeOtherSessions`를 보낼 때만 다른 세션을 지웠다. 운영 M4 는 그 값과 관계없이 서버가 타 세션 폐기를 강제한다 (V30)
+  - 비밀번호 재설정 (모든 세션). `revokeSessionsOnPasswordReset`을 켠다. 꺼진 구성에서 재설정 뒤 세션이 남았다는 V30 결과는 당시 측정이다.
+- 로그인과 상태 변경이 겹치면 `databaseHooks.session.create.after`가 상태·credential 지문·`authVersion`을 다시 확인해 조건에 맞지 않는 세션 행을 지운다. 그 응답의 쿠키는 바로 쓸모없어진다 (V31, 2026-10-15 후속 결정).
+- 측정과 운영은 구분한다. V29 `plain`은 그대로이며 V30·V31·V32 raw 는 M4 방어를 제외한 역사적 SDK+H1 구성이다. H1 확인 흐름·가입 gate·가입 응답 trim 을 포함하므로 순수 SDK가 아니다. 당시 타 세션 유지 측정과 운영 M4 의 비밀번호 변경 시 타 세션 강제 폐기는 다른 계약이다. JSON·봉인·과거 통과 기록은 바꾸지 않고, 구성 읽기 검수를 런타임 재검 증거로 쓰지 않는다.
+- 자기 탈퇴의 내부 proof 는 `@magnetosphere/auth/internal`(`./internal`) WeakMap에 `createAuth` 원본 반환 객체로만 연결한다. own 키는 `handler`·`api` 둘, 루트 런타임 export는 기존 일곱, `SelfDeleteCredentialProof`는 type-only 호환 export다. spread 사본·미등록 조회는 고정 오류를 던지고 중복 등록은 거부한다. internal 경로는 import 가능하며 보안 경계가 아니다.
 
-회원 상태 (v5.8)
+회원 상태 (v5.8, 로그인은 2026-10-15 후속 결정 반영)
 - 전이는 넷만 허용하고 그 밖은 409 다: `pending → active`(승인), `pending → 행 삭제`(거절. 키·사용 기록이 없으므로 같은 이메일로 다시 가입할 수 있게 지운다), `active ↔ suspended`, `active·suspended → deleted`(되돌릴 수 없음).
-- `pending`·`suspended` 회원은 로그인되지 않는다. 비밀번호가 맞을 때만 403 `account_pending`·`account_suspended`를 내고 세션을 만들지 않는다. 틀린 비밀번호는 상태와 관계없이 401 이라 상태로 계정 존재가 더 드러나지 않는다. 자리는 `databaseHooks.session.create.before`다. 비밀번호 재설정·이메일 인증 링크는 세션을 만들지 않는다 (`autoSignInAfterVerification` 꺼짐) (V31).
+- v5.8 당시 결정: `pending`·`suspended` 회원은 로그인되지 않는다. 비밀번호가 맞을 때만 403 `account_pending`·`account_suspended`를 내고 세션을 만들지 않는다. 틀린 비밀번호는 상태와 관계없이 401 이라 상태로 계정 존재가 더 드러나지 않는다. 자리는 `databaseHooks.session.create.before`다. 비밀번호 재설정·이메일 인증 링크는 세션을 만들지 않는다 (`autoSignInAfterVerification` 꺼짐) (V31). 이 문장은 당시 이력이며 현행 로그인 조건은 다음 줄을 따른다.
+- 현행: 이메일 인증된 `pending`은 non-null credential 지문이 현재 credential과 같고 `authVersion`도 같을 때 이메일 로그인·세션을 허용한다. 미인증은 차단한다. `suspended`는 올바른 비밀번호 확인 뒤 403 `account_suspended`, 없는 이메일·틀린 비밀번호·삭제 회원은 같은 본문의 401 이다. 앞·뒤 세션 훅과 요청 시 판정이 상태·지문·버전을 다시 확인한다.
+- `activeAuthUser`는 넓히지 않는다. `pending`의 키 목록·PATCH·발급 제한은 유지한다. 비밀번호 변경·자기 탈퇴·OAuth/NULL 지문 허용을 `pending`으로 넓히지 않는다. 승인 때 `authVersion`을 올리고 기존 세션을 폐기하므로 다시 로그인해야 한다.
 - 관리자 보호: 최초 관리자(`is_bootstrap_admin`)는 강등·정지·삭제할 수 없다. 마지막 활성 관리자는 강등·정지·삭제할 수 없다. 자기 자신은 강등·정지할 수 없다. 관리자가 다른 관리자를 정지하는 것은 된다.
 - 탈퇴: 관리자 삭제와 자기 탈퇴(`DELETE /api/me` + 비밀번호 재확인, 최초 관리자는 불가). `open` 정책에서 외부 사용자가 자기 계정을 지울 길이 있어야 한다.
 - 삭제한 회원의 데이터: `user` 행은 남기고 개인정보를 지운다 (이메일 `deleted-<id>@invalid`, 이름 빈 값, `deleted_at`). `account`·`session`, 그 회원의 `verification` 행(재설정 토큰 값이 회원 id 다)은 지운다. `api_keys` 행(`deleted`, 사용액 근거)·OmniRoute 기록·`usage_daily`·`audit_log`는 남긴다. OmniRoute 키는 5.2 순서(끄기 → 60초 → `DELETE`)로 지운다. 회원 한도는 계정 단위라 같은 사람이 탈퇴 뒤 다시 가입하면 그달 한도를 새로 받는다. `open`에서는 다른 이메일로 가입해도 같으므로 사람 단위 한도는 지킬 수 없다 — 운영 문서에 적는다.

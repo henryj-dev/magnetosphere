@@ -59,6 +59,22 @@ export interface Table {
 
 const now = { kind: "timestamp", notNull: true, defaultNow: true } as const;
 
+/**
+ * 회원별 인증 버전 계약 (M4 ABA). credential 지문·updatedAt 과 별개이며 둘 다 서버 전용이다.
+ * 기존 행과 새 행의 시작값은 0 이다. 권한·상태·credential 변경은 DB 식 `auth_version + 1` 로만 1 씩 늘리고,
+ * 이전 값으로 되돌리거나 updatedAt 으로 계산하지 않는다. 증가 결과가 이 상한을 넘으면 변경은 실패하며 순환하지 않는다.
+ *
+ * 상한 2147483647 은 세 방언 integer 범위의 공통 최댓값이다.
+ *   sqlite integer: 64비트 저장이지만 Drizzle 은 JS number 로 읽고, 2^53-1 까지만 정수를 정확히 나타낸다
+ *   mysql int: 부호 있는 32비트, -2147483648..2147483647
+ *   pg integer: 부호 있는 32비트, -2147483648..2147483647
+ * MySQL·Postgres 가 가장 좁고 그 최댓값이 2147483647 이다. 다음 값 2147483648 은 그 두 DB 가 거부한다.
+ * SQLite integer 에는 32비트 CHECK 가 없어 2147483648 도 저장되므로, 스키마가 아닌 애플리케이션 SQL 조건
+ * `auth_version < AUTH_VERSION_MAX` 가 세 방언의 공통 증가 가드다. 현재 값이 상한이면 증가 SQL 을 실행하지 않고 실패시킨다.
+ */
+export const AUTH_VERSION_DEFAULT = 0;
+export const AUTH_VERSION_MAX = 2147483647;
+
 // Better Auth user 테이블에 더하는 칼럼 (계획서 4.6). 모두 input: false — 가입·회원정보 수정 요청으로 바꾸지 못한다.
 // Better Auth 구성은 src/auth-options.ts 의 AUTH_SCHEMA_OPTIONS 를 거쳐 이 객체를 user.additionalFields 로 쓴다.
 export const USER_ADDITIONAL_FIELDS = {
@@ -70,10 +86,14 @@ export const USER_ADDITIONAL_FIELDS = {
   // 기본값이 없어 가입 본문에 넣으면 400 FIELD_NOT_ALLOWED, 회원정보 수정도 400 이다 (TC-M1.T4.b)
   deletedAt: { type: "date", required: false, input: false },
   signupOrigin: { type: "string", required: false, defaultValue: "legacy", input: false, returned: false },
+  // 생성 본문의 값은 버리고 0 을 쓴다. 수정 본문에 값이 있으면 FIELD_NOT_ALLOWED 다. 응답·synthetic user 에도 없다 (M4 ABA).
+  authVersion: { type: "number", required: false, defaultValue: AUTH_VERSION_DEFAULT, input: false, returned: false },
 } as const;
 
 export const SESSION_ADDITIONAL_FIELDS = {
   credentialFingerprint: { type: "string", required: false, input: false, returned: false },
+  // 생성 본문의 값은 버리고 0 을 쓴다. 갱신 본문에 값이 있으면 FIELD_NOT_ALLOWED 다. 세션 응답에는 없다.
+  authVersion: { type: "number", required: false, defaultValue: AUTH_VERSION_DEFAULT, input: false, returned: false },
 } as const;
 
 export const TABLES: Record<string, Table> = {
@@ -81,7 +101,7 @@ export const TABLES: Record<string, Table> = {
   user: {
     name: "user",
     owner: "better-auth",
-    doc: "회원. Better Auth 칼럼 + 권한 칼럼 다섯 + 삭제 시각",
+    doc: "회원. Better Auth 칼럼 + 권한 칼럼 다섯 + 삭제 시각 + 인증 버전",
     columns: {
       id: { name: "id", kind: "id", primaryKey: true },
       name: { name: "name", kind: "text", notNull: true },
@@ -97,6 +117,7 @@ export const TABLES: Record<string, Table> = {
       isBootstrapAdmin: { name: "is_bootstrap_admin", kind: "boolean", notNull: true, default: false },
       deletedAt: { name: "deleted_at", kind: "timestamp", doc: "삭제(탈퇴) 시각. 개인정보를 지운 행이다 (Q9). NULL 이면 삭제되지 않음" },
       signupOrigin: { name: "signup_origin", kind: "string", length: 16, exact: true, notNull: true, default: "legacy", doc: "서버 전용 가입 출처: public | invite | setup | legacy. 기존 미인증 행은 추정하지 않는다" },
+      authVersion: { name: "auth_version", kind: "integer", notNull: true, default: AUTH_VERSION_DEFAULT, doc: "서버 전용 인증 버전. 0 부터 시작해 상태·권한·credential 변경 때 DB 에서 1 씩만 는다. AUTH_VERSION_MAX 를 넘기면 실패하고 순환하지 않는다" },
     },
   },
   session: {
@@ -113,6 +134,7 @@ export const TABLES: Record<string, Table> = {
       userAgent: { name: "user_agent", kind: "text" },
       userId: { name: "user_id", kind: "id", notNull: true, references: { table: "user", column: "id", onDelete: "cascade" } },
       credentialFingerprint: { name: "credential_fingerprint", kind: "string", length: 64, exact: true, doc: "서버 전용 credential HMAC. 비밀번호 변경 전 세션은 조회 때도 거부. NULL 은 기존·비비밀번호 세션" },
+      authVersion: { name: "auth_version", kind: "integer", notNull: true, default: AUTH_VERSION_DEFAULT, doc: "세션을 만들 때 관찰한 회원 인증 버전. 로그인 전 재바인딩하지 않으며 현재 user.auth_version 과 다르면 접근을 막는다" },
     },
     indexes: [{ name: "session_userId_idx", columns: ["userId"] }],
   },

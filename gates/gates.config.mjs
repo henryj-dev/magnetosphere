@@ -843,8 +843,57 @@ export const GATES = {
     needs: ["M3"],
     waivable: false,
     strictTests: true,
-    outputs: ["apps/server/src/admin/**", "apps/server/test/admin/**", "apps/server/src/sessions/**", "apps/server/test/sessions/**"],
-    checks: [],
+    outputs: [
+      "apps/server/src/admin/**", "apps/server/test/admin/**", "apps/server/src/sessions/**", "apps/server/test/sessions/**",
+      "packages/auth/src/auth-version.ts", "packages/auth/src/safe-reset-adapter.ts", "packages/auth/src/internal.ts",
+      "packages/auth/test/m4-session-version.test.ts", "packages/auth/test/m4-reset-delete.test.ts",
+      "packages/db/migrations/sqlite/0005_m4_auth_version.sql", "packages/db/migrations/mysql/0005_m4_auth_version.sql", "packages/db/migrations/pg/0005_m4_auth_version.sql",
+      "packages/db/migrations/sqlite/meta/0005_snapshot.json", "packages/db/migrations/mysql/meta/0005_snapshot.json", "packages/db/migrations/pg/meta/0005_snapshot.json",
+      "packages/db/test/migrate-0005.test.ts",
+    ],
+    // 초안. expectPassed: null 은 정적 선언·selector 가 확정되기 전의 미확정이다. strictTests 라 null 인 test 검사는 실패한다. 실행 결과에 맞춰 숫자를 고치지 않는다.
+    // G-M4.1·5·7·9·10 의 숫자는 시험 파일 텍스트의 정적 목록 기준이다 (it·it.each 인자 리터럴 전개). runner 가 센 수가 아니다.
+    // G-M4.2·4·6·8 의 숫자는 정적 추정이다 — 위 전개에 고른 DB 수를 곱했다 (DB 넷 또는 다섯). runner 가 센 수가 아니다.
+    // Red 검사(check-red.mjs)는 등록하지 않았다. Red 커밋(834c264)은 있지만 아직 실제로 돌려 빨강을 확인하지 않았다 — 확인 전에는 봉인하지 않는다.
+    // G-M4.2·6 의 숫자는 다른 시험이 더해지면 정적 선언으로 다시 센다 (지금 값은 시험 추가 전 기준이다).
+    checks: [
+      // M4.T1 회원 목록·상태 API
+      { id: "G-M4.1", how: "test", desc: "TC-M4.T1.a~f 목록·전이·권한·stale actor·K3 반영·거절 실패", cmd: 'pnpm -C apps/server test -t "TC-M4\\.T1\\.[a-f] "', expectPassed: 9 },
+      { id: "G-M4.2", how: "test", requires: ["local-services"], desc: "TC-M4.T1.db 회원 관리 뮤텍스·CAS (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-M4.T1.db" --db sqlite,mysql,mariadb,pg', expectPassed: 96 },
+      // G-M4.3: 시험이 beforeAll 에서 로컬 D1 과 시험 Worker 를 직접 띄운다 (member-wrangler.jsonc).
+      // 파일과 시험 이름으로 기존 롤백 시험 1개만 고른다 — 같은 파일에 D1 경쟁 시험이 더해져도 이 검사의 수는 1 로 남는다 (경쟁은 새 검사로 둔다)
+      // check-red 는 이 desc 를 G-M4.2 와 같은 TC-M4.T1.d 로 읽는다. G-M4.3 은 Red 대상이 아니라 Red 검사를 붙이지 않는다
+      { id: "G-M4.3", how: "test", requires: ["local-services"], desc: "TC-M4.T1.d1 실제 D1 batch 롤백 (D1)", cmd: 'pnpm -C apps/server test:workers test/admin/members.workers.test.ts -t "TC-M4\\.T1\\.d1 CAS 0행"', expectPassed: 1 },
+      // G-M4.4·6·8: 시험은 MG_TEST_DBS 가 없으면 sqlite 만 돈다. test:migrate 는 --db 로, auth test 는 명령 앞 MG_TEST_DBS 로 DB 를 고른다
+      { id: "G-M4.4", how: "test", requires: ["local-services"], desc: "TC-M4.T1.migration 0005 업그레이드 보존·auth_version 0 (다섯 DB)", cmd: 'pnpm -C packages/db test:migrate -t "TC-M4.T1.migration" --db sqlite,mysql,mariadb,pg,d1', expectPassed: 5 },
+      // M4.T2 관리자 삭제
+      { id: "G-M4.5", how: "test", desc: "TC-M4.T2.a-d 익명화·소유 토큰·키 보존·120초 큐·권한 경계", cmd: 'pnpm -C apps/server test -t "TC-M4.T2"', expectPassed: 1 },
+      // M4.T3 세션 상태·인증 버전
+      { id: "G-M4.6", how: "test", requires: ["local-services"], desc: "TC-M4.T3.a M4.T3 상태·버전·ABA·비밀번호 변경 세션 계약 (Node DB 넷)", cmd: 'MG_TEST_DBS=sqlite,mysql,mariadb,pg pnpm -C packages/auth test -t "M4.T3"', expectPassed: 97 },
+      { id: "G-M4.7", how: "test", desc: "TC-M4.T3.f 공용 앱 회원·관리자 route guard", cmd: 'pnpm -C apps/server test -t "TC-M4.T3.f"', expectPassed: 11 },
+      // M4.T4 reset/delete 경합·자기 탈퇴
+      { id: "G-M4.8", how: "test", requires: ["local-services"], desc: "TC-M4.T4.reset M4.T4 reset/delete 늦은 credential 쓰기 차단 (Node DB 넷)", cmd: 'MG_TEST_DBS=sqlite,mysql,mariadb,pg pnpm -C packages/auth test -t "M4.T4.reset-"', expectPassed: 24 },
+      { id: "G-M4.9", how: "test", desc: "TC-M4.T4.a 자기 탈퇴 proof·bootstrap·last admin·Origin", cmd: 'pnpm -C apps/server test -t "TC-M4.T4.a"', expectPassed: 1 },
+      // M4.T5 setup 관리자 판정
+      { id: "G-M4.10", how: "test", desc: "TC-M4.T5.a·b 활성 관리자·설치 Origin·설치 완료 판정", cmd: 'pnpm -C apps/server test -t "TC-M4.T5"', expectPassed: 6 },
+      // 타입
+      { id: "G-M4.11", how: "cmd", desc: "타입 검사", cmd: "pnpm -r typecheck" },
+      // 정적 검사: 설치 판정·재설정 세션 무효화·어댑터 경계 (실행 결과가 아니라 소스 문자열을 센다)
+      { id: "G-M4.12", how: "grep", desc: "설치 판정이 role 만 보지 않음 (setup 에 role === / !== \"admin\" 없음)", pattern: 'role\\s*(===|!==)\\s*"admin"', in: ["apps/server/src/setup"], op: "==", limit: 0 },
+      { id: "G-M4.13", how: "grep", desc: "재설정 뒤 세션 무효화 켬", pattern: "revokeSessionsOnPasswordReset: true", in: ["packages/auth/src"], op: "==", limit: 1 },
+      { id: "G-M4.14", how: "grep", desc: "어댑터 밖 OmniRoute 관리 호출 0 (G-K4.23 과 같은 패턴·범위)", pattern: "/api/(keys|usage)", in: ["apps", "packages"], exclude: ["packages/omniroute/**"], op: "==", limit: 0 },
+      // CI 단계 잡·필수 검사 (M4.T6)
+      { id: "G-M4.15", how: "grep", desc: "TC-M4.T6.a CI 단계 잡 (M4)", pattern: "^\\s+run: node scripts/gate\\.mjs M4\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
+      { id: "G-M4.16", how: "cmd", desc: "TC-M4.T6.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
+      // M4.T5.c 계약: 실제 OmniRoute 계약 환경이 필요하다. pnpm test:contract 실행기가 환경 띄우기와 준비(setup.mjs)를 스스로 한다
+      { id: "G-M4.17", how: "test", requires: ["local-services"], desc: "TC-M4.T5.c 정지 직후 첫 요청이 거부된다 (계약, 로컬 arm64·CI amd64)", cmd: 'pnpm test:contract -t "TC-M4.T5.c"', expectPassed: 1 },
+      // M4.T3 D1 세션: 시험 Worker(wrangler dev)로 도는 실제 D1 판. 선언 17 은 정적 목록 기준이다 (it·it.each 인자 전개)
+      { id: "G-M4.18", how: "test", requires: ["local-services"], desc: "TC-M4.T3.d1 실제 D1 세션 상태·버전·비밀번호 변경 (D1)", cmd: 'pnpm -C apps/server test:workers test/sessions/m4-session.workers.test.ts -t "TC-M4\\.T3\\.d1"', expectPassed: 17 },
+      // M4.T1.c·d·T2.d 경쟁·삭제: 선언 204 = DB 당 (T1.c 10 + T1.d 20 + T2.d 20 + 1) 51 × 4. 정적 목록 기준이다
+      { id: "G-M4.19", how: "test", requires: ["local-services"], desc: "TC-M4.T1.c·T1.d 동시 승인거절·마지막 관리자 경쟁, TC-M4.T2.d 삭제 뒤 재설정 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-M4\\.T1\\.c|TC-M4\\.T1\\.d |TC-M4\\.T2\\.d" --db sqlite,mysql,mariadb,pg', expectPassed: 204 },
+      // G-M4.20: 새 D1 경쟁 it 둘("TC-M4.T1.c D1:", "TC-M4.T1.d D1:")만 고른다. 롤백 it 이름은 "TC-M4.T1.d1 …" 라 "d D1" 에 걸리지 않는다
+      { id: "G-M4.20", how: "test", requires: ["local-services"], desc: "TC-M4.T1.c·d 실제 D1 동시 승인거절·상호 강등 경쟁 (D1)", cmd: 'pnpm -C apps/server test:workers test/admin/members.workers.test.ts -t "TC-M4\\.T1\\.(c|d) D1"', expectPassed: 2 },
+    ],
   },
   M5: {
     needs: ["M4"],

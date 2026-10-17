@@ -7,6 +7,10 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { authOptions, type AuthConfig } from "../../src/index.ts";
 import { withClientIp } from "../../src/rate-limit.ts";
+import { eq } from "drizzle-orm";
+import { decideSignup, loadSignupInputs } from "@magnetosphere/db/src/signup.ts";
+import { currentInvite } from "../../src/invite-context.ts";
+import { signupConfirmation } from "../../src/signup-confirmation.ts";
 import { accountOfUser, statusOf, userById, deleteSession } from "./ops.ts";
 
 /**
@@ -29,12 +33,13 @@ export type HookLog =
  *   create403·create400 user.create.before 가 APIError(403·400) — V29 (나)·(다)
  *   createData         user.create.before 가 { data: { emailVerified: true, status: "pending", monthlyLimitUsd: 5 } } — V29 (라)
  *   als                hooks.before·user.create.before·user.create.after 가 초대 문맥과 커밋 여부를 기록만 한다 — V29 (마)
+ *   sdkRaw             M4 방어를 제외한 역사적 SDK+H1 구성 — V30~V32
  *   resetRevoke        revokeSessionsOnPasswordReset: true — V30
  *   resetKeep          revokeSessionsOnPasswordReset: false — V30 의 "꺼짐" 측정 (M2 보안 리뷰 H1 로 지금 구성은 켜져 있다)
  *   sessionGuard       session.create.before 가 status suspended·pending 회원을 APIError(403, account_*) 로 거부 — V31
  *   sessionAfterDelete session.create.after 가 방금 만든 세션 행을 지운다 — V31
  */
-export const SCENARIOS = ["plain", "before403", "create403", "create400", "createData", "als", "resetRevoke", "resetKeep", "sessionGuard", "sessionAfterDelete"] as const;
+export const SCENARIOS = ["plain", "before403", "create403", "create400", "createData", "als", "sdkRaw", "resetRevoke", "resetKeep", "sessionGuard", "sessionAfterDelete"] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export const HOOK_DATA = { emailVerified: true, status: "pending", monthlyLimitUsd: 5 } as const;
@@ -44,18 +49,71 @@ const inviteId = () => inviteContext.getStore()?.inviteId ?? null;
 // 초대 문맥 호출을 hooks.before 에서 잡아 두는 자리 (concurrentSignUps). 잡혀 있는 동안 공개 요청 하나가 처음부터 끝까지 돈다
 const holds = new Map<string, Promise<void>>();
 
+/** SDK+H1 측정 전용이다. 운영 createAuth의 M4 세션·비밀번호 방어는 포함하지 않는다. */
+function rawBase(cfg: AuthConfig, transaction: boolean) {
+  const deliver = async (message: Parameters<AuthConfig["mailer"]["send"]>[0]) => {
+    cfg.waitUntil(cfg.mailer.send(message).catch((e) => cfg.onMailError(e, { to: message.to, subject: message.subject })));
+  };
+  const confirmation = signupConfirmation(cfg, deliver);
+  const base = authOptions(cfg, confirmation);
+  const { db, schema } = cfg.database as { db: any; schema: any };
+  return {
+    ...base,
+    database: drizzleAdapter(db, { provider: cfg.database.provider, schema, transaction }),
+    emailAndPassword: {
+      ...base.emailAndPassword,
+      // M4 전 H1 callback: SDK가 credential을 저장한 뒤 부른다. version writer·snapshot을 쓰지 않는다.
+      onPasswordReset: async ({ user }) => {
+        const [current] = await db.select().from(schema.user).where(eq(schema.user.id, user.id)).limit(1);
+        if (current?.role !== "member" || !["public", "legacy", "invite"].includes(current.signupOrigin) || current.deletedAt) return;
+        await db.update(schema.user).set({ emailVerified: true, updatedAt: new Date() }).where(eq(schema.user.id, user.id));
+      },
+    },
+    databaseHooks: { user: base.databaseHooks.user },
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        if (ctx.path.startsWith("/sign-up")) {
+          const load = () => loadSignupInputs(db, schema);
+          const inputs = await (cfg.signupInputs ? cfg.signupInputs(load) : load());
+          if (inputs.adminExists) {
+            const invite = currentInvite();
+            const decision = decideSignup({ inputs, email: ctx.body?.email, via: invite ? "invite" : "public", invite });
+            if (!decision.ok) throw new APIError("FORBIDDEN", { code: decision.code.toUpperCase(), message: decision.code });
+          }
+        }
+        const normalized = ["/sign-up/email", "/sign-in/email"].includes(ctx.path) && typeof ctx.body?.email === "string"
+          ? { context: { body: { ...ctx.body, email: ctx.body.email.trim().toLowerCase() } } }
+          : undefined;
+        if (normalized) ctx.body = normalized.context.body;
+        await confirmation.blockCoreVerification(ctx);
+        return normalized;
+      }),
+      after: createAuthMiddleware(async (ctx) => {
+        await confirmation.sendQueuedMail(ctx);
+        const result = ctx.context.returned as any;
+        if (ctx.path !== "/sign-up/email" || !result?.user || result instanceof Error) return;
+        const fields = ["id", "name", "email", "emailVerified", "image", "createdAt", "updatedAt"];
+        return ctx.json({ token: result.token ?? null, user: Object.fromEntries(fields.map((key) => [key, result.user[key] ?? null])) });
+      }),
+    },
+  } satisfies BetterAuthOptions;
+}
+
 /**
  * transaction: false 는 Better Auth 의 대화형 트랜잭션을 끈다. D1 은 대화형 트랜잭션이 없어 지금 구성(transaction: true)으로는
  * 가입이 drizzle 의 "begin" 에서 500 이다 (V29 d1Transaction). D1 시험 Worker 는 이 값을 끄고 나머지를 잰다.
  */
-export function probeOptions(cfg: AuthConfig, scenario: Scenario, log: HookLog[], { transaction = true }: { transaction?: boolean } = {}) {
-  const base = authOptions(cfg);
+export function probeOptions(cfg: AuthConfig, scenario: Scenario, log: HookLog[], o: { transaction?: boolean } | null = null) {
+  const transaction = o?.transaction ?? true;
+  const raw = ["sdkRaw", "resetRevoke", "resetKeep", "sessionGuard", "sessionAfterDelete"].includes(scenario);
+  const base = raw ? rawBase(cfg, transaction) : authOptions(cfg);
   const { db, schema } = cfg.database as { db: any; schema: any };
   const userCreate = base.databaseHooks.user.create;
   const opts: BetterAuthOptions = { ...base, databaseHooks: { ...base.databaseHooks } };
   if (!transaction) opts.database = drizzleAdapter(db, { provider: cfg.database.provider, schema, transaction: false });
   switch (scenario) {
     case "plain":
+    case "sdkRaw":
       break;
     case "before403":
       opts.hooks = {
@@ -143,7 +201,7 @@ export function probeOptions(cfg: AuthConfig, scenario: Scenario, log: HookLog[]
 }
 
 /** 시험 구성 하나의 인증 인스턴스. 운영 createAuth 와 같이 handler 는 클라이언트 IP 머리글을 붙여 감싼다 */
-export function probeAuth(cfg: AuthConfig, scenario: Scenario, log: HookLog[], o: { transaction?: boolean } = {}) {
+export function probeAuth(cfg: AuthConfig, scenario: Scenario, log: HookLog[], o: { transaction?: boolean } | null = null) {
   const auth = betterAuth(probeOptions(cfg, scenario, log, o));
   return { handler: withClientIp(auth.handler, cfg.clientIp), api: auth.api, options: auth.options };
 }

@@ -1,5 +1,6 @@
 // 서버 구성. 비밀 값은 런타임 어댑터의 secret() 으로 읽는다 (Node 는 환경 변수, Workers 는 env 바인딩).
 import { createAuth, type Mailer } from "@magnetosphere/auth";
+import { selfDeleteCredentialProofOf } from "@magnetosphere/auth/internal";
 import { createClient } from "@magnetosphere/omniroute";
 import { consoleMailer, MailError } from "@magnetosphere/auth/mail";
 import { createCipher } from "@magnetosphere/runtime/crypto";
@@ -71,5 +72,5 @@ export async function buildServices(rt: Runtime, opts: ServiceOptions): Promise<
     if (!baseUrl || !token) return null;
     return (o?: { timeoutMs?: number }) => createClient({ baseUrl, credential: { token }, timeoutMs: o?.timeoutMs });
   };
-  return { db, auth, cipher, omniroute, setupToken, clientIp: rt.clientIp, appOrigin: new URL(baseURL).origin, keysClient, mailer };
+  return { db, auth: { ...auth, selfDeleteCredentialProof: selfDeleteCredentialProofOf(auth) }, cipher, omniroute, setupToken, clientIp: rt.clientIp, appOrigin: new URL(baseURL).origin, keysClient, mailer };
 }

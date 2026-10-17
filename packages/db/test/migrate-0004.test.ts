@@ -24,7 +24,8 @@ async function open(kind: Kind): Promise<Upgrade> {
   cpSync(migrations(dialect), old, { recursive: true });
   const journalFile = path.join(old, "meta/_journal.json");
   const journal = JSON.parse(readFileSync(journalFile, "utf8"));
-  expect(journal.entries.at(-1).tag).toBe("0004_m2_confirmation");
+  // 0004가 다섯 번째 항목인지 본다. 뒤 마이그레이션(0005~)은 아래에서 걷어내고 rest()가 최신까지 올린다.
+  expect(journal.entries[4].tag).toBe("0004_m2_confirmation");
   for (const e of journal.entries.slice(4)) rmSync(path.join(old, `${e.tag}.sql`));
   journal.entries = journal.entries.slice(0, 4);
   writeFileSync(journalFile, JSON.stringify(journal));

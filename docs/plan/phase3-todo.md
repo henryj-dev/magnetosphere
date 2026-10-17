@@ -28,6 +28,8 @@ M0 확인에서 새로 안 사실 (2026-10-11, V29~V32, 계획서 v5.8)
 - 인증 메일은 생성 훅이 `emailVerified: true`를 넣어도 나간다 (V29 (라)). 이메일 지정 초대(Q5)는 발송기가 초대 문맥을 보고 건너뛴다 (M3.T2).
 - V32: 이메일 변경·회원 삭제 경로는 기본으로 닫혀 있다. M2.T1 이 `disabledPaths`에 더할 경로는 없고, 닫힌 채인지를 TC-M2.T1.d 가 고정한다.
 
+2026-10-15 구성 구분: V29 의 `plain`은 그대로 둔다. V30·V31·V32 의 raw 구성은 M4 방어를 제외한 역사적 SDK+H1 구성이며, H1 확인 흐름·가입 gate·가입 응답 trim 을 포함하므로 순수 SDK가 아니다. 당시 비밀번호 변경의 타 세션 유지 측정과 운영 M4 의 타 세션 강제 폐기는 구분한다. V29~V32 JSON·봉인·위 관찰과 M0 통과 기록은 바꾸지 않는다. 구성 읽기 검수는 런타임 재검 증거가 아니다.
+
 ### Q1 — 지금 열려 있는 공개 가입을 언제 막나
 - 조율 세션이 정했고 이미 main 에 들어갔다: PR #13 (`7e1b5bf`). 설치 뒤 공개 `/sign-up/*`는 정책과 관계없이 일괄 403 이다.
 - 영향: M2 는 #13 의 판정 위에 정책을 얹는다. `PUBLIC_SIGNUP_MODES`에 `open`·`domain_allowlist`를 넣고 도메인·메일·상한 판정을 더한다. 앞 판정 두 자리와 생성 훅 자리는 그대로 쓴다. M2.T1 의 재현 빨강은 "`open` + 메일 있음에서 공개 가입이 회원 행을 만든다"를 **생긴 행 수**로 단언한다. #13 위에서는 `PUBLIC_SIGNUP_MODES`가 비어 있어 `app.ts`가 403 으로 막으므로 0행, 빨강이다.
@@ -72,6 +74,7 @@ M0 확인에서 새로 안 사실 (2026-10-11, V29~V32, 계획서 v5.8)
 - (나) 로그인은 되고 `/api/me/*`만 막는다 (화면이 생기면 "승인 대기" 안내를 보여 줄 수 있다).
 - 영향: V31, TC-M4.T3.a·c·e.
 - 결정: (가) pending·suspended 모두 로그인 막음 (v5.8)
+- 후속 결정 (2026-10-15): 위 선택지와 결정은 당시 이력이다. 현행은 이메일 인증된 `pending`의 이메일 로그인·세션을 조건부 허용한다. 조건·제한은 M4.T3 의 후속 결정과 [계획서 4.5](../design/omniroute-member-layer.md#45-역할과-세션)를 따른다.
 
 ### Q8 — 상태 전이와 거절
 - (가) **전이를 아래 넷만 허용하고, 그 밖의 전이는 409 다 (추천)**.
@@ -1228,10 +1231,10 @@ TC-M4.T1.b  허용하지 않는 전이는 409 이고 아무것도 바뀌지 않�
   단언:  active 회원 approve → 409 invalid_transition, deleted 회원 unsuspend → 409, pending reject → user·account 0행·audit member.reject 1행
   검출:  상태를 검사 없이 덮어써 삭제(개인정보 지움)한 회원을 정지 해제로 active 로 되살리는 것
 TC-M4.T1.c  같은 회원에게 동시에 다른 동작 (다섯 DB)
-  단언:  pending 회원에 approve 와 reject 동시 → 하나만 200, 다른 하나 409, 최종 상태와 audit 1행이 서로 맞음 (sqlite·mysql·mariadb·pg, D1 은 G-M4.26)
+  단언:  pending 회원에 approve 와 reject 동시 → 하나만 200, 다른 하나 409, 최종 상태와 audit 1행이 서로 맞음 (sqlite·mysql·mariadb·pg, D1 은 G-M4.20). 진 쪽 기대: 409 또는 404 (거절이 이기면 지워진 회원이라 not_found)
   검출:  읽기 → 쓰기 두 단계라 거절로 지운 회원 행에 승인이 active 를 다시 쓰거나(행 0 갱신을 성공으로 봄) 감사 기록이 둘 다 남는 것
 TC-M4.T1.d  마지막 활성 관리자는 동시 강등·정지로도 사라지지 않는다 (Q12 의존, 다섯 DB)
-  단언:  최초 관리자 아닌 활성 관리자 둘(A·B)이 서로를 동시에 role member 20회 반복 → 매회 활성 관리자 ≥ 1, 진 쪽 409 last_admin. 서로 동시 suspend 도 같음. 최초 관리자 suspend → 409 bootstrap_admin, 자기 자신 suspend → 409 self (sqlite·mysql·mariadb·pg, D1 은 G-M4.27)
+  단언:  최초 관리자 아닌 활성 관리자 둘(A·B)이 서로를 동시에 role member 20회 반복 → 매회 활성 관리자 ≥ 1, 진 쪽 409 last_admin. 서로 동시 suspend 도 같음. 최초 관리자 suspend → 409 bootstrap_admin, 자기 자신 suspend → 409 self (sqlite·mysql·mariadb·pg, D1 은 G-M4.20). 상호 강등·정지에서 진 쪽 기대: 403 forbidden (requireActor 가 먼저 막아 쓰기 없음). last_admin 409 는 `members.db.test.ts` 의 기존 시험과 D1 롤백 lastAdmin 이 본다
   검출:  앱에서 관리자 수를 센 뒤 UPDATE 해 두 강등이 둘 다 통과하는 것, MySQL 에서 자기 테이블 서브쿼리 UPDATE 가 1093 으로 늘 실패해 강등 자체가 안 되는 것, Postgres READ COMMITTED 의 한 문장 조건이 경쟁을 못 막는 것
 TC-M4.T1.e  역할 값과 권한 (Q11 의존)
   단언:  role "owner" · "ADMIN" → 400, 회원 세션으로 모든 /api/admin/users* → 403, 정지된 관리자 → 403, 다른 출처 → 403 forbidden_origin
@@ -1242,7 +1245,7 @@ TC-M4.T1.f  목록은 비밀 값을 주지 않는다
 ```
 
 【통과】
-- [ ] G-M4.1 ~ G-M4.6 · G-M4.26 · G-M4.27 통과
+- [ ] G-M4.1 ~ G-M4.4 통과 (현행 번호). 옛 G-M4.3·26·4·27 의 approve/reject 동시·상호 강등 경쟁은 G-M4.19·G-M4.20 으로 등록했고 실행 전이다
 
 ### ☐ M4.T2 — 회원 삭제 (관리자) 🛡 보안 리뷰 (Q9 의존)
 선행 M4.T1 · 산출 `apps/server/src/admin/delete.ts` · 되돌리기 커밋 1개
@@ -1277,10 +1280,15 @@ TC-M4.T2.d  삭제 전에 받은 재설정 링크로 계정이 되살아나지 �
 ```
 
 【통과】
-- [ ] G-M4.7 ~ G-M4.9 · G-M4.28 통과
+- [ ] G-M4.5 통과 (현행 번호). G-M4.19 (실행 전) 가 옛 G-M4.28 의 삭제 뒤 재설정을 DB 넷에서 본다
 
 ### ☐ M4.T3 — 세션 무효화·로그인 차단·회원 판정 🛡 보안 리뷰 (V30·V31·Q7 의존)
 선행 M4.T1 · 산출 `apps/server/src/sessions/**`, `packages/auth/src/index.ts`, `apps/server/src/routes/guard.ts` · 되돌리기 커밋 3개 · 장치 요구 `Red: TC-M4.T3.a, TC-M4.T3.f`
+
+**후속 결정 (2026-10-15, Q7 보완)**
+- 이메일 인증된 `pending`은 non-null credential 지문이 현재 credential과 같고 `authVersion`도 같을 때 이메일 로그인·세션을 허용한다. 미인증은 차단한다. `suspended`는 올바른 비밀번호 확인 뒤 403 `account_suspended`, 없는 이메일·틀린 비밀번호·삭제 회원은 같은 본문의 401 이다.
+- `activeAuthUser`는 넓히지 않는다. `pending`의 키 목록·PATCH·발급 제한은 그대로다. 비밀번호 변경·자기 탈퇴·OAuth/NULL 지문 허용을 `pending`으로 넓히지 않는다. 승인 때 버전을 올리고 기존 세션을 폐기한다.
+- 기존 13파일은 독립 읽기 검수 APPROVE를 받았다. 기존 타입 검사 종료코드 0·TC-M2.T2.a 1개 통과는 그 범위의 증거이며, M4 완료·Workers 통과 증거는 아니다. 이 문서 보완에서는 실행 검증을 하지 않는다.
 
 【작업】
 1. 재현 시험 둘을 넣는다. 꼬리줄 `Red: TC-M4.T3.a, TC-M4.T3.f`. 커밋.
@@ -1291,11 +1299,13 @@ TC-M4.T2.d  삭제 전에 받은 재설정 링크로 계정이 되살아나지 �
    - 역할 변경·정지·삭제 때 모두 부른다.
    - 비밀번호 변경 때는 현재 세션을 뺀 나머지를 지운다. `/change-password` 뒤 `hooks.after`에서 하고, 클라이언트가 `revokeOtherSessions`를 보냈는지와 관계없다 (V30 b).
    - 비밀번호 재설정은 `emailAndPassword.revokeSessionsOnPasswordReset: true`로 켠다 (`password.mjs:169`).
-   - `databaseHooks.session.create.before`: 회원 `status`가 `pending`이면 403 `account_pending`, `suspended`면 `account_suspended`, `deleted`면 로그인 실패와 같은 응답 (Q7, V31).
-   - **로그인과 정지가 겹칠 때**: 앞 훅이 `active`를 읽은 뒤, 세션을 넣기 전에 정지가 커밋되면 세션이 남는다. 이를 닫으려고 `session.create.after`가 회원 상태를 다시 읽어 `active`가 아니면 방금 만든 세션을 지운다. 정지 쪽은 "상태 쓰기 → 세션 지우기" 순서를 지킨다. 그래서 어떤 순서로 겹쳐도 앞 훅, 정지의 세션 지우기, 뒤 훅 중 하나가 세션을 막거나 지운다.
+   - v5.8 당시 계획: `databaseHooks.session.create.before`: 회원 `status`가 `pending`이면 403 `account_pending`, `suspended`면 `account_suspended`, `deleted`면 로그인 실패와 같은 응답 (Q7, V31). 현행은 위 2026-10-15 후속 결정으로 보완한다.
+   - 현행 앞 훅은 비밀번호 확인 뒤 credential 지문·`authVersion`을 다시 확인하고, 인증된 `pending`만 조건부 허용한다. 삭제·누락·stale credential/version 은 로그인 실패와 같은 401 이다.
+   - **로그인과 상태 변경이 겹칠 때**: `session.create.after`가 상태·credential 지문·버전을 다시 확인해 조건에 맞지 않으면 방금 만든 세션을 지운다. 상태 변경 쪽은 "상태·버전 쓰기 → 세션 지우기" 순서를 지킨다. 승인도 버전 증가·기존 세션 폐기를 유지해 옛 `pending` 세션을 이어 쓰지 못한다.
 3. `sessionMember`가 `status !== "active"`면 403 `member_inactive`를 낸다. 키 API(`routes/keys.ts`)의 `deleted`만 막던 판정은 이 판정이 대신한다. 2단계 TC-K4.T1.d 의 pending·suspended 403 은 그대로 403 이다. 커밋.
 
 【테스트】
+TC 식별자·제목은 기존 목록을 유지한다. TC-M4.T3.c 의 제목은 Q7 당시 표현이고, 현행 기대는 2026-10-15 후속 결정에 맞춘 아래 단언이다. 시험 코드·게이트 표의 명령·통과 수는 이 문서 보완에서 바꾸지 않는다.
 ```
 TC-M4.T3.a  정지된 회원의 옛 세션과 새 로그인이 막힌다 (V30·V31·Q7 의존)
   단언:  세션 둘 회원 suspend → 두 쿠키 모두 첫 요청부터 401, 맞는 비밀번호 로그인 → 403 account_suspended·session 0행. unsuspend → 로그인 200
@@ -1304,14 +1314,14 @@ TC-M4.T3.b  역할 변경은 그 회원 세션을 모두 끊는다
   단언:  관리자 세션 둘 → 다른 관리자가 role member → 두 쿠키 401, 다시 로그인 → GET /api/admin/users 403
   검출:  4.5 규칙(역할 변경 때 세션 무효화)을 빠뜨려 강등된 사람의 세션이 만료(기본 7일)까지 사는 것. 지금은 sessionAdmin 이 요청마다 DB 의 role 을 다시 읽어 관리자 API 는 막히지만, 나중에 세션 쿠키 캐시를 켜거나 세션 사본의 role 을 믿는 판정이 생기면 그 사이 옛 역할로 통과한다
 TC-M4.T3.c  pending 회원은 로그인하지 못한다 (Q7 의존)
-  단언:  open + 승인 켬 가입 → 이메일 인증 링크 → 세션 0행(V31 verifyCreatesSession 이면 훅이 거부) → 로그인 403 account_pending → approve → 로그인 200
-  검출:  이메일 인증 링크의 자동 로그인(autoSignInAfterVerification)으로 승인 전 회원이 세션을 얻는 것
+  단언:  open + 승인 켬 가입 → 미인증 로그인 차단 → H1 확인(링크·가입 비밀번호) 또는 이메일 재설정으로 인증 → 현재 non-null credential 지문·authVersion 일치 시 이메일 로그인 200·세션 유효 → 키 목록·PATCH·발급 403 → approve → 버전 증가·기존 쿠키 401 → 다시 로그인 200
+  검출:  인증·credential 지문·버전 확인 없이 pending 세션을 허용하거나, pending 로그인 허용을 키 권한·비밀번호 변경·자기 탈퇴·OAuth/NULL 지문까지 넓히는 것
 TC-M4.T3.d  비밀번호를 바꾸거나 재설정하면 다른 세션이 끊긴다 (V30 의존)
   단언:  세션 셋 → 하나에서 /change-password (revokeOtherSessions 없이) → 그 세션 200, 나머지 둘 401. 세션 둘 → /request-password-reset → /reset-password → 둘 다 401
   검출:  Better Auth 기본(다른 세션 유지, 재설정은 revokeSessionsOnPasswordReset 꺼짐)에 맡겨 비밀번호를 바꾸거나 재설정해도 훔친 세션이 사는 것 (4.5 "비밀번호 변경 (현재 세션 제외)")
 TC-M4.T3.e  거부 응답이 계정 존재를 더 드러내지 않는다 (Q7 의존)
-  단언:  없는 이메일·틀린 비밀번호·삭제된 회원 → 같은 상태·본문. account_pending·account_suspended 는 맞는 비밀번호일 때만
-  검출:  상태별 코드를 비밀번호 확인 전에 내 이메일만으로 정지·대기 여부를 알아내는 것
+  단언:  없는 이메일·틀린 비밀번호·삭제된 회원 → 같은 본문의 401. account_suspended 는 맞는 비밀번호일 때만 403. 인증된 pending 은 현재 non-null credential 지문·authVersion 일치 시 로그인 허용
+  검출:  비밀번호 확인 전에 상태 코드를 내거나, pending 의 인증·credential 지문·버전 검사를 생략하는 것
 TC-M4.T3.f  회원 API 는 활성 회원만 쓴다
   단언:  pending·suspended 회원 세션(세션 행을 남긴 시험) → GET /api/me/keys · PATCH /api/me/keys/:id · POST /api/me/keys → 403 member_inactive, OmniRoute 호출 0. active → 200
   검출:  sessionMember(guard.ts:36-45)가 회원 행이 있는지만 봐서, 세션 무효화가 한 번 빠지거나 경쟁으로 남은 세션으로 정지 회원이 키 이름을 바꾸고 목록을 읽는 것
@@ -1321,11 +1331,13 @@ TC-M4.T3.g  로그인 도중 정지되어도 세션이 남지 않는다 (V31 의
 ```
 
 【통과】
-- [ ] G-M4.10 ~ G-M4.14 · G-M4.30 · G-M4.31 · G-M4.29 · G-M4.32 통과
-- [ ] G-M4.22 · G-M4.33 통과 (Red 커밋에서 TC-M4.T3.a·f 실패)
+- [ ] G-M4.6 · G-M4.7 · G-M4.12 · G-M4.13 · G-M4.18 통과 (현행 번호). D1 세션 시험은 G-M4.18 로 등록했고 실행 전이다. T3.g D1 경쟁도 G-M4.18 의 `TC-M4.T3.d1.race` 12개가 덮는다
+- [ ] 재현 빨강 TC-M4.T3.a·f 는 검사로 등록하지 않았다 — 「재현 빨강」
 
 ### ☐ M4.T4 — 자기 탈퇴 `DELETE /api/me` (Q10 의존)
 선행 M4.T2 · 산출 `apps/server/src/admin/self-delete.ts` · 되돌리기 커밋 1개
+
+내부 proof 는 `@magnetosphere/auth/internal`(`./internal`)의 WeakMap에 `createAuth` 원본 반환 객체로만 연결한다. 반환 객체의 own 키는 `handler`·`api` 둘, 루트 런타임 export는 기존 일곱이며 `SelfDeleteCredentialProof`는 type-only 호환 export다. spread 사본·미등록 객체 조회는 고정 오류를 던지고 중복 등록도 거부한다. internal 경로는 import 가능하며 보안 경계가 아니다. 이 구조의 읽기 검수와 자기 탈퇴의 런타임 증거는 구분한다.
 
 【작업】
 1. `DELETE /api/me {password}`를 만든다. 커밋.
@@ -1341,7 +1353,7 @@ TC-M4.T4.a  비밀번호를 다시 확인하고 탈퇴한다 (Q10 의존)
 ```
 
 【통과】
-- [ ] G-M4.15 통과
+- [ ] G-M4.9 통과 (현행 번호)
 
 ### ☐ M4.T5 — 설치 API 의 관리자 판정과 CSRF 🛡 보안 리뷰
 선행 M4.T1 · 산출 `apps/server/src/setup/routes.ts`, `apps/server/src/app.ts` · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-M4.T5.a`
@@ -1368,8 +1380,8 @@ TC-M4.T5.c  정지 직후 첫 요청이 거부된다 (계약, 로컬 arm64·CI a
 ```
 
 【통과】
-- [ ] G-M4.16 ~ G-M4.18 통과
-- [ ] G-M4.23 통과 (Red 커밋에서 TC-M4.T5.a 실패)
+- [ ] G-M4.10 · G-M4.12 · G-M4.17 통과 (현행 번호, 옛 G-M4.18 은 G-M4.17)
+- [ ] 재현 빨강 TC-M4.T5.a 는 검사로 등록하지 않았다 — 「재현 빨강」
 
 ### ☐ M4.T6 — M4 CI 잡과 봉인
 선행 M4.T1 ~ M4.T5 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
@@ -1390,41 +1402,94 @@ TC-M4.T6.b  ruleset 필수 검사가 이 잡을 포함한다
 ```
 
 【통과】
-- [ ] G-M4.20 · G-M4.21 통과
+- [ ] G-M4.15 · G-M4.16 통과 (현행 번호, 옛 G-M4.20·21)
 
 ## 🚪 GATE M4
 
+아래 번호는 `gates/gates.config.mjs` 의 M4 `checks` 와 같다. 옛 번호(G-M4.1 ~ G-M4.34)는 계획 당시 이름이라 아래 「옛 번호 대응」으로 찾는다.
+**통과 수는 정적 선언이다.** 시험 파일의 `it`·`it.each` 인자를 글자로 펼친 값이고 runner 가 센 수가 아니다. 시험이 더해지면 선언을 다시 센다.
+**G-M4.2(96)는 다른 시험이 더해지기 전 값이다. G-M4.6(97 = Node DB 넷 × 24 + 1)은 독립 검수가 정적 선언으로 센 값이다. 시험이 늘면 다시 세어 고친다.**
+
 | id | 검사 | 명령 | 통과 기준 |
 |---|---|---|---|
-| G-M4.1 · 2 | TC-M4.T1.a · b | `pnpm -C apps/server test -t "TC-M4.T1.<x>"` | 각 통과 = 1 |
-| G-M4.3 | TC-M4.T1.c 동시 동작 (Node DB 넷) | [L] `pnpm -C apps/server test:db -t "TC-M4.T1.c" --db sqlite,mysql,mariadb,pg` | 통과 = 4 |
-| G-M4.26 | TC-M4.T1.c 동시 동작 (D1) | [L] `pnpm -C apps/server test:workers -t "TC-M4.T1.c"` | 통과 = 1 |
-| G-M4.4 | TC-M4.T1.d 마지막 관리자 동시 강등 (Node DB 넷) | [L] `pnpm -C apps/server test:db -t "TC-M4.T1.d" --db sqlite,mysql,mariadb,pg` | 통과 = 4, 활성 관리자 0 인 순간 0 |
-| G-M4.27 | TC-M4.T1.d 마지막 관리자 동시 강등 (D1) | [L] `pnpm -C apps/server test:workers -t "TC-M4.T1.d"` | 통과 = 1 |
-| G-M4.5 · 6 | TC-M4.T1.e · f | `pnpm -C apps/server test -t "TC-M4.T1.<x>"` | 각 통과 = 1 |
-| G-M4.7 ~ 9 | TC-M4.T2.a ~ c | `pnpm -C apps/server test -t "TC-M4.T2.<x>"` | 각 통과 = 1 |
-| G-M4.28 | TC-M4.T2.d 재설정 토큰으로 부활 없음 | [L] `pnpm -C packages/auth test -t "TC-M4.T2.d"` | 통과 = 4 (DB 4) |
-| G-M4.10 ~ 14 | TC-M4.T3.a ~ e (Node DB 넷) | [L] `pnpm -C packages/auth test -t "TC-M4.T3.<x>"` | 각 통과 = 4 (DB 4) |
-| G-M4.30 | TC-M4.T3.a·c·d (D1) | [L] `pnpm -C apps/server test:workers -t "TC-M4.T3.[acd]"` | 통과 = 3 |
-| G-M4.31 | TC-M4.T3.f 회원 API 는 활성만 | `pnpm -C apps/server test -t "TC-M4.T3.f"` | 통과 = 1 |
-| G-M4.32 | TC-M4.T3.g 로그인 도중 정지 (Node DB 넷) | [L] `pnpm -C packages/auth test -t "TC-M4.T3.g"` | 통과 = 4 |
-| G-M4.29 | TC-M4.T3.g 로그인 도중 정지 (D1) | [L] `pnpm -C apps/server test:workers -t "TC-M4.T3.g"` | 통과 = 1 |
-| G-M4.15 | TC-M4.T4.a 자기 탈퇴 | `pnpm -C apps/server test -t "TC-M4.T4.a"` | 통과 = 1 |
-| G-M4.16 · 17 | TC-M4.T5.a · b | `pnpm -C apps/server test -t "TC-M4.T5.<x>"` | 각 통과 = 1 |
-| G-M4.18 | TC-M4.T5.c 정지 직후 거부 (계약) | [L] `pnpm test:contract -t "TC-M4.T5.c"` | 통과 = 1 |
-| G-M4.19 | 설치 판정이 role 만 보지 않음 | grep `role !== "admin"\|role === "admin"` in `apps/server/src/setup` | == 0 (지금 `setup/routes.ts:27`에 1) |
-| G-M4.34 | 재설정 뒤 세션 무효화 켬 | grep `revokeSessionsOnPasswordReset: true` in `packages/auth/src` | == 1 |
-| G-M4.20 | TC-M4.T6.a CI 단계 잡 | grep `^\s+run: node scripts/gate\.mjs M4\b` in ci.yml | == 1 |
-| G-M4.21 | ruleset · TC-M4.T6.b | `node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere` | 종료코드 0 |
-| G-M4.22 | 재현 빨강 TC-M4.T3.a | `node scripts/check-red.mjs --check G-M4.10 --since seal:M3` | 종료코드 0 |
-| G-M4.33 | 재현 빨강 TC-M4.T3.f | `node scripts/check-red.mjs --check G-M4.31 --since seal:M3` | 종료코드 0 |
-| G-M4.23 | 재현 빨강 TC-M4.T5.a | `node scripts/check-red.mjs --check G-M4.16 --since seal:M3` | 종료코드 0 |
-| G-M4.24 | 어댑터 밖 관리 호출 0 | G-K4.23 과 같음 | == 0 |
-| G-M4.25 | 타입 검사 | `pnpm -r typecheck` | 종료코드 0 |
+| G-M4.1 | TC-M4.T1.a~f 목록·전이·권한·stale actor·K3 반영·거절 실패 | `pnpm -C apps/server test -t "TC-M4\.T1\.[a-f] "` | 통과 = 9 |
+| G-M4.2 | TC-M4.T1.db 상호 강등·정지 경쟁·last_admin·CAS (Node DB 넷) | [L] `pnpm -C apps/server test:db -t "TC-M4.T1.db" --db sqlite,mysql,mariadb,pg` | 통과 = 96 (추가 뒤 재산정) |
+| G-M4.3 | TC-M4.T1.d1 실제 D1 batch 롤백 (D1, 기존 시험 1개만 고른다) | [L] `pnpm -C apps/server test:workers test/admin/members.workers.test.ts -t "TC-M4\.T1\.d1 CAS 0행"` | 통과 = 1 |
+| G-M4.4 | TC-M4.T1.migration 0005 업그레이드 보존·auth_version 0 (다섯 DB) | [L] `pnpm -C packages/db test:migrate -t "TC-M4.T1.migration" --db sqlite,mysql,mariadb,pg,d1` | 통과 = 5 |
+| G-M4.5 | TC-M4.T2.a-d 익명화·소유 토큰·키 보존·120초 큐·권한 경계 | `pnpm -C apps/server test -t "TC-M4.T2"` | 통과 = 1 |
+| G-M4.6 | M4.T3 상태·버전·ABA·비밀번호 변경 세션 계약 (Node DB 넷) | [L] `MG_TEST_DBS=sqlite,mysql,mariadb,pg pnpm -C packages/auth test -t "M4.T3"` | 통과 = 97 |
+| G-M4.7 | TC-M4.T3.f 공용 앱 회원·관리자 route guard | `pnpm -C apps/server test -t "TC-M4.T3.f"` | 통과 = 11 |
+| G-M4.8 | M4.T4.reset reset/delete 늦은 credential 쓰기 차단 (Node DB 넷) | [L] `MG_TEST_DBS=sqlite,mysql,mariadb,pg pnpm -C packages/auth test -t "M4.T4.reset-"` | 통과 = 24 |
+| G-M4.9 | TC-M4.T4.a 자기 탈퇴 proof·bootstrap·last admin·Origin | `pnpm -C apps/server test -t "TC-M4.T4.a"` | 통과 = 1 |
+| G-M4.10 | TC-M4.T5.a·b 활성 관리자·설치 Origin·설치 완료 판정 | `pnpm -C apps/server test -t "TC-M4.T5"` | 통과 = 6 |
+| G-M4.11 | 타입 검사 | `pnpm -r typecheck` | 종료코드 0 |
+| G-M4.12 | 설치 판정이 role 만 보지 않음 | grep `role\s*(===\|!==)\s*"admin"` in `apps/server/src/setup` | == 0 |
+| G-M4.13 | 재설정 뒤 세션 무효화 켬 | grep `revokeSessionsOnPasswordReset: true` in `packages/auth/src` | == 1 |
+| G-M4.14 | 어댑터 밖 OmniRoute 관리 호출 0 | G-K4.23 과 같은 패턴·범위 (`/api/(keys\|usage)` in `apps`·`packages`, `packages/omniroute/**` 제외) | == 0 |
+| G-M4.15 | TC-M4.T6.a CI 단계 잡 | grep `^\s+run: node scripts/gate\.mjs M4\b` in ci.yml | == 1 |
+| G-M4.16 | ruleset · TC-M4.T6.b | `node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere` | 종료코드 0 |
+| G-M4.17 | TC-M4.T5.c 정지 직후 첫 요청 거부 (계약, 로컬 arm64·CI amd64) | [L] `pnpm test:contract -t "TC-M4.T5.c"` | 통과 = 1 |
+| G-M4.18 | TC-M4.T3.d1 실제 D1 세션 상태·버전·비밀번호 변경 (D1) | [L] `pnpm -C apps/server test:workers test/sessions/m4-session.workers.test.ts -t "TC-M4\.T3\.d1"` | 통과 = 17 (a1 + pending1 + d3 (revokeOtherSessions 3값) + race12) |
+| G-M4.19 | TC-M4.T1.c·T1.d 동시 승인거절·마지막 관리자 경쟁, TC-M4.T2.d 삭제 뒤 재설정 (Node DB 넷) | [L] `pnpm -C apps/server test:db -t "TC-M4\.T1\.c|TC-M4\.T1\.d |TC-M4\.T2\.d" --db sqlite,mysql,mariadb,pg` | 통과 = 204 (DB 당 10 + 20 + 20 + 1 = 51, × 4) |
+| G-M4.20 | TC-M4.T1.c·d 실제 D1 동시 승인거절·상호 강등 경쟁 (D1) | [L] `pnpm -C apps/server test:workers test/admin/members.workers.test.ts -t "TC-M4\.T1\.(c\|d) D1"` | 통과 = 2 (롤백 it `TC-M4.T1.d1 …` 은 고르지 않는다) |
+
+### 옛 번호 대응
+
+시험 파일의 TC 글자는 문서의 TC 단언과 1:1 이 아니다 (예: 시험 `TC-M4.T1.a` 는 목록, 문서 T1.a 는 정지 때 키 끄기). 대응은 시험 제목을 글자로 읽은 것이고 실행으로 확인한 것이 아니다.
+
+| 옛 번호 | 옛 검사 | 현행 | 상태 |
+|---|---|---|---|
+| G-M4.1 · 2 · 5 · 6 | TC-M4.T1.a · b · e · f | G-M4.1 | 한 선택자로 합침 (9개) |
+| G-M4.3 | TC-M4.T1.c 동시 동작 (Node DB 넷) | G-M4.19 | 검사 등록됨 (선언 204 중 일부), 실행 전 |
+| G-M4.26 | TC-M4.T1.c (D1) | G-M4.20 | 검사 등록됨 (선언 2 중 1), 실행 전 |
+| G-M4.4 | TC-M4.T1.d 마지막 관리자 (Node DB 넷) | G-M4.2 · G-M4.19 | G-M4.2 는 있음 (선언 96). 동시 강등·정지 경쟁은 G-M4.19 로 등록됨, 실행 전 |
+| G-M4.27 | TC-M4.T1.d (D1) | G-M4.3 · G-M4.20 | G-M4.3 은 롤백·guard. 동시 강등 D1 경쟁은 G-M4.20 으로 등록됨 (선언 2 중 1), 실행 전 |
+| G-M4.7 ~ 9 | TC-M4.T2.a ~ c | G-M4.5 | 한 시험(a-d)으로 합침 |
+| G-M4.28 | TC-M4.T2.d 재설정 토큰 부활 없음 (DB 넷) | G-M4.5 일부 · G-M4.8 일부 · G-M4.19 | G-M4.19 로 등록됨 (선언 204 중 일부), 실행 전 |
+| G-M4.10 ~ 14 | TC-M4.T3.a ~ e (Node DB 넷) | G-M4.6 | 합침 (선언 97). 시험 이름에 `TC-` 가 없다 |
+| G-M4.30 | TC-M4.T3.a·c·d (D1) | G-M4.18 | 검사 등록됨 (선언 17), 실행 전 |
+| G-M4.31 | TC-M4.T3.f | G-M4.7 | 있음 (선언 11) |
+| G-M4.32 | TC-M4.T3.g (Node DB 넷) | G-M4.6 일부 | `M4.T3.c/e/g` 경계 ABA 시험이 있다. 로그인 도중 정지는 401 `INVALID_EMAIL_OR_PASSWORD`·쿠키 0·세션 0 으로 고정한다 (문서는 이 응답에 403 을 요구하지 않고, 정지 뒤 재로그인이 403 `ACCOUNT_SUSPENDED`) |
+| G-M4.29 | TC-M4.T3.g (D1) | G-M4.18 | 검사 등록됨 (실행 전). G-M4.18 의 `TC-M4.T3.d1.race` 12개 (verify·before-insert·after-insert·final-response 4경계 × 정지 유지 1 + status/role ABA 2, 정지 유지 4·ABA 8) 가 로그인 도중 정지를 덮는다 |
+| G-M4.15 | TC-M4.T4.a | G-M4.9 | 있음 |
+| G-M4.16 · 17 | TC-M4.T5.a · b | G-M4.10 | 합침 |
+| G-M4.18 | TC-M4.T5.c 정지 직후 거부 (계약) | G-M4.17 | 검사 등록됨 (시험 `apps/server/test/contract/routes/keys.contract.ts`, 선언 1). 로컬 arm64 에서 선택 1 통과·18 건너뜀·종료코드 0 (9.06초) 로그만 있다 — HEAD 5517f89 + 작업 트리 변경(계약 시험 미커밋) 기준이고 amd64(CI)는 실행하지 않았다 |
+| G-M4.19 | 설치 판정이 role 만 보지 않음 | G-M4.12 | 지금 0 |
+| G-M4.34 | 재설정 뒤 세션 무효화 켬 | G-M4.13 | 지금 1 |
+| G-M4.20 · 21 | TC-M4.T6.a · b | G-M4.15 · 16 | 잡 추가됨. 필수 검사 이름은 사용자 몫 |
+| G-M4.22 · 33 · 23 | 재현 빨강 T3.a · T3.f · T5.a | 없음 | 「재현 빨강」 |
+| G-M4.24 | 어댑터 밖 관리 호출 0 | G-M4.14 | 지금 0 |
+| G-M4.25 | 타입 검사 | G-M4.11 | |
+| (옛 표에 없음) | 0005 마이그레이션 · reset/delete 방어 | G-M4.4 · G-M4.8 | 새로 더함 |
+
+### M4 시험 빈 곳
+
+지금 문서 요구 중 검사에 붙은 시험이 없는 것은 없다. 시험이 더 생기면 새 번호(G-M4.21 이후)로 검사를 더한다.
+
+로컬 실행 (2026-10-17, `17afb68` 직전 작업 트리, arm64, 봉인 없음): `gate M4` 20 중 19 통과. G-M4.16 만 실패 — main 필수 검사에 `회원 관리 (M4 게이트, 다섯 DB·OmniRoute 3.8.51)` 가 없다. 같은 이유로 PR #20 CI 의 다른 단계 잡(K0·K6·M0·M1 등)의 ruleset 검사도 실패한다. ruleset 반영은 `(사용자/메인 세션)` 몫이다 (M4.T6).
+
+### 재현 빨강
+
+Red 커밋 `834c264`(꼬리줄 `Red: TC-M4.T1.d`·`TC-M4.T3.a`·`TC-M4.T4.r`·`TC-M4.T5.a`)는 앞 커밋의 미구현 뼈대(`throw new Error("M4 미구현")`) 위에 있다. 그 커밋에서 시험이 실패해도 목적 단언이 아니라 뼈대 예외에서 끝날 수 있어, `check-red` 의 종료코드·통과 수 판정만으로는 의미 있는 빨강이라 할 수 없다. `TC-M4.T3.f` 는 어느 커밋에도 `Red:` 꼬리줄이 없다. 그래서 `check-red` 검사는 등록하지 않았고, 대신 아래 격리 복사본 대조를 증거로 둔다.
+
+**격리 복사본 대조 (2026-10-17, HEAD `17afb687e829d52d8d698ea8ce3325a3e18464af`)** — `check-red` 꼬리줄 방식과 별개의 증거다. `Red:` 커밋을 돌린 것이 아니다. HEAD 의 임시 worktree 에서만 방어 하나를 끄고, 같은 시험이 목적 단언에서 실패하는지 봤다. 대상마다 정상 실행 → 변이 → 실행 → 복원(작업 트리 깨끗함 확인) 순서다. 브랜치·PR 에는 약화 커밋이 없다. 게이트 검사로 등록하지 않았다 (등록은 별도 결정). 판정: 정상은 종료코드 0·선택 1 통과, 변이는 종료코드 ≠0·선택 1 실패·`AssertionError`·그 it 이름의 FAIL 줄, `Cannot find module`·`SyntaxError`·`M4 미구현`·`Test timed out` 없음. 실행기 `.omc/scripts/m4-red-mutants.py`, 로그 `.omc/logs/m4-red/20261017T091749Z/` (로컬 전용).
+
+| 대상 | 끈 방어 (변이) | 선택 시험 | 정상 | 변이 결과 |
+|---|---|---|---|---|
+| TC-M4.T3.a 상태 | `signup-confirmation.ts` `matches` 가 suspended 도 살아 있는 세션으로 본다 (두 줄) | auth `M4.T3.f: NULL 지문/OAuth…` (SQLite) | 1 통과·0 | 1 실패·`expected 200 to be 401` |
+| TC-M4.T3.a 버전 | `matches` 의 `user.authVersion !== version` 비교 제거 | 위와 같음 | 1 통과·0 | 1 실패·`expected 200 to be 401` |
+| TC-M4.T3.f | `guard.ts` `sessionMember` 의 `status !== "active"` 검사 제거 | server `가짜 세션이 suspended 회원을…` | 1 통과·0 | 1 실패·`[200, {keys…}]` ≠ `[403, member_inactive]` |
+| TC-M4.T5.a 관리자 | 설치 관리 경로가 역할만 보고 상태는 보지 않음 (`834c264` 이전 결함과 같은 모양) | server `정지 관리자 가짜 세션은…` | 1 통과·0 | 1 실패·`[200, connected]` ≠ `[403, forbidden]` |
+| TC-M4.T5.a Origin | `app.ts` `/api/setup`·`/api/setup/*` 의 `sameOrigin` 제거 | server `최초 설치는 세션·토큰 없이도…` | 1 통과·0 | 1 실패·`[401, invalid_token]` ≠ `[403, forbidden_origin]` |
+
+- auth 시험 `M4.T3.f`(이름)는 문서 TC-M4.T3.a 의 "세션 행을 남긴 정지·버전" 단언에 해당한다.
+- TC-M4.T5.a 관리자 대조는 가짜 auth fixture 기준이다. 실제 SDK 세션에서는 T3.a 방어가 앞에서 함께 막는다.
+- `TC-M4.T4.r` 꼬리줄은 위 문서의 TC 목록(T4.a 하나)에 없다. 이 대조의 대상이 아니다.
+- 봉인 전에 이 증거를 받아들일지, 같은 대조를 검사로 등록할지는 별도 결정이다. `check-red.mjs` 는 바꾸지 않았다.
 
 `node scripts/gate.mjs M4 --seal`
 
-가장 중요한 검사는 G-M4.10 과 G-M4.32 다. 정지의 효과는 세 곳(세션·로그인·OmniRoute 키)에 걸리고, 키 쪽은 2단계 시험이 이미 본다. 세션이 하나라도 남으면, 그것이 무효화 누락이든 로그인 경쟁이든, 회원 앱의 다른 모든 검사가 맞아도 정지한 회원이 Better Auth 경로를 계속 쓴다.
+가장 중요한 검사는 현행 G-M4.6 (Node DB 넷의 세션·로그인 경쟁)과 G-M4.18 (같은 요구의 D1)이다. 둘 다 로컬에서 통과했지만 CI amd64 확인과 봉인 전에는 이 단계를 보안 완료로 보지 않는다. 정지의 효과는 세 곳(세션·로그인·OmniRoute 키)에 걸리고, 키 쪽은 2단계 시험이 이미 본다. 세션이 하나라도 남으면, 그것이 무효화 누락이든 로그인 경쟁이든, 회원 앱의 다른 모든 검사가 맞아도 정지한 회원이 Better Auth 경로를 계속 쓴다.
 
 ---
 
@@ -1448,7 +1513,7 @@ TC-M5.T1.a  invite_only (여섯 조합, Q3·Q5 의존)
   단언:  설치 직후 공개 가입 → 회원 행 증가 0 → 관리자가 이메일 지정 member 초대 → 수락 201 → 그 회원 로그인 → 키 발급 201 (이메일 인증 메일 없이, Q5) → 같은 토큰 재수락 400 invalid_invite
   검출:  어느 조합의 DB 경로에서 초대 차지가 1행 판정을 못 해(MySQL affectedRows·D1 meta.changes) 수락이 늘 실패하거나 두 번 되는 것
 TC-M5.T1.b  open + 승인 + 하루 상한 (여섯 조합, Q6·Q13·Q19·Q20 의존)
-  단언:  메일 설정(API) → PATCH open·상한 2 → 공개 가입 2건 행 +2 → 3번째 403 signup_cap·행 0·alert.signup_cap 1행 → 인증 링크 열기 → 로그인 403 account_pending → approve → 로그인 200 → 키 발급 201 → monthly_limit_usd 5
+  단언 (2026-10-15 후속 계획):  메일 설정(API) → PATCH open·상한 2 → 공개 가입 2건 행 +2 → 3번째 403 signup_cap·행 0·alert.signup_cap 1행 → H1 확인 POST + 가입 비밀번호 또는 이메일 재설정으로 인증 → 현재 non-null credential 지문·authVersion 일치 시 pending 로그인 200 → 승인 전 키 발급 403 → approve → 기존 쿠키 401 → 재로그인 200 → 키 발급 201 → monthly_limit_usd 5
   검출:  한 조합에서 user.create.before 가 돌려준 status pending·한도가 저장되지 않아(Better Auth 어댑터의 방언 차이) 그 조합만 승인 없이 무제한 회원이 생기는 것
 TC-M5.T1.c  domain_allowlist·closed (여섯 조합, Q14·Q19 의존)
   단언:  domain_allowlist ["e2e.test"] → a@e2e.test 행 +1, a@other.test 행 0·403. closed → 공개 가입 행 0, 초대 만들기 409
@@ -1740,7 +1805,7 @@ TC-M6.T4.c  ruleset 필수 검사가 이 잡을 포함한다
 | TC-M3.T1.c, TC-M3.T2.a, TC-M1.T4.a | Q4 한 번만·7일·30일 | 0003 칼럼, 동시 수락 기대 수 |
 | TC-M3.T1.e, TC-M3.T2.c, TC-M5.T1.a | Q5 이메일 지정 초대 = 인증됨 | 메일 없는 invite_only 의 키 발급, 5단계 연결 규칙 |
 | TC-M2.T2.a, TC-M3.T2.d, TC-M5.T1.b | Q6 승인 범위 | 표 |
-| TC-M0.T4.*, TC-M4.T3.a·c·e | Q7 pending·suspended 로그인 차단 | 로그인 허용 + /api/me 차단으로 |
+| TC-M0.T4.*, TC-M4.T3.a·c·e | Q7: TC-M0.T4.* 는 당시 SDK+H1 V31 관찰, 운영 M4 는 인증된 pending 조건부 로그인 허용·suspended 차단 | 현행은 2026-10-15 후속 결정(M4.T3) 참조. 현재 non-null credential 지문·authVersion 일치와 기존 키 제한 유지 |
 | TC-M1.T2.a, TC-M4.T1.b | Q8 전이 표·거절 = 행 삭제 | 표 |
 | TC-M1.T4.a, TC-M4.T2.b·d, TC-M6.T3.a | Q9 행 유지 + 개인정보·토큰 지움, 계정 단위 한도 | 0003, 삭제 단언, (라)면 HMAC 표 |
 | TC-M4.T4.a | Q10 자기 탈퇴 | M4.T4 `(폐기)` |

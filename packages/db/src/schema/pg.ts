@@ -2,7 +2,7 @@
 // 원본: packages/db/src/schema/common.ts · 생성: pnpm -C packages/db gen
 import { bigint, boolean, index, integer, numeric, pgTable, primaryKey, text, timestamp, varchar } from "drizzle-orm/pg-core";
 
-// 회원. Better Auth 칼럼 + 권한 칼럼 다섯 + 삭제 시각
+// 회원. Better Auth 칼럼 + 권한 칼럼 다섯 + 삭제 시각 + 인증 버전
 export const user = pgTable("user", {
   id: varchar("id", { length: 36 }).primaryKey(),
   name: text("name").notNull(),
@@ -18,6 +18,7 @@ export const user = pgTable("user", {
   isBootstrapAdmin: boolean("is_bootstrap_admin").default(false).notNull(),
   deletedAt: timestamp("deleted_at"),
   signupOrigin: varchar("signup_origin", { length: 16 }).default("legacy").notNull(),
+  authVersion: integer("auth_version").default(0).notNull(),
 });
 
 // 로그인 세션
@@ -31,6 +32,7 @@ export const session = pgTable("session", {
   userAgent: text("user_agent"),
   userId: varchar("user_id", { length: 36 }).notNull().references(() => user.id, { onDelete: "cascade" }),
   credentialFingerprint: varchar("credential_fingerprint", { length: 64 }),
+  authVersion: integer("auth_version").default(0).notNull(),
 }, (table) => [
   index("session_userId_idx").on(table.userId),
 ]);

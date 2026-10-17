@@ -26,7 +26,7 @@ const pattern = ti >= 0 ? (args[ti + 1] ?? "") : "";
 
 const SUITES = [
   { dir: "packages/omniroute", owns: /TC-S5\.T[12]\b|TC-K0\.T(5|6|8|9|10)\b/ },
-  { dir: "apps/server", owns: /TC-S5\.T3\b|TC-K2\.T[67]\b|TC-K3\.T3\b|TC-K4\.T5\b/ },
+  { dir: "apps/server", owns: /TC-S5\.T3\b|TC-K2\.T[67]\b|TC-K3\.T3\b|TC-K4\.T5\b|TC-M4\.T5\b/ },
 ];
 const mentioned = SUITES.filter((s) => s.owns.test(pattern));
 const suites = mentioned.length ? mentioned : SUITES;

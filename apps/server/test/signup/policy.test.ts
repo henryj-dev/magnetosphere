@@ -292,14 +292,31 @@ describe("TC-M2.T5 정책·메일 설정 API", () => {
       // 대조: 열려 있을 때 다른 인스턴스에서 가입된다
       expect((await attempt(other, () => other.signUp(body(mail("t5a-before"))))).user).toBe(1);
       const member = await login(rig, "member");
-      const suspended = await login(rig, "admin", "suspended");
+      // 두 활성 관리자를 별도로 만든다. 대상은 최초 관리자가 아니고 자신을 정지하지 않는다.
+      const suspended = await login(rig, "admin");
       const admin = await login(rig, "admin");
       const at = (await get(admin.cookie)).json.updatedAt;
+      expect((await get(suspended.cookie)).status).toBe(200);
+      expect((await rig.call("GET", "/api/auth/get-session", { cookie: suspended.cookie })).json?.user?.id).toBe(suspended.id);
+      expect(await rig.op("sessionsOf", suspended.email)).toBe(1);
+      const stopped = await rig.call("POST", `/api/admin/users/${suspended.id}/suspend`, { cookie: admin.cookie });
+      expect(stopped.status, stopped.body).toBe(200);
+      expect(await rig.op("user", suspended.email)).toMatchObject({ role: "admin", status: "suspended" });
+      // 운영 인증은 정지 전 쿠키를 무효화한다. 유효한 가짜 세션의 DB 권한 403 은 member-guard.test.ts에서 검사한다.
+      expect(await rig.op("sessionsOf", suspended.email)).toBe(0);
+      const staleSession = await rig.call("GET", "/api/auth/get-session", { cookie: suspended.cookie });
+      expect([staleSession.status, staleSession.json]).toEqual([200, null]);
+      const staleGet = await get(suspended.cookie);
+      expect([staleGet.status, staleGet.json]).toEqual([401, { error: "unauthorized" }]);
+      const stalePatch = await patch(suspended.cookie, { signupMode: "closed" }, at);
+      expect([stalePatch.status, stalePatch.json]).toEqual([401, { error: "unauthorized" }]);
+      const rejected = await rig.call("POST", "/api/auth/sign-in/email", { body: { email: suspended.email, password: PASSWORD } });
+      expect({ status: rejected.status, code: rejected.json?.code?.toLowerCase() }).toEqual({ status: 403, code: "account_suspended" });
+      expect(rejected.setCookie).toEqual([]);
+      expect(await rig.op("sessionsOf", suspended.email)).toBe(0);
       expect((await get(member.cookie)).status).toBe(403);
-      expect((await get(suspended.cookie)).status).toBe(403);
       expect((await rig.call("GET", "/api/admin/settings/signup")).status).toBe(401);
       expect((await patch(member.cookie, { signupMode: "closed" }, at)).status).toBe(403);
-      expect((await patch(suspended.cookie, { signupMode: "closed" }, at)).status).toBe(403);
       const cross = await patch(admin.cookie, { signupMode: "closed" }, at, "https://evil.example");
       expect({ status: cross.status, error: cross.json?.error }).toEqual({ status: 403, error: "forbidden_origin" });
       expect(await rig.op("audits", "settings.update")).toBe(0);
