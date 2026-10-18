@@ -1,0 +1,124 @@
+{
+  "phase": "M6",
+  "sealed": true,
+  "head": "e766cc4b5e68b13bc970a6ff63e691f5d7fde327",
+  "at": "2026-10-18T14:55:17.714Z",
+  "waived": false,
+  "reason": null,
+  "checks": [
+    {
+      "id": "G-M6.1",
+      "ok": true,
+      "measured": 0,
+      "limit": "== 0"
+    },
+    {
+      "id": "G-M6.2",
+      "ok": true,
+      "measured": 0,
+      "limit": "== 0"
+    },
+    {
+      "id": "G-M6.3",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-M6.10",
+      "ok": true,
+      "measured": "통과 21 / 기대 21",
+      "limit": "종료코드 0, 통과 == 21"
+    },
+    {
+      "id": "G-M6.4",
+      "ok": true,
+      "measured": 1,
+      "limit": "== 1"
+    },
+    {
+      "id": "G-M6.11",
+      "ok": true,
+      "measured": 1,
+      "limit": "== 1"
+    },
+    {
+      "id": "G-M6.5",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-M6.6",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-M6.7",
+      "ok": true,
+      "measured": 0,
+      "limit": "종료코드 0"
+    },
+    {
+      "id": "G-M6.8",
+      "ok": true,
+      "measured": 1,
+      "limit": "== 1"
+    },
+    {
+      "id": "G-M6.9",
+      "ok": true,
+      "measured": 0,
+      "limit": "== 0"
+    },
+    {
+      "id": "G-M6.12",
+      "ok": true,
+      "measured": "통과 8 / 기대 8",
+      "limit": "종료코드 0, 통과 == 8"
+    },
+    {
+      "id": "G-M6.13",
+      "ok": true,
+      "measured": "통과 2 / 기대 2",
+      "limit": "종료코드 0, 통과 == 2"
+    },
+    {
+      "id": "G-M6.14",
+      "ok": true,
+      "measured": "통과 5 / 기대 5",
+      "limit": "종료코드 0, 통과 == 5"
+    },
+    {
+      "id": "G-M6.15",
+      "ok": true,
+      "measured": "통과 16 / 기대 16",
+      "limit": "종료코드 0, 통과 == 16"
+    },
+    {
+      "id": "G-M6.16",
+      "ok": true,
+      "measured": "통과 5 / 기대 5",
+      "limit": "종료코드 0, 통과 == 5"
+    },
+    {
+      "id": "G-M6.17",
+      "ok": true,
+      "measured": "통과 12 / 기대 12",
+      "limit": "종료코드 0, 통과 == 12"
+    },
+    {
+      "id": "G-M6.18",
+      "ok": true,
+      "measured": "통과 2 / 기대 2",
+      "limit": "종료코드 0, 통과 == 2"
+    },
+    {
+      "id": "G-M6.19",
+      "ok": true,
+      "measured": "통과 2 / 기대 2",
+      "limit": "종료코드 0, 통과 == 2"
+    }
+  ]
+}
