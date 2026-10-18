@@ -1,0 +1,637 @@
+# TC-M5.T3.a 음성 대조: 실제 ci.yml 에서 e2e 매트릭스의 회원 정책 시나리오 스텝(--scenario members)과 아직 봉인 안 된 p3-m5 잡을 지운 사본이다.
+# 실제 p3-m5 잡은 --skip-ids 로 G-M5.1~6 을 빼므로, 그 스텝이 빠지면 완료 기준 E2E 가 CI 에서 하나도 돌지 않는다.
+# p3-m5 잡을 함께 지우는 까닭: 그 잡의 --skip-ids 는 옛 검사기에서 [skip-ids] 로 걸려, 재현 빨강(TC-CI.4.c)이 members 규칙이 없어서인지 흐려진다.
+# 지우면 옛 검사기는 이 사본에서 문제 0 이고, 지금 검사기는 [members-scenario] 하나만 낸다. M5 가 봉인 전이라 단계 잡을 요구하지 않는다 ([stage-missing] 없음).
+# 실제 ci.yml 의 M5 단계 잡 줄은 G-M5.11 이 따로 센다. 나머지는 실제 ci.yml 과 같다 (test/check-ci-matrix-members.test.mjs 가 본다).
+# 게이트 설정 M5 에 members 검사가 있으면 봉인과 상관없이 잡는다. TC-CI.4.c 는 빈 --seal-dir 로 돌아 M5 봉인 뒤에도 [members-scenario] 하나만 본다.
+# G-M5.9·G-S7.1 은 기본 봉인 폴더로 돈다. M5 봉인 뒤에는 [stage-missing] 이 더해지지만 --expect-fail 은 기대 코드를 잡았는지만 본다.
+# expect: members-scenario
+# CI 매트릭스 (실행판 S7.T1, 2단계 실행판 0절 「CI 단계 잡 규칙」). 단계마다 그 단계의 게이트를 서비스를 띄운 잡에서 그대로 돈다 (node scripts/gate.mjs S<n>).
+# 검사 정의는 gates/gates.config.mjs 하나뿐이라 CI 와 로컬 게이트가 어긋나지 않는다.
+# - 테스트 DB·mailpit·계약 환경 OmniRoute·배포 묶음은 각 검사의 실행기가 docker compose 로 직접 띄운다 (잡에는 docker 만 있으면 된다).
+# - 잡마다 러너가 따로라 포트가 겹치지 않는다. 무거운 묶음(배포·E2E)은 잡을 나눠 동시에 돈다.
+# - 게이트에서 빼는 검사는 E2E 여섯(G-S6.9~14)·키 시나리오 여섯(G-K5.3~8)·회원 정책 시나리오 여섯(G-M5.1~6)뿐이다.
+#   그 열여덟은 e2e 매트릭스 잡이 조합마다 같은 명령으로 돈다.
+# - S1 은 확인용 코드(spikes/)를 S7.T2 에서 지웠으므로 봉인 커밋을 꺼내 그 커밋의 코드로 돈다 (s1-seal 잡).
+# scripts/check-ci-matrix.mjs (G-S7.1) 가 이 파일의 매트릭스·단계 잡·액션 SHA 고정을 검사한다.
+# 액션은 커밋 SHA 로 고정한다 (주석은 그 SHA 의 태그).
+# push 는 main 에서만 돈다. PR 브랜치는 pull_request 실행(대상 브랜치와 합친 커밋)만 돌아 같은 커밋을 두 번 돌리지 않는다.
+# main 의 push 실행은 남겨 봉인 커밋의 결과가 main 에 남는다 (ruleset 우회 계정의 직접 push 도 여기서 돈다).
+# PR 을 열기 전 브랜치 push 와 대상 브랜치와 충돌하는 PR 은 CI 가 돌지 않는다 (pre-push 훅의 순서 검사는 남고,
+# 충돌 PR 은 필수 검사가 없어 병합되지 않는다). 태그 push 도 돌지 않는다.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  # main 에서는 앞 실행을 취소하지 않는다. 봉인 커밋의 단계 게이트 결과가 남아야 한다 (K0.T3, check-ci-matrix [concurrency])
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  FORCE_COLOR: "0"
+  WRANGLER_SEND_METRICS: "false"
+
+jobs:
+  unit:
+    name: 단위 (S0 게이트·패키지 테스트·타입)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: 스크립트 테스트
+        run: node --test --test-reporter=tap "scripts/*.test.mjs"
+      # yaml 패키지를 쓰는 검사기 시험이라 설치 뒤에 돈다. gate.yml 의 스크립트 테스트는 설치 없이 돌아 여기 두지 못한다
+      - name: CI 조각·집계 잡 검사기 시험
+        run: node --test --test-reporter=tap test/check-ci-matrix-partition.test.mjs test/check-ci-matrix-trigger.test.mjs test/check-ci-matrix-members.test.mjs test/check-required-checks-aggregate.test.mjs
+      - name: S0 게이트
+        run: node scripts/gate.mjs S0
+      - name: 패키지 단위 테스트 (서비스 없이 도는 것 전부)
+        run: |
+          pnpm -C packages/db test
+          pnpm -C packages/omniroute test
+          pnpm -C packages/runtime test
+          pnpm -C apps/server test
+      - name: 타입 검사
+        run: pnpm -r typecheck
+
+  order:
+    name: 순서·봉인 상태
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: 처음 커밋부터 순서 위반 없음
+        run: node scripts/gate.mjs --assert-order --base "$(git rev-list --max-parents=0 HEAD)"
+      - name: 단계 상태
+        run: node scripts/gate.mjs --status
+
+  schema:
+    name: 스키마 (S2 게이트, 다섯 DB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: S2 게이트
+        run: node scripts/gate.mjs S2 --explain
+
+  auth:
+    name: 인증 (S3 게이트, 네 DB·mailpit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: S3 게이트
+        run: node scripts/gate.mjs S3 --explain
+      - name: packages/auth 테스트 전부
+        run: pnpm -C packages/auth test && pnpm -C packages/auth test:smtp
+      # 봉인된 단계의 게이트 밖 보안 고침 시험. Workers + D1 비밀번호 재설정 (wrangler dev 는 시험이 직접 띄운다).
+      # -t 로 거르면 맞는 시험이 0 개여도 종료코드 0 이라 파일 경로로 거른다 (없는 파일이면 실패한다)
+      - name: D1 비밀번호 재설정 (TC-SEC.2.a)
+        run: pnpm -C apps/server test:workers test/auth/reset.workers.test.ts
+
+  server:
+    name: 서버·런타임 (S4 게이트)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: S4 게이트
+        run: node scripts/gate.mjs S4 --explain
+
+  contract:
+    name: 계약 (S5 게이트, OmniRoute 3.8.51)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: S5 게이트
+        run: node scripts/gate.mjs S5 --explain
+
+  deploy:
+    name: 배포 묶음 (S6 게이트, E2E 여섯은 e2e 잡)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: S6 게이트 (G-S6.9~14 는 e2e 매트릭스가 같은 명령으로 돈다)
+        run: node scripts/gate.mjs S6 --explain --skip-ids G-S6.9,G-S6.10,G-S6.11,G-S6.12,G-S6.13,G-S6.14
+
+  e2e:
+    name: E2E ${{ matrix.combo }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        combo: [docker-sqlite, docker-mysql, docker-pg, workers-d1, workers-mysql, workers-pg]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: 설치 → 관리자 → 부트스트랩 → 로그인
+        run: pnpm e2e --combo ${{ matrix.combo }}
+      # 2단계 완료 기준 E2E (K5.T3, G-K5.3~8). 끄기·여러 키 회원 한도·삭제·재발급. p2-k5 잡은 이 여섯을 --skip-ids 로 뺀다
+      - name: 키 시나리오 (회원 한도·끄기·삭제·재발급)
+        run: pnpm e2e --combo ${{ matrix.combo }} --scenario keys
+
+  guard:
+    name: 재발 방지 (S7 게이트)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: S7 게이트
+        run: node scripts/gate.mjs S7 --explain
+
+  p2-k0:
+    name: 장치·확인 (K0 게이트, OmniRoute 3.8.51)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # 계약 환경 OmniRoute(20170)는 pnpm test:contract 가, 측정용 OmniRoute(20171)는 tests/bench/analytics.mjs 가 띄운다.
+    # G-K0.31 은 gh api 로 main 규칙을 읽는다 (공개 저장소라 읽기 권한 토큰으로 읽힌다. 못 읽으면 검사가 실패한다).
+    # G-K0.35·36 은 Red 커밋을 봉인 S7 뒤 이력에서 찾으므로 이력 전체가 필요하다.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: K0 게이트
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
+        run: node scripts/gate.mjs K0 --explain
+      - name: 분석 API 측정값 (확인 15번, G-K0.18 이 남긴 파일)
+        run: cat "$RUNNER_TEMP/bench-analytics.json"
+
+  p2-k1:
+    name: 작업 기반 (K1 게이트, 네 DB) 조각 ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/3", "2/3", "3/3"]
+    # 테스트 DB(MySQL·MariaDB·Postgres)는 test:migrate·test:db 실행기가 docker compose 로 띄우고, 로컬 D1·wrangler dev 는 검사가 직접 띄운다.
+    # G-K1.18 은 Red 커밋을 봉인 K0 뒤 이력에서 찾으므로 이력 전체가 필요하다. G-K1.21 은 gh api 로 main 규칙을 읽는다.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: K1 게이트
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
+        run: node scripts/gate.mjs K1 --explain --shard ${{ matrix.shard }}
+
+  p2-k2:
+    name: 한도 분배 (K2 게이트, OmniRoute 3.8.51) 조각 ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/3", "2/3", "3/3"]
+    # 계약 환경 OmniRoute(20170)는 pnpm test:contract 가, 측정용 OmniRoute(20171)는 tests/bench/analytics.mjs --rebalance 가,
+    # 테스트 DB(MySQL·MariaDB·Postgres)는 test:migrate 실행기가 docker compose 로 띄운다. G-K2.21 은 gh api 로 main 규칙을 읽는다.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: K2 게이트
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
+        run: node scripts/gate.mjs K2 --explain --shard ${{ matrix.shard }}
+
+  p2-k3:
+    name: 키 상태 (K3 게이트, OmniRoute 3.8.51) 조각 ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/2", "2/2"]
+    # 계약 환경 OmniRoute(20170)는 pnpm test:contract 가, 테스트 DB(MySQL·MariaDB·Postgres)는 test:db 실행기가 docker compose 로 띄운다.
+    # G-K3.15 는 gh api 로 main 규칙을 읽는다. 재현 빨강(G-K3.22·23)은 K2 봉인 뒤 Red 커밋을 꺼내 돈다 (fetch-depth 0).
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: K3 게이트
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
+        run: node scripts/gate.mjs K3 --explain --shard ${{ matrix.shard }}
+
+  p2-k4:
+    name: 키 API (K4 게이트, 다섯 DB·OmniRoute 3.8.51) 조각 ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/3", "2/3", "3/3"]
+    # 계약 환경 OmniRoute(20170)는 pnpm test:contract 가, 테스트 DB(MySQL·MariaDB·Postgres)는 test:db 실행기가 docker compose 로 띄운다.
+    # 로컬 D1·wrangler dev(G-K4.7)는 검사가 직접 띄운다. G-K4.27 은 gh api 로 main 규칙을 읽는다.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: K4 게이트
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
+        run: node scripts/gate.mjs K4 --explain --shard ${{ matrix.shard }}
+
+  p2-k5:
+    name: 완료 기준 (K5 게이트, 키 시나리오는 e2e 잡)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # G-K5.1 은 docker-sqlite 묶음(Caddy·가짜 상위 서버)을 띄우고 Claude Code(tests/e2e/claude-code, 고정 버전)를 그 폴더에 설치해 돈다.
+    # 키 시나리오 여섯(G-K5.3~8)은 e2e 매트릭스 잡이 같은 명령으로 돈다. G-K5.10 은 K4 봉인 뒤 Red 커밋을 꺼내 돈다 (fetch-depth 0).
+    # G-K5.12 는 gh api 로 main 규칙을 읽는다.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: K5 게이트 (G-K5.3~8 은 e2e 매트릭스가 같은 명령으로 돈다)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
+        run: node scripts/gate.mjs K5 --explain --skip-ids G-K5.3,G-K5.4,G-K5.5,G-K5.6,G-K5.7,G-K5.8
+
+  p2-k6:
+    name: 재발 방지 (K6 게이트)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # G-K6.6 은 처음 커밋부터 순서를 보고 G-K6.12·13·16 은 K5 봉인 뒤 Red 커밋을 꺼내 돌므로 이력 전체가 필요하다.
+    # 테스트 DB(MySQL·MariaDB·Postgres)는 test:db 실행기가 docker compose 로 띄운다 (G-K6.10). G-K6.7 은 gh api 로 main 규칙을 읽는다.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: K6 게이트
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
+        run: node scripts/gate.mjs K6 --explain
+
+  p3-m0:
+    name: 확인 (M0 게이트, 다섯 DB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # V29~V32 를 Node 네 DB(테스트 DB 는 packages/auth 실행기가 docker compose 로 띄운다)와 로컬 D1(시험 Worker, wrangler dev)에서 돈다.
+    # G-M0.13 은 gh api 로 main 규칙을 읽는다.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: M0 게이트
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
+        run: node scripts/gate.mjs M0 --explain
+
+  p3-m1:
+    name: 회원 기반 (M1 게이트, 다섯 DB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    # 동시 설정 쓰기(G-M1.4)·0003 마이그레이션(G-M1.9)·새 칼럼 입력 차단(G-M1.10)은 각 실행기가 테스트 DB 를 docker compose 로 띄우고,
+    # D1 은 시험 Worker(wrangler dev, G-M1.17)·wrangler d1 migrations apply --local 로 돈다.
+    # G-M1.16 은 M0 봉인 뒤 Red 커밋을 꺼내 돌므로 이력 전체가 필요하다. G-M1.15 는 gh api 로 main 규칙을 읽는다.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: M1 게이트
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
+        run: node scripts/gate.mjs M1 --explain
+
+  p3-m2:
+    name: 가입 정책 (M2 게이트, 다섯 DB·mailpit) 조각 ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/3", "2/3", "3/3"]
+    # 정책 표·하루 상한·설정 API(G-M2.1·10·36·38)는 서버 test:db 가, Better Auth 자리(G-M2.2·28·34)·응답 시간(G-M2.13·14)·SQLite 겹친 쓰기(G-M2.31)는
+    # packages/auth 실행기가 테스트 DB 를 docker compose 로 띄운다. D1(G-M2.12·17·18·29·30·35·37·39)은 시험 Worker(wrangler dev)로 돈다.
+    # 메일은 시험 메일러가 받는다 (mailpit 은 잡 이름의 실행판 표기 그대로, 이 게이트의 검사는 쓰지 않는다).
+    # 재현 빨강 셋(G-M2.21·22·33)은 M1 봉인 뒤 Red 커밋을 꺼내 돌므로 이력 전체가 필요하다. G-M2.27 은 gh api 로 main 규칙을 읽는다.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: M2 게이트
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
+        run: node scripts/gate.mjs M2 --explain --shard ${{ matrix.shard }}
+
+  p3-m3:
+    name: 초대 (M3 게이트, 다섯 DB) 조각 ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ["1/2", "2/2"]
+    # 초대 만들기·수락·정리의 네 DB 검사(G-M3.7·14·23)는 서버 test:db 실행기가 테스트 DB 를 docker compose 로 띄운다.
+    # D1(G-M3.8·19·28)은 시험 Worker(wrangler dev, test/signup·test/invites)로 돈다. 단위 검사(G-M3.1~6·9~13·20·22·24·26)는 SQLite 파일 DB 다.
+    # 재현 빨강 셋(G-M3.21·25·27)은 M2 봉인 뒤 Red 커밋을 꺼내 돌므로 이력 전체가 필요하다. G-M3.18 은 gh api 로 main 규칙을 읽는다.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: M3 게이트
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
+        run: node scripts/gate.mjs M3 --explain --shard ${{ matrix.shard }}
+      # TC-M3.T1.j·k 는 기존 M3 게이트 선택자(TC-M3.T1.[ghi])에 들어가지 않는다. 게이트·필수 검사 이름은 그대로 두고,
+      # MySQL·MariaDB 에서만 같은 잡의 다음 단계로 돈다. 종료코드 0 과 통과 수 4 를 함께 확인한다.
+      - name: M3 재초대 이메일 정확 비교 (MySQL·MariaDB)
+        run: node scripts/check-m3-email-db.mjs
+
+  p3-m4:
+    name: 회원 관리 (M4 게이트, 다섯 DB·OmniRoute 3.8.51)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # 회원 관리 뮤텍스·CAS(G-M4.2)는 서버 test:db 실행기가, 세션·재설정 경쟁(G-M4.6·8)은 packages/auth 시험이 테스트 DB 를 docker compose 로 띄운다.
+    # D1(G-M4.3)은 시험 Worker(wrangler dev, test/admin/member-wrangler.jsonc)로, 0005 업그레이드(G-M4.4)는 packages/db test:migrate 가 다섯 DB 로 돈다.
+    # 정지 직후 거부 계약(G-M4.17, TC-M4.T5.c)은 pnpm test:contract 실행기가 계약 환경 OmniRoute(20170)와 자체 가짜 상위 서버를 띄우고
+    # setup.mjs 로 준비한 뒤 돈다. 그래서 이 잡에 compose·setup 단계를 따로 두지 않는다. 로컬은 arm64, CI(ubuntu-latest)는 amd64 에서 돈다.
+    # G-M4.16 은 gh api 로 main 규칙을 읽는다.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: M4 게이트
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
+        run: node scripts/gate.mjs M4 --explain
+
+  # 분할한 단계의 필수 검사 이름은 집계 잡이 그대로 잇는다. 조각 잡의 표시 이름은 "<기존 이름> 조각 i/n" 이라
+  # ruleset 에 조각마다 이름을 더하지 않는다 (check-required-checks 가 집계 잡 needs 로 덮인 매트릭스 잡은 뺀다).
+  # 집계 잡은 게이트 명령을 돌리지 않는다 — 단계 명령은 조각 잡의 한 줄뿐이다.
+  p2-k1-result:
+    name: 작업 기반 (K1 게이트, 네 DB)
+    needs: p2-k1
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.p2-k1.result }}" = success
+
+  p2-k2-result:
+    name: 한도 분배 (K2 게이트, OmniRoute 3.8.51)
+    needs: p2-k2
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.p2-k2.result }}" = success
+
+  p2-k3-result:
+    name: 키 상태 (K3 게이트, OmniRoute 3.8.51)
+    needs: p2-k3
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.p2-k3.result }}" = success
+
+  p2-k4-result:
+    name: 키 API (K4 게이트, 다섯 DB·OmniRoute 3.8.51)
+    needs: p2-k4
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.p2-k4.result }}" = success
+
+  p3-m2-result:
+    name: 가입 정책 (M2 게이트, 다섯 DB·mailpit)
+    needs: p3-m2
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.p3-m2.result }}" = success
+
+  p3-m3-result:
+    name: 초대 (M3 게이트, 다섯 DB)
+    needs: p3-m3
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: test "${{ needs.p3-m3.result }}" = success
+
+  s1-seal:
+    name: 확인 항목 (S1 게이트, 봉인 커밋에서)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # S1 검사는 spikes/ 의 확인용 코드로 돈다. spikes/ 는 S7.T2 에서 지웠으므로 S1 봉인 커밋을 따로 꺼내 그 코드로 돈다.
+    # 0단계의 시험용 OmniRoute(20140, 손으로 준비)는 같은 버전·같은 가짜 상위 서버를 붙인 계약 환경(20170)으로 대신한다.
+    # 확인용 코드는 OMNI_URL·OMNI_PASSWORD 로 주소와 비밀번호를 받는다. Keycloak·DB 는 그 커밋의 up.sh 가 띄운다.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - name: 시험용 OmniRoute (계약 환경, 가짜 상위 서버 mko·mka)
+        run: |
+          # Docker Hub 가 이미지 받기에 가끔 502 를 준다. 5초·15초 쉬고 세 번까지 (scripts/compose-up.mjs 와 같은 간격)
+          # 다시 할 때마다 경고 주석을 남긴다. 느린 healthcheck 가 재시도에 묻히지 않고 실행 요약에 보이게 (K5 리뷰 L5)
+          n=1
+          for wait in 5 15 0; do
+            docker compose -f tests/contract/docker-compose.yml up -d --wait && break
+            if [ "$wait" = 0 ]; then exit 1; fi
+            echo "::warning title=docker compose up 재시도::계약 환경 띄우기 실패 ($n/3). ${wait}초 뒤 다시 띄운다"
+            docker compose -f tests/contract/docker-compose.yml ps -a || true
+            n=$((n + 1))
+            sleep "$wait"
+          done
+          node tests/contract/setup.mjs
+      - name: S1 봉인 커밋 꺼내기
+        run: |
+          head=$(node -p 'require("./gates/seals/S1.json").head')
+          git worktree add --detach "$RUNNER_TEMP/s1" "$head"
+          echo "S1_ROOT=$RUNNER_TEMP/s1" >> "$GITHUB_ENV"
+          # G-S1.4 가 읽는 V16 수집 로그(spikes/v16/paths.log)는 봉인 뒤 커밋에서야 저장소에 들어갔다 (그 전에는 이 컴퓨터에만 있었다).
+          # 그 로그를 추가한 커밋(8af3175, 고정)에서 꺼내 봉인 커밋 작업 트리에 둔다. 커밋이나 파일이 없으면 이 스텝이 실패한다
+          git show "8af317565f41ffc12d64464771a3a843c67ece4c:spikes/v16/paths.log" > "$RUNNER_TEMP/s1/spikes/v16/paths.log"
+      - name: 확인용 코드 의존성
+        working-directory: ${{ runner.temp }}/s1
+        run: |
+          pnpm -C spikes/v17 install --frozen-lockfile
+          pnpm -C spikes/v26 install --frozen-lockfile
+          # v27 은 자기 pnpm-workspace.yaml 이 없어 설치 스크립트 허용 목록이 없다 (pnpm 11 은 허용 안 된 빌드를 오류로 낸다).
+          # 저장소 최상위와 같은 허용 목록(esbuild·workerd)을 그 폴더에 두고 설치한다
+          printf 'allowBuilds:\n  esbuild: true\n  workerd: true\n' > spikes/v27/pnpm-workspace.yaml
+          pnpm -C spikes/v27 install --frozen-lockfile
+      - name: Keycloak·DB 띄우기 (V26·V27)
+        working-directory: ${{ runner.temp }}/s1
+        run: |
+          bash spikes/v26/up.sh
+          bash spikes/v27/up.sh
+      - name: S1 게이트 (봉인 커밋의 설정·코드)
+        env:
+          OMNI_URL: http://127.0.0.1:20170
+          OMNI_PASSWORD: contract-initial-password-5c1e9a
+        run: node scripts/gate.mjs --root "$S1_ROOT" S1 --explain
