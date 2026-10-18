@@ -1,0 +1,17 @@
+# TC-S7.T1.c 음성 대조: on.pull_request.branches 거르개 (pull_request 는 거르개를 둘 수 없다)
+# expect: trigger
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: S2 게이트
+        run: node scripts/gate.mjs S2
