@@ -7,6 +7,7 @@
 // - schedule(): 등록만 하고, Workers 진입점의 scheduled() 가 runScheduled(cron) 으로 부른다. Cron 호출은 겹칠 수 있다
 //   (1분 작업이 1분을 넘기면 다음 호출이 앞 호출과 같이 돈다). 그래서 Node 와 같은 job_leases 임대·하트비트 아래에서 돈다 (K1.T2).
 import { isValidIP } from "@better-auth/core/utils/ip";
+import type { SendEmailBinding } from "@magnetosphere/auth/mail";
 import { runLeased } from "./lease.ts";
 import { cronIntervalMinutes, type DbHandle, type Job, type Runtime } from "./types.ts";
 
@@ -20,10 +21,11 @@ export interface HyperdriveBinding {
   database: string;
 }
 
-/** Workers env. 바인딩 이름은 DB(D1) 또는 HYPERDRIVE. 나머지 문자열은 비밀 값·변수다 */
+/** Workers env. 바인딩 이름은 DB(D1) 또는 HYPERDRIVE. EMAIL 은 선택인 send_email 바인딩. 나머지 문자열은 비밀 값·변수다 */
 export interface WorkersEnv {
   DB?: unknown;
   HYPERDRIVE?: HyperdriveBinding;
+  EMAIL?: SendEmailBinding;
   [name: string]: unknown;
 }
 

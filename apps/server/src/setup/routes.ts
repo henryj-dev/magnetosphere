@@ -49,7 +49,7 @@ export function setupRoutes(services: () => Promise<Services>, opts: { setupToke
       if (b.status !== "connected") opts.log(`[setup] OmniRoute 접근 토큰을 자동으로 만들지 못했다 (${b.reason}). 관리자로 로그인해 토큰을 붙여 넣는다.`);
       return b.status;
     };
-    const result = await runSetup(s.db, body && typeof body === "object" ? body : {}, async () => s.cipher, bootstrap);
+    const result = await runSetup(s.db, body && typeof body === "object" ? body : {}, async () => s.cipher, bootstrap, s.mailCapabilities);
     return result.ok ? c.json({ ok: true, omniroute: result.omniroute }, 201) : c.json({ error: result.error }, result.status);
   });
   r.get("/omniroute", async (c) => {

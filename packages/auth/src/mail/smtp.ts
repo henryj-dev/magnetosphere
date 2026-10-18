@@ -19,20 +19,44 @@ export interface SmtpOptions {
   from: string;
 }
 
+// 단계별 제한(nodemailer)과 한 번 보내는 데 걸리는 총 상한. 소켓이 계속 조금씩 움직여도 총 상한에서 끊는다 (M5 리뷰 MEDIUM).
+const CONNECTION_TIMEOUT_MS = 5_000;
+const GREETING_TIMEOUT_MS = 5_000;
+const SOCKET_TIMEOUT_MS = 10_000;
+const TOTAL_DEADLINE_MS = 15_000;
+const TIMEOUT_DETAIL = "SMTP 서버 응답 시간 초과";
+
+class SmtpDeadline extends Error {}
+
 export function smtpMailer(opts: SmtpOptions): Mailer {
-  const transport = nodemailer.createTransport({
-    host: opts.host,
-    port: opts.port,
-    secure: opts.secure,
-    requireTLS: opts.requireTLS ?? !opts.secure,
-    ...(opts.user ? { auth: { user: opts.user, pass: opts.pass ?? "" } } : {}),
-  });
   return {
     async send(msg: MailMessage) {
+      // 보낼 때마다 transport 를 따로 만들고 닫는다 — 닫아도 동시에 보내는 다른 요청이 끊기지 않는다
+      const transport = nodemailer.createTransport({
+        host: opts.host,
+        port: opts.port,
+        secure: opts.secure,
+        requireTLS: opts.requireTLS ?? !opts.secure,
+        connectionTimeout: CONNECTION_TIMEOUT_MS,
+        greetingTimeout: GREETING_TIMEOUT_MS,
+        socketTimeout: SOCKET_TIMEOUT_MS,
+        ...(opts.user ? { auth: { user: opts.user, pass: opts.pass ?? "" } } : {}),
+      });
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        await transport.sendMail({ from: opts.from, to: msg.to, subject: msg.subject, text: msg.text, html: msg.html });
+        await Promise.race([
+          transport.sendMail({ from: opts.from, to: msg.to, subject: msg.subject, text: msg.text, html: msg.html }),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new SmtpDeadline()), TOTAL_DEADLINE_MS);
+          }),
+        ]);
       } catch (e) {
-        throw new MailError("smtp", null, (e as Error).message);
+        // 시간 초과는 라이브러리 원문 대신 고정 문구만 쓴다 (호스트·주소가 API 응답과 로그에 새지 않게)
+        const timedOut = e instanceof SmtpDeadline || (e as { code?: unknown }).code === "ETIMEDOUT";
+        throw new MailError("smtp", null, timedOut ? TIMEOUT_DETAIL : (e as Error).message);
+      } finally {
+        clearTimeout(timer);
+        transport.close();
       }
     },
   };

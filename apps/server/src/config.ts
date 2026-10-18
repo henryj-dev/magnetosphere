@@ -2,13 +2,13 @@
 import { createAuth, type Mailer } from "@magnetosphere/auth";
 import { selfDeleteCredentialProofOf } from "@magnetosphere/auth/internal";
 import { createClient } from "@magnetosphere/omniroute";
-import { consoleMailer, MailError } from "@magnetosphere/auth/mail";
+import { consoleMailer, MailError, type SendEmailBinding } from "@magnetosphere/auth/mail";
 import { createCipher } from "@magnetosphere/runtime/crypto";
 import type { Runtime } from "@magnetosphere/runtime/types";
 import type { Services } from "./app.ts";
 import { assertSetupTokenStrength } from "./setup/index.ts";
 import { signupAuthHooks } from "./signup/gate.ts";
-import { settingsMailer } from "./setup/mail.ts";
+import { settingsMailer, type SmtpFactory } from "./setup/mail.ts";
 import { readOmniRouteToken } from "./setup/omniroute.ts";
 
 export function requireSecret(rt: Runtime, name: string): string {
@@ -40,6 +40,10 @@ export interface ServiceOptions {
   waitUntil: (p: Promise<unknown>) => void;
   /** 메일 설정과 관계없이 늘 이 어댑터로 보낸다 (시험이 보낸 메일을 센다). 운영은 비운다 */
   mailer?: Mailer;
+  /** Node 진입점만 주입한다. 없으면 SMTP 설정 저장을 거부한다 */
+  smtp?: SmtpFactory;
+  /** Workers 진입점이 send_email 바인딩 env.EMAIL 을 넘긴다. 없으면 Cloudflare 메일 설정 저장을 거부한다 (선택 기능이라 시작은 막지 않는다) */
+  cloudflareEmail?: SendEmailBinding;
 }
 
 export async function buildServices(rt: Runtime, opts: ServiceOptions): Promise<Services> {
@@ -47,7 +51,7 @@ export async function buildServices(rt: Runtime, opts: ServiceOptions): Promise<
   // 키가 없거나 32바이트가 아니면 여기서 시작을 거부한다 (TC-S4.T2.c)
   const cipher = await createCipher(requireSecret(rt, "APP_ENCRYPTION_KEY"));
   const baseURL = requireSecret(rt, "BETTER_AUTH_URL");
-  const mailer = opts.mailer ?? settingsMailer(async () => db, async () => cipher, opts.fallbackMailer ?? fallbackMailer());
+  const mailer = opts.mailer ?? settingsMailer(async () => db, async () => cipher, opts.fallbackMailer ?? fallbackMailer(), opts.smtp, opts.cloudflareEmail);
   const auth = createAuth({
     database: db,
     baseURL,
@@ -56,7 +60,8 @@ export async function buildServices(rt: Runtime, opts: ServiceOptions): Promise<
     mailer,
     clientIp: rt.clientIp,
     waitUntil: opts.waitUntil,
-    onMailError: (e, info) => console.error(`[mail] ${info.to} 에게 "${info.subject}" 를 보내지 못했다`, e),
+    // 공급자 오류 원문에는 인증 정보·주소가 섞일 수 있다. 로그에 인자나 원문을 넣지 않는다.
+    onMailError: () => console.error("[mail] 메일을 보내지 못했다"),
     // 가입 판정 입력은 요청 하나에서 한 번만 읽고, 가입 뒤 감사 기록 member.signup 을 남긴다 (signup/gate.ts)
     ...signupAuthHooks(db),
   });
@@ -72,5 +77,5 @@ export async function buildServices(rt: Runtime, opts: ServiceOptions): Promise<
     if (!baseUrl || !token) return null;
     return (o?: { timeoutMs?: number }) => createClient({ baseUrl, credential: { token }, timeoutMs: o?.timeoutMs });
   };
-  return { db, auth: { ...auth, selfDeleteCredentialProof: selfDeleteCredentialProofOf(auth) }, cipher, omniroute, setupToken, clientIp: rt.clientIp, appOrigin: new URL(baseURL).origin, keysClient, mailer };
+  return { db, auth: { ...auth, selfDeleteCredentialProof: selfDeleteCredentialProofOf(auth) }, cipher, omniroute, setupToken, clientIp: rt.clientIp, appOrigin: new URL(baseURL).origin, keysClient, mailer, mailCapabilities: { smtp: !!opts.smtp, cloudflare: !!opts.cloudflareEmail } };
 }
