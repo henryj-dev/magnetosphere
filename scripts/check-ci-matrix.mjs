@@ -15,6 +15,10 @@
 //            matrix.combo 와 같아야 하고, 매트릭스 잡에 `pnpm e2e --combo ${{ matrix.combo }} --scenario keys` 명령 줄이 있어야 한다 [keys-scenario].
 //            S6 조합 불일치(combo-set)와 코드를 나눠, 키 시나리오 음성 대조가 조합이 어긋난 다른 이유로 통과하지 않게 한다 (K5 리뷰 L4).
 //            K5 잡은 그 여섯을 --skip-ids 로 빼므로, 매트릭스 스텝이 빠지면 키 시나리오가 CI 에서 하나도 돌지 않는다 (K5.T3).
+//            게이트 설정 M5 에 `pnpm e2e --combo <조합> --scenario members` 검사(3단계 완료 기준 E2E, G-M5.1~6)가 있으면 같은 방식으로
+//            그 조합 집합이 matrix.combo 와 같고 매트릭스 잡에 `pnpm e2e --combo ${{ matrix.combo }} --scenario members` 명령 줄이 있어야 한다
+//            [members-scenario]. 봉인 여부가 아니라 설정에 검사가 있는지로 켠다 (K5 키 시나리오와 같다). M5 잡은 그 여섯을 --skip-ids 로 뺀다 (M5.T3).
+//            members-regress(G-M5.7·8)는 매트릭스가 대신 돌지 않아 --skip-ids 로 뺄 수 없다.
 //   stage    봉인 파일이 있는(면제 아닌) 단계 중 S1 을 뺀 모든 단계를 어떤 스텝이 `node scripts/gate.mjs <단계>` 로 돈다 [stage-missing]. --skip-requires 는 쓰지 않고
 //            [skip-requires], --skip-ids 로 뺄 수 있는 것은 매트릭스가 대신 도는 E2E 검사뿐이다 [skip-ids].
 //            같은 단계를 `--shard <식>` 으로 나누면 그 식의 matrix 값을 펼쳐 분모가 같고 분자 1..n 이 정확히 한 번씩이어야 하며,
@@ -80,7 +84,8 @@ async function gateInfo(sealDir) {
       .map((c) => ({ id: c.id, combo: c.m[1] }));
   const checks = e2e("S6", /^pnpm e2e --combo (\S+)$/);
   const keys = e2e("K5", /^pnpm e2e --combo (\S+) --scenario keys$/);
-  return { phases: Object.keys(GATES).filter((p) => sealed(sealDir, p)), checks, keys };
+  const members = e2e("M5", /^pnpm e2e --combo (\S+) --scenario members$/);
+  return { phases: Object.keys(GATES).filter((p) => sealed(sealDir, p)), checks, keys, members };
 }
 
 const GATE_RE = /scripts\/gate\.mjs/;
@@ -203,10 +208,21 @@ function check(doc, name, expect, gates) {
         add("keys-scenario", `${job}: \`pnpm e2e --combo \${{ matrix.combo }} --scenario keys\` 명령 줄이 없다 — 게이트 K5 키 시나리오(${gates.keys.map((c) => c.id).join(", ")})가 CI 에서 돌지 않는다`);
       }
     }
+    // 3단계 완료 기준 E2E (M5): 회원 정책 시나리오도 같은 조합 전부를 매트릭스가 돈다
+    if (gates.members.length) {
+      const wantMembers = gates.members.map((c) => c.combo);
+      const missingMembers = combos.filter((c) => !wantMembers.includes(c));
+      const extraMembers = wantMembers.filter((c) => !combos.includes(c));
+      if (missingMembers.length) add("members-scenario", `${job}: 게이트 M5 회원 정책 시나리오에 없는 조합: ${missingMembers.join(", ")}`);
+      if (extraMembers.length) add("members-scenario", `${job}: 게이트 M5 회원 정책 시나리오 조합이 매트릭스에 없다: ${extraMembers.join(", ")}`);
+      if (!commands.some((c) => c.job === job && /^pnpm e2e --combo "?\$\{\{\s*matrix\.combo\s*\}\}"? --scenario members$/.test(c.line))) {
+        add("members-scenario", `${job}: \`pnpm e2e --combo \${{ matrix.combo }} --scenario members\` 명령 줄이 없다 — 게이트 M5 회원 정책 시나리오(${gates.members.map((c) => c.id).join(", ")})가 CI 에서 돌지 않는다`);
+      }
+    }
   }
 
   // stage
-  const e2eIds = new Set([...gates.checks, ...gates.keys].map((c) => c.id));
+  const e2eIds = new Set([...gates.checks, ...gates.keys, ...gates.members].map((c) => c.id));
   for (const phase of gates.phases.filter((p) => p !== "S1")) {
     const re = new RegExp(`^node scripts/gate\\.mjs ${phase}(?![0-9])(.*)$`);
     const hits = commands.map((c) => ({ ...c, m: re.exec(c.line) })).filter((c) => c.m);

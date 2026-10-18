@@ -2,7 +2,8 @@
 # 검사 정의는 gates/gates.config.mjs 하나뿐이라 CI 와 로컬 게이트가 어긋나지 않는다.
 # - 테스트 DB·mailpit·계약 환경 OmniRoute·배포 묶음은 각 검사의 실행기가 docker compose 로 직접 띄운다 (잡에는 docker 만 있으면 된다).
 # - 잡마다 러너가 따로라 포트가 겹치지 않는다. 무거운 묶음(배포·E2E)은 잡을 나눠 동시에 돈다.
-# - 게이트에서 빼는 검사는 E2E 여섯(G-S6.9~14)과 키 시나리오 여섯(G-K5.3~8)뿐이다. 그 열둘은 e2e 매트릭스 잡이 조합마다 같은 명령으로 돈다.
+# - 게이트에서 빼는 검사는 E2E 여섯(G-S6.9~14)·키 시나리오 여섯(G-K5.3~8)·회원 정책 시나리오 여섯(G-M5.1~6)뿐이다.
+#   그 열여덟은 e2e 매트릭스 잡이 조합마다 같은 명령으로 돈다.
 # - S1 은 확인용 코드(spikes/)를 S7.T2 에서 지웠으므로 봉인 커밋을 꺼내 그 커밋의 코드로 돈다 (s1-seal 잡).
 # scripts/check-ci-matrix.mjs (G-S7.1) 가 이 파일의 매트릭스·단계 잡·액션 SHA 고정을 검사한다.
 # 액션은 커밋 SHA 로 고정한다 (주석은 그 SHA 의 태그).
@@ -48,7 +49,7 @@ jobs:
         run: node --test --test-reporter=tap "scripts/*.test.mjs"
       # yaml 패키지를 쓰는 검사기 시험이라 설치 뒤에 돈다. gate.yml 의 스크립트 테스트는 설치 없이 돌아 여기 두지 못한다
       - name: CI 조각·집계 잡 검사기 시험
-        run: node --test --test-reporter=tap test/check-ci-matrix-partition.test.mjs test/check-ci-matrix-trigger.test.mjs test/check-required-checks-aggregate.test.mjs
+        run: node --test --test-reporter=tap test/check-ci-matrix-partition.test.mjs test/check-ci-matrix-trigger.test.mjs test/check-ci-matrix-members.test.mjs test/check-required-checks-aggregate.test.mjs
       - name: S0 게이트
         run: node scripts/gate.mjs S0
       - name: 패키지 단위 테스트 (서비스 없이 도는 것 전부)
@@ -185,6 +186,10 @@ jobs:
       # 2단계 완료 기준 E2E (K5.T3, G-K5.3~8). 끄기·여러 키 회원 한도·삭제·재발급. p2-k5 잡은 이 여섯을 --skip-ids 로 뺀다
       - name: 키 시나리오 (회원 한도·끄기·삭제·재발급)
         run: pnpm e2e --combo ${{ matrix.combo }} --scenario keys
+      # 3단계 완료 기준 E2E (M5.T3, G-M5.1~6). 초대·공개 가입 정책·정지·삭제. p3-m5 잡은 이 여섯을 --skip-ids 로 뺀다.
+      # 같은 러너에서 앞 스텝 뒤에 차례로 돈다 (시나리오마다 묶음을 띄우고 끝나면 내린다)
+      - name: 회원 정책 시나리오 (초대·가입 정책·정지·삭제)
+        run: pnpm e2e --combo ${{ matrix.combo }} --scenario members
 
   guard:
     name: 재발 방지 (S7 게이트)
@@ -517,6 +522,30 @@ jobs:
           # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
           CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
         run: node scripts/gate.mjs M4 --explain
+
+  p3-m5:
+    name: 완료 기준 (M5 게이트, 정책 시나리오는 e2e 잡)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # 회원 정책 시나리오 여섯(G-M5.1~6)은 e2e 매트릭스 잡이 같은 명령으로 돈다. 권한 회귀 둘(G-M5.7·8, docker-sqlite·workers-d1)은
+    # 매트릭스가 돌지 않아 이 잡에서 pnpm e2e 가 묶음(Docker 는 mailpit 포함, Workers 는 send_email 로컬 바인딩)을 직접 띄운다.
+    # 재현 빨강(G-M5.10)은 M4 봉인 뒤 Red 커밋을 꺼내 돌므로 이력 전체가 필요하다. G-M5.12 는 gh api 로 main 규칙을 읽는다.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: M5 게이트 (G-M5.1~6 은 e2e 매트릭스가 같은 명령으로 돈다)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # 재현 빨강(check-red)이 같은 Red 커밋의 작업 트리·설치를 이 잡 안에서 다시 쓴다 (잡이 끝나면 러너와 함께 사라진다)
+          CHECK_RED_CACHE_DIR: ${{ runner.temp }}/check-red
+        run: node scripts/gate.mjs M5 --explain --skip-ids G-M5.1,G-M5.2,G-M5.3,G-M5.4,G-M5.5,G-M5.6
 
   # 분할한 단계의 필수 검사 이름은 집계 잡이 그대로 잇는다. 조각 잡의 표시 이름은 "<기존 이름> 조각 i/n" 이라
   # ruleset 에 조각마다 이름을 더하지 않는다 (check-required-checks 가 집계 잡 needs 로 덮인 매트릭스 잡은 뺀다).
