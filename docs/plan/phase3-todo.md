@@ -1662,13 +1662,18 @@ TC-M5.T4.b  ruleset 필수 검사가 이 잡을 포함한다
 # M6 — 재발 방지와 잔재 회수 🔒 (M5 필요)
 
 **브랜치** `p3/m6`.
-**outputs** 없음. 새로 만드는 검사기·픽스처(`scripts/check-user-writes.mjs`, `test/check-user-writes.test.mjs`, `test/fixtures/user-writes/**`)는 모두 새 경로지만, 잠긴 단계의 `outputs`에 넣으면 앞 단계가 막히므로 넣지 않는다 (K6 과 같음).
+**outputs** 없음. 새로 만드는 검사기·픽스처·시험(`scripts/check-user-writes.mjs`, `scripts/user-writes.allow.json`, `test/check-user-writes.test.mjs`, `test/fixtures/user-writes/**`, `test/audit-phase2-detail.test.mjs`, `packages/auth/test/m6-jit-guard.test.ts`)은 모두 새 경로지만, 잠긴 단계의 `outputs`에 넣으면 앞 단계가 막히므로 넣지 않는다 (K6 과 같음).
 
 백로그 (M0 리뷰): 계획서 버전을 올릴 때마다 앞 단계의 막았던 확인 파일(`was_blocking: true`) `resolved_in`을 손으로 현재 버전으로 올려야 한다 (`check-verify resolved` 가 현재 버전과 같기를 요구, M0 에서 V12·V15·V18·V19·V20 을 v5.8 로). M6 에서 검사 방식(예: "현재 버전 이하")을 다시 본다.
+- **결정 (M6): 정확 일치를 유지한다.** ① `scripts/check-verify.mjs` 는 S1·K0 의 `outputs` 라 고치면 `--assert-order`(G-M6.6)와 봉인 재검이 깨진다. ② 정확 일치는 버전을 올리는 사람이 막았던 항목을 새 버전에서 다시 읽게 만든다. "이하" 로 바꾸면 옛 버전에서 풀린 판단이 새 계획서와 어긋나도 조용히 초록이 된다. 손이 드는 일은 계획서 버전을 올릴 때뿐이고, 빠뜨리면 게이트가 잡는다. 바꾸려면 4단계에서 새 플래그(기본 동작 유지)로 낸다.
 
 백로그 (M1 리뷰):
 - 2단계 audit 직접 INSERT 자리를 writeAudit 로 옮길 때 detail 키 재확인 (`admin-limits.ts`·`limits/*`·`keys/alerts.ts`·`queue/index.ts`, M1 `audit/` 의 금지 키·이메일 꼴 값 규칙에 걸리는지).
+  - **결정 (M6): 옮기지 않고 키 목록을 고정한다 (TC-M6.T6.a·b).** 읽은 결과: `admin-limits`(before·after 의 monthlyLimitUsd·maxKeys), `limits/daily`(keyDays·diffUsd·from·until), `limits/rebalance`(runs·error / members·userIds·errors), `queue/index`(action·attempts·keyId·error), `keys/apply` key_missing(keyId), `keys/reconcile` key_stuck(keyId·isActive)은 금지 키에 안 걸린다. `keys/reconcile` 의 unknown_m_key 둘·manage_scope_key 하나는 OmniRoute 키 이름을 `name` 키로 넣어 `forbidden_detail_key` 로 걸린다. 옮길 때는 `keyName`(예외 목록에 있음)으로 바꿔야 한다 — 제품 코드 수정이라 M6 에서 하지 않는다. `keys/alerts.ts` 는 detail 을 매개변수로 받으므로 부르는 쪽(apply·reconcile)에서 센다.
+  - 값 규칙(이메일 꼴)은 정적으로 못 본다. 값은 숫자·날짜·회원/키 id·`describeError` 문자열(OmniRoute 상태·응답 code, 오류 이름, 200자, 비밀 값 지움)이다. OmniRoute 응답 code 가 이메일 꼴이면 걸릴 수 있다 (UNKNOWN, 가능성 낮음).
 - 5단계 SSO JIT 매핑이 role·status 등 권한 칼럼을 채울 수 없는지 시험.
+  - **결정 (M6): 빈 곳만 단위 시험으로 더한다 (TC-M6.T6.c·d).** 기존 TC-SEC.1.b·TC-M2.T1.b 가 설치 뒤 `createOAuthUser`·`createUser` 거부를 DB 에서 보지만 생성 입력에 권한 값을 싣지 않는다. 새 시험은 `authOptions(cfg).databaseHooks.user.create.before` 를 DB 없이 불러 claim 의 role·status·한도가 결과를 바꾸지 못함을 본다.
+  - 남은 빈 곳 (제품 코드, 보고만): ① 설치 전(관리자 0명)에는 훅이 생성 입력을 그대로 통과시킨다 (`signupOrigin`·기본 한도만 넣음). 지금은 SSO 공급자를 등록할 길이 막혀 있지만(`SSO_DISABLED_PATHS`), 5단계에서 IdP 를 켜기 전에 이 분기도 이메일 가입 밖 경로를 거부해야 한다. ② 통과한 가입에서 `isBootstrapAdmin`·`authVersion`·`deletedAt` 은 판정 값으로 덮지 않고 Better Auth 의 `input: false` 걸러내기에 기댄다. 5단계 JIT 줄을 더할 때 훅이 허용 칼럼만 남기게 한다.
 
 ### ☐ M6.T1 — 임시 코드·꺼진 테스트 회수
 선행 없음 · 산출 없음 (검사만) · 되돌리기 해당 없음
@@ -1679,7 +1684,7 @@ TC-M5.T4.b  ruleset 필수 검사가 이 잡을 포함한다
 【테스트】
 ```
 TC-M6.T1.a  운영 코드에 시험 갈림길이 없다 (3단계 경로 포함)
-  단언:  G-K6.1 과 같은 grep, 3단계가 만든 apps/server/src/{settings,members,audit,signup,invites,admin,sessions} 포함 → 0
+  단언:  G-K6.1 과 같은 패턴·경로 → 0. 3단계가 만든 apps/server/src/{settings,members,audit,signup,invites,admin,sessions} 는 apps/server/src 아래라 이미 포함 (따로 더하면 두 번 센다)
   검출:  E2E 에서 가입 최소 응답 시간(400ms)이나 하루 상한을 끄려고 넣은 환경 변수가 운영에 남는 것. TC-M4.T3.g 의 로그인 멈춤 장치가 함수 인자가 아니라 환경 변수로 들어가는 것
 TC-M6.T1.b  건너뛴 테스트와 미구현 표식이 없다
   단언:  G-K6.2 와 같은 grep → 0
@@ -1690,27 +1695,31 @@ TC-M6.T1.b  건너뛴 테스트와 미구현 표식이 없다
 - [ ] G-M6.1 · G-M6.2 통과
 
 ### ☐ M6.T2 — 운영 코드는 user 테이블에 정해진 곳에서만 쓴다
-선행 없음 · 산출 `scripts/check-user-writes.mjs`, `test/check-user-writes.test.mjs`, `test/fixtures/user-writes/**` · 되돌리기 커밋 1개
+선행 없음 · 산출 `scripts/check-user-writes.mjs`, `scripts/user-writes.allow.json`, `test/check-user-writes.test.mjs`, `test/fixtures/user-writes/**` · 되돌리기 커밋 1개
 
 【작업】
-1. 문자열 grep 대신 TypeScript 컴파일러 API(`typescript` 패키지, 저장소에 있음)로 검사한다. 문자열 grep 은 `const u = h.schema.user; db.insert(u)` 같은 별칭을 놓친다. 커밋.
-   - 대상: `apps/server/src`·`packages/*/src`의 `.insert(X)`·`.update(X)`·`.delete(X)` 호출.
-   - `X`의 **타입**이 생성 스키마의 user 테이블(`typeof schema.user`, 세 방언)이면 그 파일·함수를 모은다.
-   - 모은 자리가 허용 목록과 다르면 실패한다. 허용 목록:
-     - `setup/index.ts` `runSetup` (최초 관리자)
-     - `packages/db/src/users.ts` `insertUser`
-     - 3단계 `admin/**`(상태·역할·삭제)
-     - `signup/**`가 쓰는 문장이 있으면 그것
-   - 음성 대조 픽스처 셋: 별칭 삽입, 구조 분해(`const { user } = h.schema`), 다른 파일에서 다시 내보낸 테이블.
+1. 문자열 grep 대신 TypeScript 구문 트리(AST)로 값의 출처를 따라간다. 타입 검사기는 쓰지 않는다 (스키마가 `any` 라 타입으로는 user 를 가릴 수 없다). 제품 모듈은 import·실행하지 않는다. `typescript` 는 `apps/server` 의존성을 빌려 쓴다. 문자열 grep 은 `const u = h.schema.user; db.insert(u)` 같은 별칭을 놓친다. 커밋.
+   - 대상: `apps/server/src`·`packages/*/src`(시험·`.d.ts` 제외)의 `.insert(X)`·`.update(X)`·`.delete(X)` 호출과 `sql` 태그 템플릿의 `update`·`insert into`·`delete from`.
+   - 분류: `X` 가 `schema.user`(별칭·괄호·`as`·`schema["user"]`·구조 분해·직접 named/namespace import·상대경로 재내보내기 한 단계·`sqliteTable("user")` 등)로 증명되면 **USER**, 다른 표로 증명되면 뺀다, 증명하지 못하면 **UNKNOWN**. 재할당·속성 대입·rest·조건식 양쪽이 다름·재내보내기 두 단계는 UNKNOWN 이다. Map·Set·Headers·Hono 만 쓰기 대상이 아니라고 본다.
+   - 고정 SQL 은 표 이름(`sqlTable`, 인용·대소문자·한정 이름 보존)을 자리 식별자에 넣는다. 그래서 같은 함수·연산·칼럼이어도 다른 표의 허용을 빌릴 수 없다. 읽지 못하는 SQL 은 `sql:dynamic` UNKNOWN 이다.
+   - 자리 하나 = 파일 · 함수 이름(익명 콜백은 조상 함수/호출 이름[인자 위치]~순번) · 연산 · 분류 · `sqlTable` · 칼럼 집합(`.set`·`.values`·upsert set, 객체 별칭·spread·뒤 대입 포함, 모르면 `?`).
+   - 허용 목록 `scripts/user-writes.allow.json` 과 **정확히** 같아야 한다: 없는 자리는 UNAUTHORIZED, 칼럼 집합이 넓거나 좁으면 COLUMNS, 사라진 허용 자리는 STALE. 항목마다 근거(`reason`)가 있어야 하고, 와일드카드·중복·UNKNOWN 자리를 USER 로 허용하는 것은 설정 오류다. 소스가 없으면 종료코드 2.
+   - 지금 USER 허용: `setup/index.ts` `runSetup`(최초 관리자 insert·보상 delete), `packages/db/src/users.ts` `insertUser`, `admin/guard-sql.ts` `mutationStatements`(전이 CAS update·delete), `routes/admin-limits.ts`(monthlyLimitUsd·maxKeys), `packages/auth` 의 `safe-reset-adapter.ts`(authVersion·emailVerified)·`signup-confirmation.ts`(emailVerified). `admin/**` 디렉터리 전체를 허용하지 않는다. UNKNOWN 허용은 근거와 함께 둔다 (`limits/store.ts` `upsert`·`setup/index.ts` `deleteCount` 의 표 매개변수, `routes/keys.ts` 의 `k(s)` 반환값, 고정 `api_keys` INSERT, 응답 머리글 삭제).
+   - 한계: ① 매개변수로 넘긴 테이블·함수 반환값의 흐름은 따라가지 않는다 (UNKNOWN 으로 닫고 함수·연산·칼럼 정확 허용을 요구한다). ② Better Auth 내부 쓰기(`drizzleAdapter` 의 user 생성·수정)는 제품 소스에 호출이 없어 보이지 않는다. 그 경로는 뒷받침 훅 시험(TC-SEC.1.b·TC-M2.T1.b·TC-M6.T6.c·d)이 맡는다. ③ 동적 SQL 은 표를 모른다 (`sql:dynamic`). ④ UNKNOWN 이 user 가 아님을 뜻하지 않는다. 새 UNKNOWN 자리는 허용 목록에 근거를 적어야 초록이 된다.
 
 【테스트】
 ```
-TC-M6.T2.a  user 테이블 쓰기 자리는 허용 목록과 같다
-  단언:  node scripts/check-user-writes.mjs → 0, 출력의 자리 목록 == 허용 목록
+TC-M6.T2.a  운영 쓰기 자리와 허용 목록이 정확히 같다
+  단언:  scan(저장소) 에 USER·UNKNOWN 자리가 있고 compare(자리, 허용 목록) == [], node scripts/check-user-writes.mjs → 0
   검출:  다음 단계가 편의 API 로 회원을 직접 넣어 가입 정책·기본 한도·권한 칼럼 보호·뒷받침 훅을 모두 비켜 가는 것
-TC-M6.T2.b  별칭·구조 분해·재내보내기로 쓴 것도 잡는다
-  단언:  --root test/fixtures/user-writes/{alias,destructure,reexport} 각각 → 종료코드 ≠ 0, 그 파일 이름 출력
-  검출:  insert\(user\) 같은 문자열 grep 이 const u = h.schema.user; db.insert(u) 를 놓쳐 검사가 늘 초록인 것
+TC-M6.T2.b~u  검사기 양성·음성 대조 (fixture test/fixtures/user-writes/**, --root·--allow)
+  b 별칭·괄호·schema 문자열 접근, c 구조 분해·schema 별칭(account 제외), d 재내보내기 한 단계, e sql 태그 세 쓰기·칼럼 보간,
+  f 같은 이름·블록 스코프·다른 표·type import 는 0 자리, g 생성 스키마 직접 import, h 동적·재할당 UNKNOWN·고정 user SQL,
+  i 사라진 허용 STALE, j 함수식·객체·클래스 메서드 구별, k 정확한 허용은 0, l 칼럼 넓힘 COLUMNS, m 와일드카드·중복·근거 없음 설정 오류,
+  n UNKNOWN 을 USER 로 허용 불가, o 소스 없는 root 종료코드 2, p 객체 별칭·spread·뒤 대입·upsert 칼럼, q 재내보내기 두 단계 UNKNOWN,
+  r 고정 SQL 표·연산·칼럼 보존, s 안 쓰는 민감 칼럼이 허용에 남으면 COLUMNS, t 다른 고정 표 허용을 빌릴 수 없다, u 인용·대소문자·한정 표 이름
+  단언:  음성 픽스처는 종료코드 1(실행 오류 2 는 검출로 세지 않음)·UNAUTHORIZED·그 파일 이름 출력, 비밀 값 꼴 문자열은 출력하지 않음
+  검출:  insert\(user\) 같은 문자열 grep 이 const u = h.schema.user; db.insert(u) 를 놓쳐 검사가 늘 초록인 것. 허용 목록이 디렉터리 단위로 넓어지는 것
 ```
 
 【통과】
@@ -1762,14 +1771,53 @@ TC-M6.T4.c  ruleset 필수 검사가 이 잡을 포함한다
 【통과】
 - [ ] G-M6.5 ~ G-M6.8 통과
 
+### ☐ M6.T6 — 백로그 고정 (M1 리뷰 둘, DB 없음)
+선행 없음 · 산출 `test/audit-phase2-detail.test.mjs`, `packages/auth/test/m6-jit-guard.test.ts` · 되돌리기 커밋 1개
+
+【작업】
+1. 2단계 audit 직접 INSERT 의 detail 키를 AST 로 읽어 목록을 고정하고, 그 키로 만든 detail 을 `auditRow` 에 넣어 본다. 제품 모듈은 `audit/index.ts` 만 import 한다. 커밋.
+2. 뒷받침 훅(`authOptions(cfg).databaseHooks.user.create.before`)을 `cfg.signupInputs` 로 판정 입력을 넣어 DB 없이 부른다. db 는 읽으면 던지는 대리 객체다. 커밋.
+
+【테스트】
+```
+TC-M6.T6.a  2단계 audit_log 직접 INSERT 의 detail 키 경로가 읽어서 정한 목록과 같다
+  단언:  alertOnce 를 부르는 파일 == [keys/apply.ts, keys/reconcile.ts], 여섯 파일의 detail 객체 키 경로(spread 는 같은 파일 const 를 펼침) == 기대 목록 10 줄
+  검출:  2단계 알림에 개인정보 키를 더하거나, 새 alertOnce 호출 자리가 생겨 키를 세지 않는 것
+TC-M6.T6.b  writeAudit 으로 옮기면 키 name 을 쓰는 키 알림 셋만 forbidden_detail_key 로 걸린다
+  단언:  걸린 자리 == reconcile 의 name 을 쓰는 셋(unknown_m_key 둘·manage_scope_key 하나), 나머지는 auditRow 통과
+  검출:  옮기는 PR 이 키 이름을 바꾸지 않아 알림 쓰기가 예외로 끊기는 것
+TC-M6.T6.c  설치 뒤 이메일 가입 밖 생성은 정책이 open 이고 claim 에 권한 값이 있어도 400 SIGNUP_CLOSED
+  단언:  ctx 경로 /sso/callback/idp·/callback/github·/sign-up/other·경로 없음·null·undefined 각각, 입력 role admin·status active·emailVerified true·monthlyLimitUsd null·maxKeys 99 → APIError BAD_REQUEST, code SIGNUP_CLOSED
+  검출:  5단계 JIT 가 IdP claim 으로 관리자·무제한 회원을 만드는 것
+TC-M6.T6.d  이메일 가입이 통과해도 권한 칼럼은 입력이 아니라 판정 값이다 (공개·초대)
+  단언:  같은 입력으로 /sign-up/email → 공개는 member·pending·emailVerified false·한도 5·maxKeys null·public, runAsInvite(member, 이메일 없음) 안에서는 member·active·false·5·null·invite
+  검출:  훅이 { ...판정, ...입력 } 순서로 바뀌어 입력이 판정을 덮는 것
+```
+
+【통과】
+- [ ] G-M6.18 · G-M6.19 통과
+
+### M6 결정 — M3 보안 리뷰 LOW 넷·M4 격리 복사본 대조
+
+M3 LOW 넷(M3 절 "백로그 (M3 보안 리뷰 LOW, 미룸)")은 모두 **보류**한다. 넷 다 제품 코드나 실환경 측정이 필요하고, M6 은 검사·문서만 고친다.
+- D1 비원자 가입 뒤 계정 없는 user 행: 보류. 고치려면 D1 가입 쓰기를 batch 로 묶거나 보상 삭제를 넣어야 한다 (제품 코드). D1 의 `transaction: false` 는 TC-SEC.2.a 가 고정한 선택이다. 이 작업 트리에는 미인증 공개 가입을 지우는 주기 작업이 없다 (`queue/runner.ts` 는 끝난 작업·초대·세션만 정리, `packages/db/src/signup.ts` 주석의 "미인증 공개 가입 정리"는 등록된 작업을 찾지 못함 — UNKNOWN). 그래서 그런 행이 생기면 그 이메일은 관리자가 지울 때까지 다시 가입하지 못한다. 4단계에서 정리 작업이나 batch 로 다룬다.
+- 수락 마무리 0행일 때의 감사: 보류. 회원은 이미 만들어졌고 경고(`invites/accept.ts`)가 남는다. 감사 action 을 더하려면 AUDIT_ACTIONS(Q17)와 제품 코드를 함께 바꿔야 한다.
+- Workers 수락 응답 시간(≥ 400ms) 실측: 보류. 실제 Workers 배포에서 재야 하는 측정이라 로컬 게이트 검사로 만들 수 없다. 4단계 배포 점검 목록에 넣는다.
+- IP 를 못 정할 때 한 `unknown` 칸 (`routes/guard.ts`): 보류. 런타임 어댑터가 IP 를 정하지 못하는 것은 설정 오류이고, 한 칸을 같이 쓰면 더 막히는 쪽(fail-closed)이다. 바꾸려면 제품 코드다.
+
+M4 격리 복사본 대조(M4 절 "재현 빨강")는 **게이트 검사로 등록하지 않기를 권한다** (등록 여부는 사용자 결정).
+- 실행기 `.omc/scripts/m4-red-mutants.py` 와 로그가 저장소 밖(로컬 전용)이라 CI 봉인 재검(gate.yml)이 같은 검사를 다시 돌 수 없다.
+- M4 는 봉인됐으므로 검사는 M6 에 들어가야 하는데, 임시 worktree·변이·복원을 하는 검사는 느리고 docker DB·환경에 기댄다 (`requires: ["local-services"]`).
+- 대신 M4 절의 표(HEAD `17afb68`, 대상 다섯)를 증거로 둔다. 4단계에서 같은 일이 또 필요하면, 변이를 설정 데이터로 적는 일반 검사기를 저장소에 넣는 것을 따로 정한다.
+
 ## 🚪 GATE M6
 
 | id | 검사 | 명령 | 통과 기준 |
 |---|---|---|---|
-| G-M6.1 | TC-M6.T1.a 시험 갈림길 0 | G-K6.1 의 패턴, 같은 경로 | == 0 |
-| G-M6.2 | TC-M6.T1.b 꺼진 테스트·미구현 표식 0 | G-K6.2 의 패턴·제외 | == 0 |
+| G-M6.1 | TC-M6.T1.a 시험 갈림길 0 | G-K6.1 의 패턴, 같은 경로 (`apps/server/src` 가 3단계 디렉터리를 포함) | == 0 |
+| G-M6.2 | TC-M6.T1.b 꺼진 테스트·미구현 표식 0 | G-K6.2 의 패턴·경로(`apps`·`packages`·`tests`·`scripts`·`test`)·제외 | == 0 |
 | G-M6.3 | TC-M6.T2.a user 쓰기 자리 | `node scripts/check-user-writes.mjs` | 종료코드 0 |
-| G-M6.10 | TC-M6.T2.b 별칭 음성 대조 | `node --test --test-reporter=tap test/check-user-writes.test.mjs` | 통과 = 3 |
+| G-M6.10 | TC-M6.T2.a~u 검사기 양성·음성 대조 | `node --test --test-reporter=tap test/check-user-writes.test.mjs` | 통과 = 21 (선언 21) |
 | G-M6.4 | TC-M6.T3.a 운영 문서 (기록) | grep `OmniRoute 호출 기록은 지워지지 않는다` in `deploy/README.md` | == 1 |
 | G-M6.11 | TC-M6.T3.a 운영 문서 (계정 단위 한도) | grep `회원 한도는 계정 단위` in `deploy/README.md` | == 1 |
 | G-M6.5 | TC-M6.T4.b 봉인 모두 유효 | `node scripts/gate.mjs --status --json` 에서 S0~S7·K0~K6·M0~M5 | 모두 ✅ |
@@ -1777,6 +1825,10 @@ TC-M6.T4.c  ruleset 필수 검사가 이 잡을 포함한다
 | G-M6.7 | ruleset · TC-M6.T4.c | `node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere` | 종료코드 0 |
 | G-M6.8 | TC-M6.T4.a CI 단계 잡 | grep `^\s+run: node scripts/gate\.mjs M6\b` in ci.yml | == 1 |
 | G-M6.9 | 어댑터 밖 관리 호출 0 | G-K4.23 과 같음 | == 0 |
+| G-M6.18 | TC-M6.T6.a·b audit detail 키 | `node --test --test-reporter=tap --test-name-pattern="TC-M6\.T6\." test/audit-phase2-detail.test.mjs` | 통과 = 2 (선언 2) |
+| G-M6.19 | TC-M6.T6.c·d 생성 훅 권한 칼럼 | `pnpm -C packages/auth exec vitest run test/m6-jit-guard.test.ts -t "TC-M6\.T6\."` | 통과 = 2 (선언 2) |
+
+G-M6.12~17 (TC-M6.T5, 삭제·인증·세션 후속)은 `gates.config.mjs` 에만 있고 이 표에 없다. G-M6.7·G-M6.8 은 ruleset·ci.yml `p3-m6` 잡이 생기기 전까지 실패한다.
 
 `node scripts/gate.mjs M6 --seal`
 

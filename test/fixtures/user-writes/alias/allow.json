@@ -1,0 +1,5 @@
+[
+  { "file": "apps/server/src/write.ts", "function": "alias", "operation": "insert", "table": "USER", "columns": ["email"], "reason": "픽스처의 이메일 삽입만 허용한다." },
+  { "file": "apps/server/src/write.ts", "function": "alias", "operation": "update", "table": "USER", "columns": ["status"], "reason": "픽스처의 상태 변경만 허용한다." },
+  { "file": "apps/server/src/write.ts", "function": "alias", "operation": "delete", "table": "USER", "columns": [], "reason": "픽스처의 삭제를 허용한다." }
+]

@@ -1,0 +1,10 @@
+[
+  {
+    "file": "apps/server/src/write.ts",
+    "function": "narrow",
+    "operation": "update",
+    "table": "USER",
+    "columns": ["name", "role"],
+    "reason": "음성 대조: 소스에서 쓰지 않는 민감 role 칼럼이 허용에 남아 있다."
+  }
+]

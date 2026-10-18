@@ -1,0 +1,171 @@
+[
+  {
+    "file": "apps/server/src/setup/index.ts",
+    "function": "runSetup",
+    "operation": "insert",
+    "table": "USER",
+    "columns": ["id", "name", "email", "emailVerified", "role", "isBootstrapAdmin", "signupOrigin", "createdAt", "updatedAt"],
+    "reason": "설치 토큰을 소비한 최초 관리자 생성. role=admin, bootstrap, setup 출처만 이 경로에서 쓴다."
+  },
+  {
+    "file": "apps/server/src/setup/index.ts",
+    "function": "runSetup",
+    "operation": "delete",
+    "table": "USER",
+    "columns": [],
+    "reason": "최초 관리자와 credential 생성 실패 시 방금 만든 user 행을 보상 삭제한다."
+  },
+  {
+    "file": "packages/db/src/users.ts",
+    "function": "insertUser",
+    "operation": "insert",
+    "table": "USER",
+    "columns": ["id", "name", "email", "emailVerified", "createdAt", "updatedAt"],
+    "reason": "직접 user 생성 저장 계층. 정규화 이메일과 기본 프로필만 쓰며 권한 칼럼은 받지 않는다."
+  },
+  {
+    "file": "apps/server/src/admin/guard-sql.ts",
+    "function": "mutationStatements",
+    "operation": "delete",
+    "table": "USER",
+    "columns": [],
+    "reason": "회원 전이 판정 뒤 row_deleted 상태의 거절·정리 CAS. actor, 세션, 인증 버전 조건을 포함한다."
+  },
+  {
+    "file": "apps/server/src/admin/guard-sql.ts",
+    "function": "mutationStatements",
+    "operation": "update",
+    "table": "USER",
+    "columns": ["status", "deletedAt", "email", "name", "image", "authVersion", "updatedAt", "role"],
+    "reason": "관리자·자기 탈퇴 전이 CAS. 상태·역할·익명화·인증 버전만 변경한다. admin 디렉터리 전체를 허용하지 않는다."
+  },
+  {
+    "file": "apps/server/src/routes/admin-limits.ts",
+    "function": "adminLimitRoutes/patch[1]",
+    "operation": "update",
+    "table": "USER",
+    "columns": ["monthlyLimitUsd", "maxKeys"],
+    "reason": "관리자 검사·입력 필드 검증 뒤 한도와 키 상한만 set에 넣는다."
+  },
+  {
+    "file": "packages/auth/src/safe-reset-adapter.ts",
+    "function": "credentialWriter/<return>",
+    "operation": "update",
+    "table": "USER",
+    "columns": ["authVersion", "updatedAt"],
+    "reason": "D1 credential 변경 batch의 user 버전 CAS. 비밀번호·권한 칼럼은 쓰지 않는다."
+  },
+  {
+    "file": "packages/auth/src/safe-reset-adapter.ts",
+    "function": "credentialWriter/<return>/transaction[0]",
+    "operation": "update",
+    "table": "USER",
+    "columns": ["authVersion", "updatedAt"],
+    "reason": "Node credential 트랜잭션의 SQLite 잠금용 버전 자기 대입과 버전 증가 CAS."
+  },
+  {
+    "file": "packages/auth/src/safe-reset-adapter.ts",
+    "function": "confirmResetEmail",
+    "operation": "update",
+    "table": "USER",
+    "columns": ["emailVerified", "updatedAt"],
+    "reason": "동일 reset 요청의 증가된 버전과 회원·출처·상태 조건을 확인하고 이메일 인증만 표시한다."
+  },
+  {
+    "file": "packages/auth/src/signup-confirmation.ts",
+    "function": "signupConfirmation/confirmEmail.createAuthEndpoint[2]",
+    "operation": "update",
+    "table": "USER",
+    "columns": ["emailVerified", "updatedAt"],
+    "reason": "가입 proof·credential 비밀번호·변경되지 않은 계정 조건을 확인한 이메일 인증 CAS."
+  },
+  {
+    "file": "apps/server/src/setup/index.ts",
+    "function": "deleteCount",
+    "operation": "delete",
+    "table": "UNKNOWN",
+    "columns": [],
+    "reason": "동적 table 매개변수라 UNKNOWN 유지. 현재 호출은 ensureSetupToken/runSetup의 appSettings 소비 두 곳뿐. 호출 간 테이블 전달은 추적 범위 밖이다."
+  },
+  {
+    "file": "apps/server/src/limits/store.ts",
+    "function": "upsert",
+    "operation": "update",
+    "table": "UNKNOWN",
+    "columns": ["?"],
+    "reason": "동적 table·set 매개변수라 UNKNOWN 유지. 현재 writeSetting은 appSettings(value,updatedAt,updatedBy), limits/daily.saveCost는 usageDaily(costUsd,updatedAt)를 넘긴다. 인자 흐름·칼럼은 증명하지 못한다."
+  },
+  {
+    "file": "apps/server/src/limits/store.ts",
+    "function": "upsert",
+    "operation": "insert",
+    "table": "UNKNOWN",
+    "columns": ["?"],
+    "reason": "동적 table·row 매개변수라 UNKNOWN 유지. 현재 appSettings(key,value,updatedAt,updatedBy) 또는 usageDaily(keyId,day,costUsd,updatedAt)만 전달한다. UNKNOWN이 user 안전성을 뜻하지 않는다."
+  },
+  {
+    "file": "apps/server/src/routes/issue.ts",
+    "function": "reserveSlot",
+    "operation": "sql:insert",
+    "table": "UNKNOWN",
+    "sqlTable": "api_keys",
+    "columns": ["id", "user_id", "omniroute_key_id", "key_preview", "label", "state", "disabled_reason", "sync_state", "created_at"],
+    "reason": "SQLite/D1 분기의 고정 INSERT INTO api_keys (...) SELECT. 보간은 값뿐이고 user 쓰기가 아니다. schema 객체 출처는 미증명 UNKNOWN이나 고정 api_keys 식별자도 정확 비교하므로 다른 표·user와 합쳐지지 않는다. 이 함수의 insert와 명시된 아홉 칼럼만 허용한다."
+  },
+  {
+    "file": "apps/server/src/routes/keys.ts",
+    "function": "keyRoutes/patch[1]",
+    "operation": "update",
+    "table": "UNKNOWN",
+    "columns": ["label"],
+    "reason": "표 반환 함수 k(s)의 인자·반환값은 추적하지 않아 UNKNOWN. 현재 k는 s.db.schema.apiKeys를 반환하고 이 콜백은 label만 쓴다."
+  },
+  {
+    "file": "apps/server/src/routes/keys.ts",
+    "function": "keyRoutes/post[1]~2",
+    "operation": "update",
+    "table": "UNKNOWN",
+    "columns": ["state", "disabledReason"],
+    "reason": "두 번째 post 콜백(키 비활성화). k(s) 반환값은 현재 apiKeys지만 함수 간 흐름을 증명하지 못해 UNKNOWN 유지."
+  },
+  {
+    "file": "apps/server/src/routes/keys.ts",
+    "function": "deleteKeyRow",
+    "operation": "update",
+    "table": "UNKNOWN",
+    "columns": ["state", "deletedAt", "syncState"],
+    "reason": "k(s)가 반환하는 apiKeys의 소프트 삭제. 함수 반환값 분석 미지원이라 UNKNOWN 유지."
+  },
+  {
+    "file": "packages/auth/src/signup-confirmation.ts",
+    "function": "signupConfirmation/changePassword",
+    "operation": "delete",
+    "table": "UNKNOWN",
+    "columns": [],
+    "reason": "ctx.context.responseHeaders.delete의 쿠키 제거다. 외부 Context 속성은 Headers 생성자로 증명하지 못하므로 UNKNOWN으로 노출한다."
+  },
+  {
+    "file": "packages/auth/src/signup-confirmation.ts",
+    "function": "signupConfirmation/sessionAfter",
+    "operation": "delete",
+    "table": "UNKNOWN",
+    "columns": [],
+    "reason": "ctx.context.responseHeaders.delete의 쿠키 제거. 외부 Headers 속성 출처 미확인으로 UNKNOWN 유지."
+  },
+  {
+    "file": "packages/auth/src/signup-confirmation.ts",
+    "function": "signupConfirmation/guardSessionResponse",
+    "operation": "delete",
+    "table": "UNKNOWN",
+    "columns": [],
+    "reason": "ctx.context.responseHeaders.delete의 쿠키 제거. user 삭제로 판정하지 않되 미확인 호출을 숨기지 않는다."
+  },
+  {
+    "file": "packages/auth/src/signup-confirmation.ts",
+    "function": "signupConfirmation/guardSignInResponse",
+    "operation": "delete",
+    "table": "UNKNOWN",
+    "columns": [],
+    "reason": "ctx.context.responseHeaders.delete의 쿠키 제거. 외부 Context 속성은 출처를 추적하지 못해 UNKNOWN 유지."
+  }
+]

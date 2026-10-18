@@ -940,6 +940,22 @@ export const GATES = {
     strictTests: true,
     outputs: [],
     checks: [
+      // M6.T1 임시 코드 회수 (G-K6.1·G-K6.2 와 같은 패턴·제외). 3단계 디렉터리(apps/server/src/{settings,members,audit,signup,invites,admin,sessions})는
+      // 이미 apps/server/src 아래라 경로를 따로 더하지 않는다 (더하면 같은 파일을 두 번 센다)
+      { id: "G-M6.1", how: "grep", desc: "TC-M6.T1.a 운영 코드에 시험 갈림길 0 (3단계 경로 포함)", pattern: "\\benv(\\.|\\?\\.|\\[|\\?\\.\\[)[\"']?(CI\\b|VITEST|TEST_|E2E_|FAKE_|MG_TEST)|NODE_ENV\\s*[!=]==?\\s*[\"']test|import\\.meta\\.env|secret\\([\"'](TEST|E2E|FAKE)_|globalThis\\.__test", in: ["apps/server/src", "apps/web/src", "packages/auth/src", "packages/db/src", "packages/omniroute/src", "packages/runtime/src"], op: "==", limit: 0 },
+      { id: "G-M6.2", how: "grep", desc: "TC-M6.T1.b 꺼진 테스트·미구현 표식 0 (3단계 경로 포함)", pattern: "\\.(only|skip|skipIf|todo)\\(|\\.(skip|only)\\.|runIf\\(|\\b(skip|todo)\\s*:\\s*true|\\b(xit|xdescribe|xtest)\\(|TODO|FIXME|not implemented", in: ["apps", "packages", "tests", "scripts", "test"], exclude: ["apps/web/build/**", "**/.svelte-kit/**", "**/.wrangler/**", "**/dist/**", "scripts/gate.test.mjs"], op: "==", limit: 0 },
+      // M6.T2 user 테이블 쓰기 자리 (AST 별칭 추적, 허용 목록 scripts/user-writes.allow.json). G-M6.10 은 시험 파일의 선언 21 개(TC-M6.T2.a~u) 전부다
+      { id: "G-M6.3", how: "cmd", desc: "TC-M6.T2.a user 쓰기 자리 == 허용 목록 (USER·UNKNOWN 자리, 함수·연산·칼럼 정확 일치)", cmd: "node scripts/check-user-writes.mjs" },
+      { id: "G-M6.10", how: "test", desc: "TC-M6.T2.a~u 검사기 양성·음성 대조 (별칭·구조 분해·재내보내기·SQL·STALE·칼럼·표 식별)", cmd: "node --test --test-reporter=tap test/check-user-writes.test.mjs", expectPassed: 21 },
+      // M6.T3 운영 문서
+      { id: "G-M6.4", how: "grep", desc: "TC-M6.T3.a 운영 문서에 탈퇴해도 OmniRoute 기록이 남는다 (Q9)", pattern: "OmniRoute 호출 기록은 지워지지 않는다", in: ["deploy/README.md"], op: "==", limit: 1 },
+      { id: "G-M6.11", how: "grep", desc: "TC-M6.T3.a 운영 문서에 회원 한도는 계정 단위 (Q9)", pattern: "회원 한도는 계정 단위", in: ["deploy/README.md"], op: "==", limit: 1 },
+      // M6.T4 1·2·3단계 봉인·순서·필수 검사. G-M6.7·G-M6.8 은 ruleset·ci.yml p3-m6 잡이 생기기 전까지 실패한다
+      { id: "G-M6.5", how: "cmd", desc: "TC-M6.T4.b 봉인 S0~S7·K0~K6·M0~M5 모두 유효", cmd: `node -e 'const r=JSON.parse(require("child_process").execFileSync(process.execPath,["scripts/gate.mjs","--status","--json"],{encoding:"utf8"}));const want=["S0","S1","S2","S3","S4","S5","S6","S7","K0","K1","K2","K3","K4","K5","K6","M0","M1","M2","M3","M4","M5"];const bad=want.filter(p=>r.find(x=>x.phase===p)?.state!=="sealed");if(bad.length){console.error("봉인 무효·없음: "+bad.join(", "));process.exit(1)}console.log("S0~S7·K0~K6·M0~M5 봉인 유효")'` },
+      { id: "G-M6.6", how: "cmd", desc: "TC-M6.T4.b 처음 커밋부터 순서 위반 없음", cmd: 'node scripts/gate.mjs --assert-order --base "$(git rev-list --max-parents=0 HEAD)"' },
+      { id: "G-M6.7", how: "cmd", desc: "TC-M6.T4.c ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
+      { id: "G-M6.8", how: "grep", desc: "TC-M6.T4.a CI 단계 잡 (M6)", pattern: "^\\s+run: node scripts/gate\\.mjs M6\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
+      { id: "G-M6.9", how: "grep", desc: "어댑터 밖 OmniRoute 관리 호출 0 (3단계 코드 포함, G-K4.23 과 같은 규칙)", pattern: "/api/(keys|usage)", in: ["apps", "packages"], exclude: ["packages/omniroute/**"], op: "==", limit: 0 },
       // G-M6.1~11 은 실행판 GATE 표(docs/plan/phase3-todo.md)의 자리다. M6 후속(TC-M6.T5)은 G-M6.12 부터 둔다.
       // expectPassed 는 정적 목록 기준이다 (describe.each 의 DB 수 × it 수)
       // M6.T5 회원 삭제의 초대 정리·0006 소급 익명화 (U1)
@@ -952,6 +968,10 @@ export const GATES = {
       { id: "G-M6.16", how: "test", desc: "TC-M6.T5.e 손상된 auth_version 은 stale_member, 정확히 상한은 version_exhausted", cmd: 'pnpm -C apps/server test test/admin/version-of.test.ts -t "TC-M6.T5.e"', expectPassed: 5 },
       // M6.T5 세션 주기 정리 (L1). 새 cron 없이 1분 queueJob 에서 돈다. 선언 12 = DB 당 3 × 4
       { id: "G-M6.17", how: "test", requires: ["local-services"], desc: "TC-M6.T5.f 만료·삭제 회원 세션 정리·500행 묶음·펜싱·queueJob 연결 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-M6.T5.f" --db sqlite,mysql,mariadb,pg', expectPassed: 12 },
+      // M6.T6 백로그 고정 (DB 없음). 선언: test/audit-phase2-detail.test.mjs 2 (a·b), packages/auth/test/m6-jit-guard.test.ts 2 (c·d)
+      // auth 쪽은 scripts/test.mjs(테스트 DB 컨테이너)를 거치지 않고 vitest 를 바로 부른다 (G-M5.18 과 같음)
+      { id: "G-M6.18", how: "test", desc: "TC-M6.T6.a·b 2단계 audit 직접 INSERT 의 detail 키 목록·writeAudit 규칙에 걸리는 자리 (키 name 셋)", cmd: nodeTest("test/audit-phase2-detail.test.mjs", "TC-M6\\.T6\\."), expectPassed: 2 },
+      { id: "G-M6.19", how: "test", desc: "TC-M6.T6.c·d 설치 뒤 이메일 가입 밖 생성 거부·통과한 가입의 권한 칼럼은 판정 값 (생성 훅 단위)", cmd: 'pnpm -C packages/auth exec vitest run test/m6-jit-guard.test.ts -t "TC-M6\\.T6\\."', expectPassed: 2 },
     ],
   },
 };
