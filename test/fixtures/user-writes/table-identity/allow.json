@@ -1,0 +1,11 @@
+[
+  {
+    "file": "apps/server/src/write.ts",
+    "function": "same",
+    "operation": "sql:insert",
+    "table": "UNKNOWN",
+    "sqlTable": "api_keys",
+    "columns": ["id"],
+    "reason": "정확한 api_keys INSERT만 허용한다. 같은 함수의 user·audit_log는 별도 자리여야 한다."
+  }
+]

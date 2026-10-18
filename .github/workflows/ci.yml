@@ -550,6 +550,29 @@ jobs:
   # 분할한 단계의 필수 검사 이름은 집계 잡이 그대로 잇는다. 조각 잡의 표시 이름은 "<기존 이름> 조각 i/n" 이라
   # ruleset 에 조각마다 이름을 더하지 않는다 (check-required-checks 가 집계 잡 needs 로 덮인 매트릭스 잡은 뺀다).
   # 집계 잡은 게이트 명령을 돌리지 않는다 — 단계 명령은 조각 잡의 한 줄뿐이다.
+
+  p3-m6:
+    name: 재발 방지 (M6 게이트)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    # 3단계 마지막 단계. 잔재·꺼진 테스트 grep(G-M6.1·2), user 쓰기 AST 검사(G-M6.3·10), 운영 문서(G-M6.4·11),
+    # 1·2·3단계 봉인·순서(G-M6.5·6), ruleset(G-M6.7, gh api), 이 잡 자신(G-M6.8), M4 보안 후속(G-M6.12~17, 다섯 DB·D1)과 백로그 고정(G-M6.18·19).
+    # 다섯 DB 시험은 서버·db 실행기가 테스트 DB 를 docker compose 로 띄운다. 순서 검사(G-M6.6)는 처음 커밋부터 보므로 이력 전체가 필요하다.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: M6 게이트
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/gate.mjs M6 --explain
+
   p2-k1-result:
     name: 작업 기반 (K1 게이트, 네 DB)
     needs: p2-k1

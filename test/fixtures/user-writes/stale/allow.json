@@ -1,0 +1,10 @@
+[
+  {
+    "file": "apps/server/src/clean.ts",
+    "function": "removedWriter",
+    "operation": "update",
+    "table": "USER",
+    "columns": ["name"],
+    "reason": "음성 대조: 실제로 존재하지 않는 낡은 항목이다."
+  }
+]
