@@ -1,0 +1,21 @@
+# 3단계 회원 E2E 메일 덧씌우기 (M5, pnpm e2e --combo docker-* --scenario members|members-regress).
+# tests/deploy/compose.test.yml·tests/e2e/keys/compose.mock.yml 위에 얹는다.
+# - 회원 앱이 SMTP 로 보내는 인증 메일을 묶음 안 mailpit 이 받는다. app 은 internal 망에서 mailpit:1025 로 붙는다.
+#   SMTP 인증 이름·비밀번호는 시험 고정값이다 (tests/e2e/members/env.mjs MAIL_SMTP 와 같다). 평문 연결에서 AUTH 를 받게 한다.
+# - 시험은 mailpit HTTP API 로만 메일을 읽는다. 8025 를 127.0.0.1 의 빈 포트에만 연다 (docker compose port 로 찾는다).
+#   SMTP 1025 는 이 컴퓨터에 열지 않는다.
+# 같은 프로젝트 이름으로 얹으므로 stack.down() 의 down -v --remove-orphans 가 mailpit 도 내린다.
+services:
+  mailpit:
+    image: axllent/mailpit:v1.31.2
+    environment:
+      MP_SMTP_AUTH: "mg:mgpass-fixed-test"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    ports:
+      - "127.0.0.1::8025"
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
