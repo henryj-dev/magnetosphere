@@ -1498,13 +1498,38 @@ Red 커밋 `834c264`(꼬리줄 `Red: TC-M4.T1.d`·`TC-M4.T3.a`·`TC-M4.T4.r`·`T
 **브랜치** `p3/m5`.
 **outputs** `tests/e2e/members/**`. `tests/e2e/run.mjs`(1단계 S6)는 공용이라 넣지 않는다.
 
+### ☐ M5.T0 — E2E 메일 공급자 (SMTP·Cloudflare)
+선행 없음 · 산출 `apps/server/src/setup/mail.ts`·`apps/server/src/signup/mail.ts`·런타임 진입점(기존 파일), `apps/server/test/mail/**` · 되돌리기 커밋 1개
+
+(2026-10-18 추가) M5.T1 의 `open`·`domain_allowlist` 메일을 받으려고 Q20 메일 설정 API 에 공급자 둘을 더한다.
+- Node: `provider: "smtp"`. 운영 SMTP 와 같은 경로로 보내고, E2E·시험에서는 mailpit 이 받는다.
+- Workers: `provider: "cloudflare"` 와 `from`. Cloudflare `send_email` 바인딩(`EMAIL`)으로 보낸다. E2E 는 로컬 바인딩(`remote: false`)이 받는다. 사용자가 고른 방식이고, 콘솔 출력으로 받으려던 계획을 대신한다.
+- 바인딩 없는 Workers 는 `cloudflare` 저장을 거부하고, Workers 는 SMTP 를 거부한다. 거부 전에 권한·Origin 검사가 먼저 돈다.
+
+이력: 처음 계획(M5.T1 작업 1)은 시나리오가 가짜 Resend 수신기를 띄우고 메일 설정 API 로 Resend 주소를 그쪽으로 덮어쓰는 것이었다. 이 계획은 잘못이었다. 메일 설정 API 의 Resend 입력에는 주소 칸이 없고(`provider`·`from`·`apiKey`), 그대로 하려면 운영 코드에 시험용 주소를 바꾸는 자리를 새로 넣어야 했다. 위 두 공급자로 바꿨다.
+
+【테스트】
+```
+TC-M5.T0.a~h·l    Node SMTP 저장·AAD 암호화·잘못된 입력 400·활성 관리자·Origin·setup·인증 생략·비활성 런타임·Resend 계약 유지·비밀 미노출 (apps/server/test/mail/smtp.test.ts)
+TC-M5.T0.smtp.corrupt  손상·변조된 메일 설정 행은 전송·fallback·네트워크 호출 없이 고정 MailError, 테스트 메일 502 (smtp.test.ts)
+TC-M5.T0.i~k      Workers SMTP 400 smtp_unsupported·권한 먼저·setup 토큰 미소비 (smtp.workers.test.ts)
+TC-M5.T0.cloudflare.a~g  Node Cloudflare 거부·바인딩 저장·from 검사·비밀 미노출·fallback 없음 (cloudflare.test.ts)
+TC-M5.T0.cloudflare.h·i  바인딩 없는 Workers Cloudflare 거부·setup 토큰 미소비 (cloudflare.workers.test.ts)
+TC-M5.T0.smtp-timeout.a~f  SMTP 어댑터 시간 제한: 전송 전체 15초·연결 5초·인사 5초·소켓 10초, 멈춘 서버는 고정 문구 MailError,
+                           타이머·transport 정리, 전송마다 transport 따로, ETIMEDOUT 원문 미노출, 다른 오류는 기존대로
+                           (packages/auth/test/smtp-timeout.test.ts, nodemailer 가짜로 mailpit 없이 돈다. M5 리뷰 MEDIUM)
+```
+
+【통과】
+- [ ] G-M5.13 ~ G-M5.16 · G-M5.18 통과 (expectPassed 는 선언 수: 10·7·3·2·6. 실행 결과에 맞춘 수가 아니다)
+
 ### ☐ M5.T1 — 여섯 조합 정책 시나리오
 선행 없음 · 산출 `tests/e2e/members/**`, `tests/e2e/run.mjs`(`--scenario members` 인자만) · 되돌리기 커밋 1개
 
 【작업】
 1. `pnpm e2e --combo <조합> --scenario members`를 만든다. 1단계 흐름(설치·관리자) 뒤 아래 시나리오를 차례로 돈다. 커밋.
    - 회원은 DB 에 직접 넣지 않고 초대·가입 API 로만 만든다.
-   - `open`·`domain_allowlist` 시나리오의 메일: 시나리오가 작은 HTTP 서버(가짜 Resend 수신기)를 띄우고, Q20 메일 설정 API 로 Resend 주소를 그쪽으로 둔다. 받은 인증 링크를 연다.
+   - `open`·`domain_allowlist` 시나리오의 메일: (2026-10-18 정정) Docker 조합은 메일 설정 API 를 SMTP 로 두고 mailpit 이 받는다. Workers 조합은 `cloudflare` 로 두고 `send_email` 로컬 바인딩이 받는다 (M5.T0). 받은 인증 링크를 연다. 처음 적은 가짜 Resend 수신기·Resend 주소 덮어쓰기는 잘못된 계획이었다 (M5.T0 이력).
    - 조합마다 끝나면 내린다 (메모리 4GB).
 
 【테스트】
@@ -1545,7 +1570,9 @@ TC-M5.T2.a  가입·초대 수락 본문의 권한 칼럼은 무시된다 (7장)
   단언:  open 공개 가입·초대 수락 본문에 role admin·status active·monthlyLimitUsd null·isBootstrapAdmin true·emailVerified true → 회원 role member·status pending(공개)·active(초대)·monthly_limit_usd 5·is_bootstrap_admin false·emailVerified 는 초대 문맥대로
   검출:  초대 수락 API 가 본문을 auth.api.signUpEmail 에 그대로 넘겨, Better Auth 의 input: false 는 지나도 우리 훅의 data 병합에 본문 값이 섞이는 것
 TC-M5.T2.b  이메일 없는 관리자 초대·토큰 재사용·정지 접근 (7장 + 3단계)
-  단언:  {role:admin} 초대 400 · 쓴 토큰 재수락 400 · 동시 수락 5건 201 == 1 · 정지 회원 옛 쿠키 401 · 정지 관리자 PUT /api/setup/omniroute 403
+  단언:  {role:admin} 초대 400 · 쓴 토큰 재수락 400 · 동시 수락 5건 201 == 1 · 정지 회원 옛 쿠키 401 · 정지 관리자 옛 쿠키 PUT /api/setup/omniroute 401 unauthorized
+  정정 (2026-10-18):  처음 적은 "정지 관리자 … 403" 은 실제 SDK 경로와 다르다. 운영 suspend 가 세션을 폐기해 옛 쿠키의 getSession 이 null 이라 401 이다.
+                      가짜 인증이 id 를 돌려줄 때 현재 DB status 로 판정하는 403 은 M4 setup guard 시험 몫이다 (TC-M4.T5.a, G-M4.10). E2E 는 401 만 받는다 (401·403 둘 다 허용하지 않는다)
   검출:  단위 시험은 초록인데 실제 배포 묶음(Caddy·Workers)에서 쿠키·Origin 처리 차이로 한 경로가 빠지는 것
 ```
 
@@ -1553,22 +1580,26 @@ TC-M5.T2.b  이메일 없는 관리자 초대·토큰 재사용·정지 접근 (
 - [ ] G-M5.7 · G-M5.8 통과
 
 ### ☐ M5.T3 — CI 에서 정책 시나리오를 E2E 매트릭스가 돈다
-선행 M5.T1 · 산출 `.github/workflows/ci.yml`, `scripts/check-ci-matrix.mjs`, `test/fixtures/ci-guard/e2e-members-missing.yml` · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-M5.T3.a`
+선행 M5.T1 · 산출 `.github/workflows/ci.yml`, `scripts/check-ci-matrix.mjs`, `test/fixtures/ci-guard/e2e-members-missing.yml`, `test/check-ci-matrix-members.test.mjs` · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-M5.T3.a`
 
 【작업】
-1. 음성 대조 픽스처를 넣는다. 꼬리줄 `Red: TC-M5.T3.a`. 커밋.
-   - 픽스처 `e2e-members-missing.yml`: 머리 `# expect: members-scenario`, 매트릭스에 `--scenario members`가 없다.
-   - M5 단계에 이 픽스처를 보는 검사를 둔다.
+1. 음성 대조 픽스처와 규칙 시험 `test/check-ci-matrix-members.test.mjs`를 넣는다. 꼬리줄 `Red: TC-M5.T3.a`. 커밋.
+   - 픽스처 `e2e-members-missing.yml`: 머리 `# expect: members-scenario`, 매트릭스에 `--scenario members`가 없다. 실제 ci.yml 에서 그 스텝과 아직 봉인 안 된 `p3-m5` 잡을 지운 사본이다 (2026-10-18 정정). 지금 검사기에서는 `[members-scenario]` 하나만 나온다. M5 가 봉인 전이라 `[stage-missing]`은 없다. 옛 검사기에서는 문제가 0 이다. `p3-m5` 잡을 남기면 그 `--skip-ids`가 옛 검사기에서 `[skip-ids]`로 걸려 재현 빨강이 흐려진다. 실제 ci.yml 의 M5 잡 줄은 G-M5.11 이 따로 센다.
+   - M5 단계에 이 픽스처를 보는 검사를 둔다 (G-M5.9 양성·음성 묶음, G-M5.17 음성 회귀 하나).
+   - 재현 빨강 (2026-10-18 정정): G-M5.10 은 G-M5.9 가 아니라 G-M5.17 (`TC-CI.4.c` 하나)을 본다. 옛 검사기는 M5 의 `--skip-ids G-M5.1~6`을 `[skip-ids]`로 거부하므로, G-M5.9 전체는 양성 쪽에서 먼저 실패해 members 규칙이 없다는 것을 보이지 못한다. 그 실패를 Red 로 삼지 않는다. TC-CI.4.c 는 옛 검사기에서 잡힌 코드가 `[members-scenario]` 하나가 아니라 실패하고, 지금 검사기에서 통과한다. Red 커밋의 옛 게이트 설정에는 M5 회원 시나리오가 없어 TC-CI.4.a 는 실패하겠지만, G-M5.17 은 이름 패턴으로 4.c 만 돌리므로 상관없다.
 2. `check-ci-matrix.mjs`와 CI 를 고친다. 커밋.
-   - 봉인된 M5 가 있으면 매트릭스에 `pnpm e2e --combo <c> --scenario members` 스텝을 요구한다.
+   - 게이트 설정 M5 에 `pnpm e2e --combo <c> --scenario members` 검사가 있으면 매트릭스에 `pnpm e2e --combo ${{ matrix.combo }} --scenario members` 스텝을 요구한다. 봉인 여부가 아니라 설정으로 켠다 (K5 키 시나리오와 같은 방식). 그래서 봉인 전 커밋도 걸러진다. (2026-10-18 정정, 처음 문구는 "봉인된 M5 가 있으면")
    - 문제 코드는 `[members-scenario]`다. K6.T5 처럼 다른 검사의 코드와 겹치지 않게 한다.
    - `e2e` 매트릭스 잡에 그 스텝을 넣는다.
-   - M5 잡은 G-M5.1~6 을 `--skip-ids`로 뺀다.
+   - M5 잡은 G-M5.1~6 을 `--skip-ids`로 뺀다. members-regress 둘(G-M5.7·8)은 매트릭스가 돌지 않으므로 M5 잡에서 돈다.
+   - 미확인 (2026-10-18): e2e 매트릭스 잡 timeout 은 45분 그대로다. 이제 한 조합에서 시나리오 셋(기본·keys·members)을 차례로 돈다. 실제 CI 소요를 본 뒤 늘릴지 정한다.
+   - 규칙 시험 `test/check-ci-matrix-members.test.mjs` (TC-CI.4.a~d)는 unit 잡 「CI 조각·집계 잡 검사기 시험」 스텝에서 돈다. 기존 `test/check-ci-matrix.test.mjs`(G-K0.10)·`test/check-required-checks.test.mjs`(G-K0.30)의 수는 바꾸지 않는다.
 
 【테스트】
 ```
 TC-M5.T3.a  매트릭스가 정책 시나리오를 빠뜨리면 잡는다
   단언:  check-ci-matrix --fixture test/fixtures/ci-guard/e2e-members-missing.yml --expect 6 --expect-fail → 0 ([members-scenario] 잡음)
+         TC-CI.4.c: 같은 픽스처에서 잡힌 문제가 [members-scenario] 하나뿐이다 (G-M5.17, 재현 빨강 대상)
   검출:  M5 잡이 --skip-ids 로 여섯 시나리오를 빼고 매트릭스에는 그 스텝이 없어 완료 기준 E2E 가 CI 에서 하나도 안 도는 것
 TC-M5.T3.b  실제 ci.yml 은 여섯 조합 모두 정책 시나리오를 돈다
   단언:  check-ci-matrix --expect 6 → 0
@@ -1576,7 +1607,7 @@ TC-M5.T3.b  실제 ci.yml 은 여섯 조합 모두 정책 시나리오를 돈다
 ```
 
 【통과】
-- [ ] G-M5.9 · G-M5.10 통과
+- [ ] G-M5.9 · G-M5.10 · G-M5.17 통과
 
 ### ☐ M5.T4 — M5 CI 잡과 봉인
 선행 M5.T1 ~ M5.T3 · 산출 `.github/workflows/ci.yml` · 되돌리기 커밋 1개
@@ -1612,9 +1643,15 @@ TC-M5.T4.b  ruleset 필수 검사가 이 잡을 포함한다
 | G-M5.7 | TC-M5.T2.a·b docker-sqlite | [L] `pnpm e2e --combo docker-sqlite --scenario members-regress` | 종료코드 0 |
 | G-M5.8 | TC-M5.T2.a·b workers-d1 | [L] `pnpm e2e --combo workers-d1 --scenario members-regress` | 종료코드 0 |
 | G-M5.9 | TC-M5.T3.a·b | `node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-guard/e2e-members-missing.yml --expect 6 --expect-fail` | 종료코드 0 |
-| G-M5.10 | 재현 빨강 TC-M5.T3.a | `node scripts/check-red.mjs --check G-M5.9 --since seal:M4` | 종료코드 0 |
+| G-M5.10 | 재현 빨강 TC-M5.T3.a | `node scripts/check-red.mjs --check G-M5.17 --since seal:M4` | 종료코드 0 — `Red: TC-M5.T3.a` 커밋(시험 파일 + 픽스처, 검사기 고침 전)이 생기기 전에는 실패가 정상이다 |
 | G-M5.11 | TC-M5.T4.a CI 단계 잡 | grep `^\s+run: node scripts/gate\.mjs M5\b` in ci.yml | == 1 |
 | G-M5.12 | ruleset · TC-M5.T4.b | `node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere` | 종료코드 0 |
+| G-M5.13 | TC-M5.T0.a~h·l·smtp.corrupt Node SMTP | `pnpm -C apps/server test test/mail/smtp.test.ts -t "TC-M5\.T0\.(?:[a-z] \|smtp\.corrupt )"` | 통과 수 == 10 |
+| G-M5.14 | TC-M5.T0.cloudflare.a~g Node | `pnpm -C apps/server test test/mail/cloudflare.test.ts -t "TC-M5\.T0\.cloudflare\."` | 통과 수 == 7 |
+| G-M5.15 | TC-M5.T0.i~k Workers SMTP | [L] `pnpm -C apps/server test:workers test/mail/smtp.workers.test.ts -t "TC-M5\.T0\.[a-z] "` | 통과 수 == 3 |
+| G-M5.16 | TC-M5.T0.cloudflare.h·i Workers | [L] `pnpm -C apps/server test:workers test/mail/cloudflare.workers.test.ts -t "TC-M5\.T0\.cloudflare\."` | 통과 수 == 2 |
+| G-M5.17 | TC-M5.T3.a 재현 빨강 대상 (TC-CI.4.c 누락 규칙 목적 단언) | `node --test --test-reporter=tap --test-name-pattern="TC-CI\.4\.c" test/check-ci-matrix-members.test.mjs` | 통과 수 == 1 |
+| G-M5.18 | TC-M5.T0.smtp-timeout.a~f SMTP 시간 제한 | `pnpm -C packages/auth exec vitest run test/smtp-timeout.test.ts -t "TC-M5\.T0\.smtp-timeout\."` | 통과 수 == 6 |
 
 `node scripts/gate.mjs M5 --seal`
 

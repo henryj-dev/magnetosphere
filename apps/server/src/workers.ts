@@ -21,11 +21,13 @@ export default {
     const runtime = createWorkersRuntime(env);
     const pending: Promise<unknown>[] = [];
     const waitUntil = (p: Promise<unknown>) => void pending.push(p.catch((e) => console.error("[server] 백그라운드 작업 실패", e)));
+    // send_email 바인딩(EMAIL)은 선택이다. 없으면 Cloudflare 메일 설정만 400 cloudflare_unsupported 이고 시작은 그대로 한다
+    const cloudflareEmail = typeof env.EMAIL?.send === "function" ? env.EMAIL : undefined;
     let services: Promise<Services> | undefined;
     const log = (line: string) => console.log(line);
     if (!leftoverWarned && typeof env.OMNIROUTE_INITIAL_PASSWORD === "string" && env.OMNIROUTE_INITIAL_PASSWORD) {
       waitUntil(
-        (services ??= buildServices(runtime, { waitUntil }))
+        (services ??= buildServices(runtime, { waitUntil, cloudflareEmail }))
           .then((s) => (leftoverWarned ? false : warnLeftoverInitialPassword(s.db, s.omniroute.initialPassword, log)))
           .then((warned) => {
             if (warned) leftoverWarned = true;
@@ -33,7 +35,7 @@ export default {
       );
     }
     const app = createApp({
-      services: () => (services ??= buildServices(runtime, { waitUntil })),
+      services: () => (services ??= buildServices(runtime, { waitUntil, cloudflareEmail })),
       // 바인딩 응답의 헤더는 바꿀 수 없어 복사한다 (보안 헤더를 덧붙인다)
       assets: async (c) => {
         const res = await env.ASSETS.fetch(c.req.raw);

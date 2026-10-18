@@ -32,6 +32,7 @@ import { adminLimitRoutes } from "./routes/admin-limits.ts";
 import { sameOrigin } from "./routes/guard.ts";
 import type { KeysClient } from "./routes/issue.ts";
 import { keyRoutes } from "./routes/keys.ts";
+import type { MailCapabilities } from "./setup/mail.ts";
 import type { OmniRouteConfig } from "./setup/omniroute.ts";
 import { setupRoutes } from "./setup/routes.ts";
 import { signupSettingsRoutes } from "./signup/admin.ts";
@@ -66,6 +67,8 @@ export interface Services {
   keysClient?: () => Promise<ClientFor<KeysClient> | null>;
   /** 메일 어댑터 (인증 메일과 같은 것, 보낼 때마다 메일 설정을 읽는다). 설정 API 의 테스트 메일이 쓴다 */
   mailer?: Mailer;
+  /** 런타임에서 쓸 수 있는 메일 전송 방식. 생략하면 SMTP 를 받지 않는다 */
+  mailCapabilities?: MailCapabilities;
 }
 
 export interface AppDeps {

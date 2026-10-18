@@ -900,7 +900,39 @@ export const GATES = {
     waivable: false,
     strictTests: true,
     outputs: ["tests/e2e/members/**"],
-    checks: [],
+    // 초안. G-M5.10 은 Red 커밋(꼬리줄 `Red: TC-M5.T3.a`, 시험 파일 + 픽스처만 넣은 커밋)이 M4 봉인 뒤 이력에 생기기 전까지 실패한다. 대상은 G-M5.17 이다.
+    // 꼬리줄을 다른 커밋에 붙이거나, 음성 대조(G-M5.9 의 --expect-fail)가 지금 통과한 것을 Red 증거로 대신하지 않는다.
+    // G-M5.13~16·18 의 expectPassed 는 시험 파일의 선언 수다 (smtp 10 = a~h·l 9 + smtp.corrupt 1, cloudflare 7, Workers smtp 3, Workers cloudflare 2, smtp-timeout 6).
+    // 실행 결과에 맞춰 숫자를 고치지 않는다. 선언을 더하거나 빼면 셀렉터와 수를 함께 고친다.
+    checks: [
+      // M5.T1 여섯 조합 정책 시나리오 (TC-M5.T1.a~d). CI 는 e2e 매트릭스 잡이 같은 명령으로 돈다 (M5 잡은 --skip-ids 로 뺀다)
+      { id: "G-M5.1", how: "cmd", requires: ["local-services"], desc: "TC-M5.T1.a~d 회원 정책 시나리오: docker-sqlite", cmd: "pnpm e2e --combo docker-sqlite --scenario members" },
+      { id: "G-M5.2", how: "cmd", requires: ["local-services"], desc: "TC-M5.T1.a~d 회원 정책 시나리오: docker-mysql", cmd: "pnpm e2e --combo docker-mysql --scenario members" },
+      { id: "G-M5.3", how: "cmd", requires: ["local-services"], desc: "TC-M5.T1.a~d 회원 정책 시나리오: docker-pg", cmd: "pnpm e2e --combo docker-pg --scenario members" },
+      { id: "G-M5.4", how: "cmd", requires: ["local-services"], desc: "TC-M5.T1.a~d 회원 정책 시나리오: workers-d1", cmd: "pnpm e2e --combo workers-d1 --scenario members" },
+      { id: "G-M5.5", how: "cmd", requires: ["local-services"], desc: "TC-M5.T1.a~d 회원 정책 시나리오: workers-mysql", cmd: "pnpm e2e --combo workers-mysql --scenario members" },
+      { id: "G-M5.6", how: "cmd", requires: ["local-services"], desc: "TC-M5.T1.a~d 회원 정책 시나리오: workers-pg", cmd: "pnpm e2e --combo workers-pg --scenario members" },
+      // M5.T2 7장 회귀 (TC-M5.T2.a·b). 매트릭스가 돌지 않으므로 M5 잡에서 돈다
+      { id: "G-M5.7", how: "cmd", requires: ["local-services"], desc: "TC-M5.T2.a·b 권한 회귀: docker-sqlite", cmd: "pnpm e2e --combo docker-sqlite --scenario members-regress" },
+      { id: "G-M5.8", how: "cmd", requires: ["local-services"], desc: "TC-M5.T2.a·b 권한 회귀: workers-d1", cmd: "pnpm e2e --combo workers-d1 --scenario members-regress" },
+      // M5.T3 CI 매트릭스가 정책 시나리오를 돈다
+      { id: "G-M5.9", how: "cmd", desc: "TC-M5.T3.a·b 매트릭스가 여섯 조합 회원 정책 시나리오를 돈다 (음성 대조 포함)", cmd: "node scripts/check-ci-matrix.mjs --expect 6 && node scripts/check-ci-matrix.mjs --fixture test/fixtures/ci-guard/e2e-members-missing.yml --expect 6 --expect-fail" },
+      { id: "G-M5.10", how: "cmd", desc: "재현 빨강: TC-M5.T3.a (G-M5.17) 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-M5.17 --since seal:M4" },
+      // M5.T4 CI 단계 잡과 ruleset 필수 검사
+      { id: "G-M5.11", how: "grep", desc: "TC-M5.T4.a CI 단계 잡 (M5)", pattern: "^\\s+run: node scripts/gate\\.mjs M5\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
+      { id: "G-M5.12", how: "cmd", desc: "TC-M5.T4.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
+      // M5.T0 메일 공급자 (SMTP·Cloudflare). 파일 경로로 고른다 (-t 만으로는 맞는 시험 0 개여도 종료코드 0). 수는 미확정 (위 주석)
+      // "TC-M5.T0.[a-z] " 는 끝의 공백으로 "TC-M5.T0.cloudflare.*" 를 뺀다
+      { id: "G-M5.13", how: "test", desc: "TC-M5.T0.a~h·l·smtp.corrupt Node SMTP 저장·검사·비활성 런타임·손상 설정 고정 오류·비밀 미노출", cmd: 'pnpm -C apps/server test test/mail/smtp.test.ts -t "TC-M5\\.T0\\.(?:[a-z] |smtp\\.corrupt )"', expectPassed: 10 },
+      { id: "G-M5.14", how: "test", desc: "TC-M5.T0.cloudflare.a~g Node Cloudflare 거부·바인딩 저장·from 검사·비밀 미노출", cmd: 'pnpm -C apps/server test test/mail/cloudflare.test.ts -t "TC-M5\\.T0\\.cloudflare\\."', expectPassed: 7 },
+      { id: "G-M5.15", how: "test", requires: ["local-services"], desc: "TC-M5.T0.i~k Workers SMTP 거부·권한 먼저·setup 토큰 미소비 (D1)", cmd: 'pnpm -C apps/server test:workers test/mail/smtp.workers.test.ts -t "TC-M5\\.T0\\.[a-z] "', expectPassed: 3 },
+      { id: "G-M5.16", how: "test", requires: ["local-services"], desc: "TC-M5.T0.cloudflare.h·i 바인딩 없는 Workers Cloudflare 거부·setup 토큰 미소비 (D1)", cmd: 'pnpm -C apps/server test:workers test/mail/cloudflare.workers.test.ts -t "TC-M5\\.T0\\.cloudflare\\."', expectPassed: 2 },
+      // 재현 빨강 전용. 전체 G-M5.9 는 옛 검사기에서 양성 쪽이 [skip-ids] 로 먼저 실패해 members 규칙이 없다는 것을 보이지 못한다.
+      // 그래서 음성 회귀 하나(TC-CI.4.c)만 떼어 Red 커밋(시험 파일 + 픽스처)과 지금 검사기에서 비교한다. 이름 패턴에 안 걸린 셋은 # SKIP 이라 세지 않는다.
+      { id: "G-M5.17", how: "test", desc: "TC-M5.T3.a 재현 빨강 대상: 회원 정책 스텝·봉인 전 p3-m5 잡이 빠진 픽스처를 [members-scenario] 하나로 잡는다 (누락 규칙 목적 단언, TC-CI.4.c)", cmd: nodeTest("test/check-ci-matrix-members.test.mjs", "TC-CI\\.4\\.c"), expectPassed: 1 },
+      // SMTP 어댑터 시간 제한 (M5 리뷰 MEDIUM). nodemailer 를 가짜로 바꿔 mailpit·테스트 DB 없이 돈다 (scripts/test.mjs 를 거치지 않고 vitest 를 바로 부른다)
+      { id: "G-M5.18", how: "test", desc: "TC-M5.T0.smtp-timeout.a~f SMTP 전송 15초·연결 5초·인사 5초·소켓 10초 상한, 고정 MailError, transport 정리", cmd: 'pnpm -C packages/auth exec vitest run test/smtp-timeout.test.ts -t "TC-M5\\.T0\\.smtp-timeout\\."', expectPassed: 6 },
+    ],
   },
   M6: {
     needs: ["M5"],

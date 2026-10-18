@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { serveStatic } from "@hono/node-server/serve-static";
 import type { MiddlewareHandler } from "hono";
 import { createNodeRuntime, listen, type NodeRuntime } from "@magnetosphere/runtime/node";
+import { smtpMailer } from "@magnetosphere/auth/mail/smtp";
 import { createApp } from "./app.ts";
 import { buildServices } from "./config.ts";
 import { registerJobs } from "./jobs.ts";
@@ -42,7 +43,7 @@ export async function startNodeServer(opts: NodeServerOptions = {}) {
   const runtime: NodeRuntime = createNodeRuntime({ env, trustedProxies });
   try {
     // Node 는 응답 뒤 작업을 따로 붙잡을 필요가 없다. 실패만 기록한다
-    const services = await buildServices(runtime, { waitUntil: (p) => void p.catch((e) => console.error("[server] 백그라운드 작업 실패", e)) });
+    const services = await buildServices(runtime, { smtp: smtpMailer, waitUntil: (p) => void p.catch((e) => console.error("[server] 백그라운드 작업 실패", e)) });
     const app = createApp({
       services: async () => services,
       assets: staticAssets(opts.webDir ?? env.WEB_DIR ?? DEFAULT_WEB_DIR),

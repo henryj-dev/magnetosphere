@@ -2,7 +2,7 @@
 //   1. 관리자가 없으면 시작할 때 일회용 설치 토큰을 만들어 콘솔에 한 번 출력한다. DB 에는 SHA-256 해시만 둔다 (7장).
 //   2. POST /api/setup 에서 토큰 + 이메일·비밀번호로 최초 관리자를 만든다 (role=admin, is_bootstrap_admin, 이메일 인증 완료).
 //   4. 회원이 도구에 넣을 공개 주소(public_base_url)를 저장한다.
-//   5. 메일 발송 설정(선택). 지금은 Resend 하나만 받고, API 키는 APP_ENCRYPTION_KEY 로 암호화해 둔다 (mail.ts).
+//   5. 메일 발송 설정(선택). Resend, Node SMTP, Workers Cloudflare(EMAIL 바인딩)를 받으며 비밀 값은 APP_ENCRYPTION_KEY 로 암호화한다 (mail.ts).
 //   3. OmniRoute 부트스트랩(oma_live_ 토큰 발급·암호화 저장, setup/omniroute.ts)은 관리자를 만든 같은 요청에서 돈다.
 //      실패해도 설치는 끝나고 응답의 omniroute 가 "manual_required" 다. 관리자가 로그인해 토큰을 붙여 넣는다 (routes.ts).
 // 관리자가 생긴 뒤에는 /api/setup 이 항상 409 다. 토큰도 다시 만들지 않는다.
@@ -12,7 +12,7 @@ import { findUserByEmail, normalizeEmail } from "@magnetosphere/db/src/users.ts"
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import { writeAppSetting } from "../settings/index.ts";
-import { MAIL_SETTINGS_KEY, storedMailSettings, validMailInput } from "./mail.ts";
+import { MAIL_SETTINGS_KEY, storedMailSettings, unsupportedMail, validMailInput, type MailCapabilities, type MailInput } from "./mail.ts";
 import type { OmniRouteStatus } from "./omniroute.ts";
 
 export const SETUP_TOKEN_KEY = "setup_token_hash";
@@ -177,7 +177,7 @@ export interface SetupInput {
   password: string;
   name?: string;
   publicBaseUrl: string;
-  mail?: { provider: "resend"; apiKey: string; from: string };
+  mail?: MailInput;
 }
 
 export type SetupResult =
@@ -209,11 +209,14 @@ export async function runSetup(
   input: Partial<SetupInput>,
   cipher: () => Promise<Cipher>,
   bootstrapOmniRoute?: (userId: string) => Promise<OmniRouteStatus>,
+  mailCapabilities?: MailCapabilities,
 ): Promise<SetupResult> {
   if (await adminExists(h)) return { ok: false, status: 409, error: "already_set_up" };
   const stored = await readSetting(h, SETUP_TOKEN_KEY);
   const given = typeof input.token === "string" ? await sha256Hex(input.token.trim()) : "";
   if (typeof stored !== "string" || !sameText(given, stored)) return { ok: false, status: 401, error: "invalid_token" };
+  const unsupported = unsupportedMail(input.mail, mailCapabilities);
+  if (unsupported) return { ok: false, status: 400, error: unsupported };
   const bad = invalid(input);
   if (bad) return { ok: false, status: 400, error: `invalid_${bad}` };
   const v = input as SetupInput;
