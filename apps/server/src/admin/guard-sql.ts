@@ -24,9 +24,11 @@
 //   - 순서는 CAS → 즉시 감사 guard → account/verification/초대/session 정리다. 그 사이에 다른 쓰기를 넣지 않는다.
 import { and, asc, count, eq, getTableName, gt, inArray, isNotNull, isNull, like, or, sql, type SQL } from "drizzle-orm";
 import type { SelfDeleteCredentialProof } from "@magnetosphere/auth";
+import { dropRevokedCodesDelete, grantRevokeOpen, mfaRowsDelete, revokeAllFactorsUpdate, type UnitStep } from "@magnetosphere/auth/mfa";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import { auditRow, type AuditEntry } from "../audit/index.ts";
 import { transition, type MemberAction, type MemberStatus, type Role, type TransitionTo } from "../members/transition.ts";
+import { consumeProofIn, d1ProofGuard, proofGuardFailed } from "../mfa/proof.ts";
 import { revokeSessionsStatement } from "../sessions/revoke.ts";
 
 /** 회원별 인증 버전 상한. 0005 의 integer 칼럼과 맞추며, 이 값에서는 +1 이 순환하지 않게 실패한다 */
@@ -41,7 +43,7 @@ export const MEMBER_MUTEX = { name: "member_management_mutex", holder: "member-m
 export const MEMBER_TX = { isolationLevel: "read committed" } as const;
 export const MEMBER_PG_LOCK_TIMEOUT = "5s";
 
-export type MemberConflict = "unauthorized" | "forbidden" | "not_found" | "invalid_transition" | "invalid_role" | "bootstrap_admin" | "self" | "last_admin" | "stale_member" | "version_exhausted";
+export type MemberConflict = "unauthorized" | "forbidden" | "not_found" | "invalid_transition" | "invalid_role" | "bootstrap_admin" | "self" | "last_admin" | "stale_member" | "version_exhausted" | "mfa_proof_invalid";
 
 export class MemberConflictError extends Error {
   readonly code: MemberConflict;
@@ -86,6 +88,11 @@ export interface MemberMutation {
   selfProof?: MemberSelfProof;
   audit: AuditEntry;
   now: Date;
+  /**
+   * 관리자 MFA (A1). proof: 민감 작업(역할 변경·관리자 탈퇴)의 step-up proof 소비 단계. 이 원자 단위의 첫 쓰기이고 0행이면 전체를 되돌린다 (mfa_proof_invalid).
+   * promote: 승격(role → admin) 때 대상의 새 인증 버전으로 promotion grant INSERT 를 만든다. 같은 단위에 들어간다
+   */
+  mfa?: { proof?: UnitStep; promote?: (nextAuthVersion: number) => Promise<{ build(db: any): any }> };
 }
 
 export interface MemberMutationResult {
@@ -142,13 +149,25 @@ async function lockUsers(h: DbHandle, tx: any, ids: readonly string[]): Promise<
   return new Map(rows.map((row: any) => [row.id, snapshot(row)]));
 }
 
+/** 관리자 MFA 를 쓸 수 있는 관리자: active factor 가 있다 (A1 설계 4절 마지막 관리자 보호) */
+function hasActiveFactor(h: DbHandle, userIdColumn: any) {
+  const f = h.schema.mfaFactor;
+  return sql`exists (select 1 from ${f} where ${f.activeSlot} = ${userIdColumn})`;
+}
+
+/** 대상 회원에게 active factor 가 있는가. 없는 관리자를 빼도 MFA 를 쓸 수 있는 관리자 수는 줄지 않는다 */
+async function targetHasFactor(h: DbHandle, tx: any, userId: string): Promise<boolean> {
+  const f = h.schema.mfaFactor;
+  return (await tx.select({ id: f.id }).from(f).where(eq(f.activeSlot, userId)).limit(1)).length === 1;
+}
+
 /**
- * 현재 활성 관리자 수. MySQL 은 잠글 표 자신을 서브쿼리에서 다시 읽지 못하므로(1093), 기본 키를 잠가 고른 뒤 그 개수를 센다.
+ * 현재 "active 이면서 active factor 가 있는" 관리자 수 (A1). MySQL 은 잠글 표 자신을 서브쿼리에서 다시 읽지 못하므로(1093), 기본 키를 잠가 고른 뒤 그 개수를 센다.
  * 갭 잠금 대신 이미 잠근 PK 행만 센다.
  */
 async function countActiveAdmins(h: DbHandle, tx: any): Promise<number> {
   const u = h.schema.user;
-  const cond = and(eq(u.role, "admin"), eq(u.status, "active"));
+  const cond = and(eq(u.role, "admin"), eq(u.status, "active"), hasActiveFactor(h, u.id));
   if (h.provider === "mysql") {
     const ids = (await tx.select({ id: u.id }).from(u).where(cond).for("update")).map((row: { id: string }) => row.id);
     return ids.length;
@@ -254,8 +273,18 @@ async function cleanupOwned(h: DbHandle, db: any, userId: string, previousEmail:
   if (action === "reject" || action === "delete") await db.delete(a).where(eq(a.userId, userId));
   await db.delete(v).where(ownedVerification(v, userId, previousEmail));
   if (action === "delete") await cleanupInvites(h, db, userId, previousEmail, now);
+  // 관리자 MFA 행(factor·복구 코드·grant·proof)도 지운다. proof 가 세션을 참조하므로 세션보다 먼저 (FK cascade 에 기대지 않는다, A1)
+  for (const statement of mfaRowsDelete(h, db, userId)) await statement;
   await revokeSessionsStatement(h, db, userId);
 }
+
+/** 강등(admin → member) 때 대상의 factor 를 모두 폐기하고 미사용 복구 코드·열린 grant 를 지운다 (A1: 관리자 MFA 해제는 강등 안에서만) */
+function demotionStatements(h: DbHandle, db: any, userId: string, now: Date): any[] {
+  return [revokeAllFactorsUpdate(h, db, { userId, reason: "demoted", now }), dropRevokedCodesDelete(h, db, userId), grantRevokeOpen(h, db, { userId, now })];
+}
+
+const demotes = (before: MemberSnapshot, input: MemberMutation) => input.action === "role" && before.role === "admin" && input.role !== "admin";
+const promotes = (before: MemberSnapshot, input: MemberMutation) => input.action === "role" && before.role !== "admin" && input.role === "admin";
 
 /**
  * D1 의 항상 평가되는 감사 guard. 앞선 CAS 가 1행일 때만 검증된 action 을 넣고, 아니면 NULL 로 NOT NULL 제약이 batch 를 되돌린다.
@@ -275,16 +304,16 @@ function credentialGuard(h: DbHandle, input: MemberMutation, targetId: string): 
   return sql`exists (select 1 from ${a} where ${and(eq(a.id, proof.accountId), eq(a.userId, targetId), eq(a.providerId, "credential"), eq(a.accountId, targetId), sameHash)})`;
 }
 
-function mutationStatements(h: DbHandle, db: any, input: MemberMutation, before: MemberSnapshot, actor: MemberSnapshot, activeAdmins: number, to: TransitionTo) {
+function mutationStatements(h: DbHandle, db: any, input: MemberMutation, before: MemberSnapshot, actor: MemberSnapshot, activeAdmins: number, to: TransitionTo, targetCounts = true) {
   const u = h.schema.user;
   const proof = selfProofOf(input);
-  const removesLast = removesActiveAdmin(before, input.action, input.role, to) && activeAdmins <= 1;
+  const removesLast = removesActiveAdmin(before, input.action, input.role, to) && targetCounts && activeAdmins <= 1;
   // Node 는 mutex → user 잠금 뒤 countActiveAdmins 결과로 mutateLocked 에서 판정한다.
   // MySQL/MariaDB CAS 에 같은 표의 병합 가능한 count subquery 를 넣어 1093 을 만들지 않는다.
   // PG 도 mutex/READ COMMITTED, SQLite 는 직렬 쓰기 transaction 이 그 판정을 CAS 까지 보호한다.
   // D1 의 사전 읽기는 잠금이 아니므로 실제 단일 CAS 안의 현재 count guard 를 반드시 유지한다.
-  const adminGuard = h.kind === "d1" && removesActiveAdmin(before, input.action, input.role, to)
-    ? sql`(select count(*) from ${u} where ${and(eq(u.role, "admin"), eq(u.status, "active"))}) > 1`
+  const adminGuard = h.kind === "d1" && removesActiveAdmin(before, input.action, input.role, to) && targetCounts
+    ? sql`(select count(*) from ${u} where ${and(eq(u.role, "admin"), eq(u.status, "active"), hasActiveFactor(h, u.id))}) > 1`
     : undefined;
   // 별도 조회여야 actor != target 에서 대상 id 조건과 충돌하지 않는다. LIMIT 은 MySQL 의 derived-table 병합(1093)을 막는다.
   // 자기 작업에서도 이 조건을 생략하지 않는다. 관찰한 대상 role/status 만으로 현재 관리자 권한을 대신하지 않는다.
@@ -313,7 +342,7 @@ async function rejectIfStale(h: DbHandle, input: MemberMutation, before: MemberS
   if (versionOf(current) >= AUTH_VERSION_MAX) throw new MemberConflictError("version_exhausted");
   if (versionOf(current) !== before.authVersion) throw new MemberConflictError("stale_member");
   if (code === "last_admin" || code === "version_exhausted") throw new MemberConflictError(code);
-  if (before.role === "admin" && before.status === "active" && (input.action === "suspend" || input.action === "delete" || (input.action === "role" && input.role !== "admin")) && await countActiveAdmins(h, db) <= 1) throw new MemberConflictError("last_admin");
+  if (before.role === "admin" && before.status === "active" && (input.action === "suspend" || input.action === "delete" || (input.action === "role" && input.role !== "admin")) && await targetHasFactor(h, db, before.id) && await countActiveAdmins(h, db) <= 1) throw new MemberConflictError("last_admin");
   throw new MemberConflictError("stale_member");
 }
 
@@ -327,11 +356,16 @@ async function mutateLocked(h: DbHandle, tx: any, input: MemberMutation): Promis
   if (!judged.ok) throw new MemberConflictError(judged.code);
   if (before.authVersion >= AUTH_VERSION_MAX) throw new MemberConflictError("version_exhausted");
   const activeAdmins = await countActiveAdmins(h, tx);
-  if (removesActiveAdmin(before, input.action, input.role, judged.to) && activeAdmins <= 1) throw new MemberConflictError("last_admin");
-  const plan = mutationStatements(h, tx, input, before, actor, activeAdmins, judged.to);
+  const targetCounts = await targetHasFactor(h, tx, before.id);
+  if (removesActiveAdmin(before, input.action, input.role, judged.to) && targetCounts && activeAdmins <= 1) throw new MemberConflictError("last_admin");
+  // step-up proof 는 이 트랜잭션의 첫 쓰기다. 0행이면 아무것도 쓰지 않고 되돌린다
+  if (input.mfa?.proof && !(await consumeProofIn(h, tx, input.mfa.proof))) throw new MemberConflictError("mfa_proof_invalid");
+  const plan = mutationStatements(h, tx, input, before, actor, activeAdmins, judged.to, targetCounts);
   if ((await changed(h, plan.cas, h.schema.user.id)) !== 1) return rejectIfStale(h, input, before, plan.removesLast ? "last_admin" : "stale_member", tx);
   const { auditStatement } = await import("../audit/index.ts");
   await auditStatement(h, input.audit, tx);
+  if (demotes(before, input)) for (const statement of demotionStatements(h, tx, before.id, input.now)) await statement;
+  if (promotes(before, input) && input.mfa?.promote && plan.nextVersion !== undefined) await (await input.mfa.promote(plan.nextVersion)).build(tx);
   if (plan.cleanup) await cleanupOwned(h, tx, before.id, before.email, input.action, input.now);
   else await revokeSessionsStatement(h, tx, before.id);
   return { to: judged.to, from: before, authVersion: plan.cleanup ? null : (plan.nextVersion ?? null) };
@@ -355,19 +389,28 @@ export async function mutateMember(h: DbHandle, input: MemberMutation): Promise<
     if (!judged.ok) throw new MemberConflictError(judged.code);
     if (before.authVersion >= AUTH_VERSION_MAX) throw new MemberConflictError("version_exhausted");
     const activeAdmins = await countActiveAdmins(h, h.db);
-    if (removesActiveAdmin(before, input.action, input.role, judged.to) && activeAdmins <= 1) throw new MemberConflictError("last_admin");
-    const plan = mutationStatements(h, h.db, input, before, actor, activeAdmins, judged.to);
-    const statements = [plan.cas, guardedAuditStatement(h, input.audit)];
+    const targetCounts = await targetHasFactor(h, h.db, before.id);
+    if (removesActiveAdmin(before, input.action, input.role, judged.to) && targetCounts && activeAdmins <= 1) throw new MemberConflictError("last_admin");
+    const plan = mutationStatements(h, h.db, input, before, actor, activeAdmins, judged.to, targetCounts);
+    // proof 소비 → 즉시 guard(0행이면 verification.value NOT NULL 로 batch 전체 롤백) → CAS → 감사 guard 순서
+    const proofGuard = input.mfa?.proof ? d1ProofGuard(h) : null;
+    const proofStatements = input.mfa?.proof && proofGuard ? [input.mfa.proof.build(h.db), proofGuard.guard] : [];
+    const statements = [...proofStatements, plan.cas, guardedAuditStatement(h, input.audit)];
+    if (demotes(before, input)) statements.push(...demotionStatements(h, h.db, before.id, input.now));
+    if (promotes(before, input) && input.mfa?.promote && plan.nextVersion !== undefined) statements.push((await input.mfa.promote(plan.nextVersion)).build(h.db));
     if (plan.cleanup && (input.action === "reject" || input.action === "delete")) statements.push(h.db.delete(h.schema.account).where(eq(h.schema.account.userId, before.id)));
     if (plan.cleanup) statements.push(h.db.delete(h.schema.verification).where(ownedVerification(h.schema.verification, before.id, before.email)));
     // 초대 정리도 같은 batch 다. 감사 guard 뒤에 두므로 CAS 0행이면 이 UPDATE 들도 함께 되돌려진다
     if (plan.cleanup && input.action === "delete") statements.push(...inviteCleanupStatements(h, h.db, before.id, before.email, input.now));
+    if (plan.cleanup) statements.push(...mfaRowsDelete(h, h.db, before.id));
     statements.push(revokeSessionsStatement(h, h.db, before.id));
+    if (proofGuard) statements.push(proofGuard.drop);
     try {
       await h.db.batch(statements);
     } catch (e) {
       const messages: string[] = [];
       for (let cause: any = e, depth = 0; cause && depth < 8; cause = cause.cause, depth++) messages.push(String(cause.message ?? ""));
+      if (proofGuardFailed(e)) throw new MemberConflictError("mfa_proof_invalid");
       if (/NOT NULL constraint failed: audit_log\.action/.test(messages.join(" "))) return rejectIfStale(h, input, before, plan.removesLast ? "last_admin" : "stale_member");
       throw new MemberConflictError("stale_member");
     }
@@ -388,4 +431,90 @@ export const memberCleanupStatements = cleanupOwned;
 /** 자기 자신 조건과 빈 세션 조건이 SQL 에서 빠지지 않는지 시험이 확인하는 내부 조건 */
 export function memberCasCondition(h: DbHandle, input: MemberMutation, before: MemberSnapshot, actor: MemberSnapshot, activeAdmins: number, to: TransitionTo): SQL | undefined {
   return mutationStatements(h, h.db, input, before, actor, activeAdmins, to).cas.config.where;
+}
+
+export interface MfaResetInput {
+  actorId: string;
+  actorSessionId: string;
+  targetId: string;
+  /** mfa.reset proof 소비 단계 (첫 쓰기, 0행이면 mfa_proof_invalid) */
+  proof: UnitStep;
+  /** 대상의 새 인증 버전으로 reset grant INSERT 를 만든다 */
+  grant: (nextAuthVersion: number) => Promise<{ build(db: any): any }>;
+  audit: AuditEntry;
+  now: Date;
+}
+
+/**
+ * 관리자 MFA 초기화 (A1 설계 4절). 회원 관리 뮤텍스 아래 한 원자 단위: proof 소비 → 대상 버전 +1 CAS → 감사 → factor 폐기·미사용 복구 코드·열린 grant 정리
+ * → reset grant → 대상 세션 철회. 자기 자신 409 self, 최초 관리자 409 bootstrap_admin, 관리자가 아닌 대상 409 invalid_transition.
+ * 마지막 관리자 판정은 하지 않는다: 행위자가 MFA 를 마친 관리자라 초기화 뒤에도 그 행위자가 남는다.
+ */
+export async function resetAdminMfa(h: DbHandle, input: MfaResetInput): Promise<{ authVersion: number }> {
+  const u = h.schema.user;
+  const s = h.schema.session;
+  const judge = (actor: MemberSnapshot | undefined, target: MemberSnapshot | undefined) => {
+    if (!actor) throw new MemberConflictError("unauthorized");
+    if (!target) throw new MemberConflictError("not_found");
+    if (target.id === actor.id) throw new MemberConflictError("self");
+    if (target.isBootstrapAdmin) throw new MemberConflictError("bootstrap_admin");
+    if (target.role !== "admin" || target.status === "deleted") throw new MemberConflictError("invalid_transition");
+    if (target.authVersion >= AUTH_VERSION_MAX) throw new MemberConflictError("version_exhausted");
+  };
+  const asMutation = { action: "role", actorId: input.actorId, actorSessionId: input.actorSessionId, targetId: input.targetId, audit: input.audit, now: input.now } as MemberMutation;
+  const cas = (db: any, before: MemberSnapshot, actor: MemberSnapshot) => {
+    const actorGuard = sql`exists (select 1 from (select ${u.id} from ${u} where ${and(eq(u.id, actor.id), eq(u.role, "admin"), eq(u.status, "active"), sql`${authVersion(u)} = ${actor.authVersion}`)} limit 1) as member_actor)`;
+    const sessionGuard = sql`exists (select 1 from ${s} where ${and(eq(s.id, input.actorSessionId), eq(s.userId, actor.id), gt(s.expiresAt, input.now), sql`${authVersion(s)} = ${actor.authVersion}`)})`;
+    return db.update(u).set({ authVersion: before.authVersion + 1, updatedAt: input.now }).where(and(sameObserved(u, before), actorGuard, sessionGuard));
+  };
+  const cleanup = (db: any, userId: string) => [
+    revokeAllFactorsUpdate(h, db, { userId, reason: "reset", now: input.now }),
+    dropRevokedCodesDelete(h, db, userId),
+    grantRevokeOpen(h, db, { userId, now: input.now }),
+  ];
+  if (h.kind === "d1") {
+    const locked = await lockUsers(h, h.db, [input.actorId, input.targetId]);
+    const actor = locked.get(input.actorId);
+    const before = locked.get(input.targetId);
+    await requireActor(h, h.db, asMutation, actor);
+    judge(actor, before);
+    const proofGuard = d1ProofGuard(h);
+    const grant = await input.grant(before!.authVersion + 1);
+    const statements = [
+      input.proof.build(h.db),
+      proofGuard.guard,
+      cas(h.db, before!, actor!),
+      guardedAuditStatement(h, input.audit),
+      ...cleanup(h.db, before!.id),
+      grant.build(h.db),
+      revokeSessionsStatement(h, h.db, before!.id),
+      proofGuard.drop,
+    ];
+    try {
+      await h.db.batch(statements);
+    } catch (e) {
+      if (proofGuardFailed(e)) throw new MemberConflictError("mfa_proof_invalid");
+      throw new MemberConflictError("stale_member");
+    }
+    return { authVersion: before!.authVersion + 1 };
+  }
+  const locking = h.provider !== "sqlite";
+  if (locking) await ensureMemberMutex(h);
+  const body = async (tx: any) => {
+    if (locking) await lockMemberMutex(h, tx);
+    const locked = await lockUsers(h, tx, [input.actorId, input.targetId]);
+    const actor = locked.get(input.actorId);
+    const before = locked.get(input.targetId);
+    await requireActor(h, tx, asMutation, actor);
+    judge(actor, before);
+    if (!(await consumeProofIn(h, tx, input.proof))) throw new MemberConflictError("mfa_proof_invalid");
+    if ((await changed(h, cas(tx, before!, actor!), u.id)) !== 1) throw new MemberConflictError("stale_member");
+    const { auditStatement } = await import("../audit/index.ts");
+    await auditStatement(h, input.audit, tx);
+    for (const statement of cleanup(tx, before!.id)) await statement;
+    await (await input.grant(before!.authVersion + 1)).build(tx);
+    await revokeSessionsStatement(h, tx, before!.id);
+    return { authVersion: before!.authVersion + 1 };
+  };
+  return locking ? h.db.transaction(body, MEMBER_TX) : h.db.transaction(body);
 }

@@ -24,13 +24,16 @@
 //     아무것도 쓰지 않는다. 읽은 뒤 다른 요청이 사용·취소했어도 404 이고 감사 기록이 없다. 기본 키 한 행만 잠그므로 뮤텍스를 쓰지 않는다.
 //     취소와 감사 기록 invite.revoke 는 한 트랜잭션(D1 은 batch)이다.
 //   - 목록에는 토큰·해시를 넣지 않는다. invites 에 created_at 이 없어 만료 시각 늦은 순이다.
+//   - 관리자 초대(role admin)는 민감 작업이다 (A1): X-MFA-Proof(admin.invite, 대상 "admin-invite")를 초대 쓰기 단위의 첫 쓰기로 소비한다.
+//     없으면 403 mfa_proof_required, 맞지 않으면(재사용·다른 목적·만료) 403 mfa_proof_invalid 이고 아무것도 쓰지 않는다.
 import { and, desc, eq, getTableColumns, gt, isNull, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import { Hono, type Context } from "hono";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import { updatedRows } from "@magnetosphere/runtime/lease";
 import type { Services } from "../app.ts";
 import { auditRow, auditStatement, type AuditEntry } from "../audit/index.ts";
-import { consume, sessionAdmin, type Member } from "../routes/guard.ts";
+import { consumeProofIn, d1ProofGuard, proofGuardFailed } from "../mfa/proof.ts";
+import { consume, proofClaim, sessionAdmin, type AdminSession, type ProofClaim } from "../routes/guard.ts";
 import { mailConfigured, readSettings } from "../settings/index.ts";
 import { readPublicBaseUrl } from "./base-url.ts";
 
@@ -131,7 +134,12 @@ function parseBody(raw: unknown): Parsed {
 }
 
 /** 세션 관리자 + 요청 수 제한. 통과하면 관리자, 아니면 응답 */
-async function admitted(c: Context, s: Services): Promise<Member | Response> {
+/** 관리자 초대 proof 의 대상. 초대 id 는 만들기 전이라 정해 둔 이름에 묶는다 (목적·세션·factor·1회·최근성은 proof 가 묶는다) */
+export const ADMIN_INVITE_PROOF_TARGET = "admin-invite";
+
+class ProofInvalid extends Error {}
+
+async function admitted(c: Context, s: Services): Promise<AdminSession | Response> {
   const admin = await sessionAdmin(c, s);
   if (admin instanceof Response) return admin;
   if (!(await consume(s.db, `invite-admin|${admin.id}`, INVITE_ADMIN_LIMIT.max, INVITE_ADMIN_LIMIT.windowMs, Date.now()))) {
@@ -248,6 +256,12 @@ export function inviteAdminRoutes(services: () => Promise<Services>) {
     const base = await readPublicBaseUrl(h);
     if (base === null) return c.json({ error: "setup_required" }, 409);
     if (p.email === null && !(await mailConfigured(h))) return c.json({ error: "mail_required" }, 409);
+    let claim: ProofClaim | null = null;
+    if (p.role === "admin") {
+      const got = await proofClaim(c, s, admin, "admin.invite", ADMIN_INVITE_PROOF_TARGET);
+      if (got instanceof Response) return got;
+      claim = got;
+    }
 
     const t = h.schema.invites;
     const now = new Date();
@@ -276,23 +290,35 @@ export function inviteAdminRoutes(services: () => Promise<Services>) {
     // 같은 이메일의 살아 있는 초대. MySQL·MariaDB 의 기본 정렬은 악센트를 무시하므로 정규화 뒤 바이트가 같은 주소만 고른다.
     // 다른 DB 는 기존 eq 그대로다. 취소와 재초대 감사는 이 조건을 같이 쓴다.
     const sameEmail = p.email === null ? null : and(h.provider === "mysql" ? sql`${t.email} = cast(${p.email} as binary)` : eq(t.email, p.email), liveOn(t, now));
-    if (h.kind === "d1") {
-      await h.db.batch([
-        ...(sameEmail ? [auditEachStatement(h, h.db, reinvite, sameEmail), h.db.update(t).set({ revokedAt: now }).where(sameEmail)] : []),
-        h.db.insert(t).values(row),
-        auditStatement(h, created),
-      ]);
-    } else {
-      const locking = h.provider !== "sqlite";
-      if (locking) await ensureInviteMutex(h);
-      const body = async (tx: any) => {
-        if (locking) await lockInviteMutex(h, tx);
-        const revoked = sameEmail ? await revokeWhere(h, tx, sameEmail, now) : [];
-        await tx.insert(t).values(row);
-        for (const id of revoked) await auditStatement(h, { ...reinvite, target: id }, tx);
-        await auditStatement(h, created, tx);
-      };
-      await (locking ? h.db.transaction(body, INVITE_TX) : h.db.transaction(body));
+    try {
+      if (h.kind === "d1") {
+        const guard = claim ? d1ProofGuard(h) : null;
+        await h.db.batch([
+          ...(claim && guard ? [claim.step.build(h.db), guard.guard] : []),
+          ...(sameEmail ? [auditEachStatement(h, h.db, reinvite, sameEmail), h.db.update(t).set({ revokedAt: now }).where(sameEmail)] : []),
+          h.db.insert(t).values(row),
+          auditStatement(h, created),
+          ...(guard ? [guard.drop] : []),
+        ]).catch((e: unknown) => {
+          if (proofGuardFailed(e)) throw new ProofInvalid();
+          throw e;
+        });
+      } else {
+        const locking = h.provider !== "sqlite";
+        if (locking) await ensureInviteMutex(h);
+        const body = async (tx: any) => {
+          if (locking) await lockInviteMutex(h, tx);
+          if (claim && !(await consumeProofIn(h, tx, claim.step))) throw new ProofInvalid();
+          const revoked = sameEmail ? await revokeWhere(h, tx, sameEmail, now) : [];
+          await tx.insert(t).values(row);
+          for (const id of revoked) await auditStatement(h, { ...reinvite, target: id }, tx);
+          await auditStatement(h, created, tx);
+        };
+        await (locking ? h.db.transaction(body, INVITE_TX) : h.db.transaction(body));
+      }
+    } catch (e) {
+      if (e instanceof ProofInvalid) return c.json({ error: "mfa_proof_invalid" }, 403);
+      throw e;
     }
     c.header("Cache-Control", "no-store");
     return c.json({ invite: view(row, now.getTime()), link: `${base}/invite#${token}` }, 201);

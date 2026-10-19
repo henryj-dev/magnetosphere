@@ -28,6 +28,23 @@ name = "magnetosphere-d1"
 
 [env.d1.vars]
 BETTER_AUTH_URL = "https://magnetosphere.example.com"
+# 관리자 MFA 정책 (A1, 필수, 공통안 1차 운영 값). 코드에 기본값이 없다
+MFA_TOTP_PERIOD_S = "30"
+MFA_TOTP_DIGITS = "6"
+MFA_TOTP_ALGORITHM = "SHA-1"
+MFA_TOTP_PAST_WINDOW = "1"
+MFA_TOTP_FUTURE_WINDOW = "1"
+MFA_SEED_BYTES = "20"
+MFA_RECENCY_TTL_S = "600"
+MFA_CHALLENGE_TTL_S = "600"
+MFA_PENDING_TTL_S = "600"
+MFA_GRANT_TTL_S = "86400"
+MFA_ADMIN_SESSION_ABSOLUTE_TTL_S = "43200"
+MFA_FAILURE_LIMIT = "5"
+MFA_FAILURE_WINDOW_S = "900"
+MFA_FAILURE_DELAY_BASE_S = "1"
+MFA_FAILURE_DELAY_MAX_S = "900"
+MFA_RECOVERY_CODE_COUNT = "10"
 
 [[env.d1.d1_databases]]
 binding = "DB"
@@ -41,6 +58,23 @@ name = "magnetosphere-mysql"
 
 [env.mysql.vars]
 BETTER_AUTH_URL = "https://magnetosphere.example.com"
+# 관리자 MFA 정책 (A1, 필수, 공통안 1차 운영 값). 코드에 기본값이 없다
+MFA_TOTP_PERIOD_S = "30"
+MFA_TOTP_DIGITS = "6"
+MFA_TOTP_ALGORITHM = "SHA-1"
+MFA_TOTP_PAST_WINDOW = "1"
+MFA_TOTP_FUTURE_WINDOW = "1"
+MFA_SEED_BYTES = "20"
+MFA_RECENCY_TTL_S = "600"
+MFA_CHALLENGE_TTL_S = "600"
+MFA_PENDING_TTL_S = "600"
+MFA_GRANT_TTL_S = "86400"
+MFA_ADMIN_SESSION_ABSOLUTE_TTL_S = "43200"
+MFA_FAILURE_LIMIT = "5"
+MFA_FAILURE_WINDOW_S = "900"
+MFA_FAILURE_DELAY_BASE_S = "1"
+MFA_FAILURE_DELAY_MAX_S = "900"
+MFA_RECOVERY_CODE_COUNT = "10"
 
 [[env.mysql.hyperdrive]]
 binding = "HYPERDRIVE"
@@ -52,6 +86,23 @@ name = "magnetosphere-pg"
 
 [env.pg.vars]
 BETTER_AUTH_URL = "https://magnetosphere.example.com"
+# 관리자 MFA 정책 (A1, 필수, 공통안 1차 운영 값). 코드에 기본값이 없다
+MFA_TOTP_PERIOD_S = "30"
+MFA_TOTP_DIGITS = "6"
+MFA_TOTP_ALGORITHM = "SHA-1"
+MFA_TOTP_PAST_WINDOW = "1"
+MFA_TOTP_FUTURE_WINDOW = "1"
+MFA_SEED_BYTES = "20"
+MFA_RECENCY_TTL_S = "600"
+MFA_CHALLENGE_TTL_S = "600"
+MFA_PENDING_TTL_S = "600"
+MFA_GRANT_TTL_S = "86400"
+MFA_ADMIN_SESSION_ABSOLUTE_TTL_S = "43200"
+MFA_FAILURE_LIMIT = "5"
+MFA_FAILURE_WINDOW_S = "900"
+MFA_FAILURE_DELAY_BASE_S = "1"
+MFA_FAILURE_DELAY_MAX_S = "900"
+MFA_RECOVERY_CODE_COUNT = "10"
 
 [[env.pg.hyperdrive]]
 binding = "HYPERDRIVE"

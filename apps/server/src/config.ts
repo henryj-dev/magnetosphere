@@ -3,9 +3,12 @@ import { createAuth, type Mailer } from "@magnetosphere/auth";
 import { selfDeleteCredentialProofOf } from "@magnetosphere/auth/internal";
 import { createClient } from "@magnetosphere/omniroute";
 import { consoleMailer, MailError, type SendEmailBinding } from "@magnetosphere/auth/mail";
+import { loadMfaPolicy, MFA_ISSUER, MFA_POLICY_ENV, mfaHmacKey, type MfaRuntime } from "@magnetosphere/auth/mfa";
 import { createCipher } from "@magnetosphere/runtime/crypto";
 import type { Runtime } from "@magnetosphere/runtime/types";
 import type { Services } from "./app.ts";
+import { auditStatement } from "./audit/index.ts";
+import { ipBucket } from "./routes/guard.ts";
 import { assertSetupTokenStrength } from "./setup/index.ts";
 import { signupAuthHooks } from "./signup/gate.ts";
 import { settingsMailer, type SmtpFactory } from "./setup/mail.ts";
@@ -46,16 +49,30 @@ export interface ServiceOptions {
   cloudflareEmail?: SendEmailBinding;
 }
 
+/**
+ * 관리자 MFA 런타임 (A1). 정책 수치는 배포 설정(env·wrangler vars)의 필수값이고 코드에 기본값이 없다.
+ * 하나라도 없거나 범위 밖이면 정책은 unavailable 이고 시작은 막지 않는다: 관리자 가드가 503 mfa_policy_unavailable,
+ * 최초 설치가 503 mfa_policy_required 로 닫힌다 (fail-closed). 사유는 설정 이름만 로그에 남긴다 (값은 남기지 않는다).
+ */
+export async function buildMfaRuntime(rt: Runtime, db: Services["db"], cipher: Services["cipher"], secret: string): Promise<MfaRuntime> {
+  const env = Object.fromEntries(Object.values(MFA_POLICY_ENV).map((name) => [name, rt.secret(name)]));
+  const policy = await loadMfaPolicy(env);
+  if (policy.state !== "ready") console.warn(`[mfa] 관리자 MFA 정책을 쓸 수 없다 (${policy.field}: ${policy.reason}). 관리자 기능과 최초 설치가 닫힌다`);
+  return { policy, cipher, key: await mfaHmacKey(secret), issuer: MFA_ISSUER, ipBucket, audit: (tx, e) => auditStatement(db, e, tx) };
+}
+
 export async function buildServices(rt: Runtime, opts: ServiceOptions): Promise<Services> {
   const db = await rt.db();
   // 키가 없거나 32바이트가 아니면 여기서 시작을 거부한다 (TC-S4.T2.c)
   const cipher = await createCipher(requireSecret(rt, "APP_ENCRYPTION_KEY"));
   const baseURL = requireSecret(rt, "BETTER_AUTH_URL");
+  const secret = requireSecret(rt, "BETTER_AUTH_SECRET");
+  const mfa = await buildMfaRuntime(rt, db, cipher, secret);
   const mailer = opts.mailer ?? settingsMailer(async () => db, async () => cipher, opts.fallbackMailer ?? fallbackMailer(), opts.smtp, opts.cloudflareEmail);
   const auth = createAuth({
     database: db,
     baseURL,
-    secret: requireSecret(rt, "BETTER_AUTH_SECRET"),
+    secret,
     trustedOrigins: [new URL(baseURL).origin],
     mailer,
     clientIp: rt.clientIp,
@@ -64,6 +81,7 @@ export async function buildServices(rt: Runtime, opts: ServiceOptions): Promise<
     onMailError: () => console.error("[mail] 메일을 보내지 못했다"),
     // 가입 판정 입력은 요청 하나에서 한 번만 읽고, 가입 뒤 감사 기록 member.signup 을 남긴다 (signup/gate.ts)
     ...signupAuthHooks(db),
+    mfa,
   });
   // OmniRoute 연결은 선택이다. 없으면 설치 때 토큰 붙여 넣기로 간다 (setup/omniroute.ts)
   const omniroute = { baseUrl: rt.secret("OMNIROUTE_URL") || null, initialPassword: rt.secret("OMNIROUTE_INITIAL_PASSWORD") || null };
@@ -77,5 +95,5 @@ export async function buildServices(rt: Runtime, opts: ServiceOptions): Promise<
     if (!baseUrl || !token) return null;
     return (o?: { timeoutMs?: number }) => createClient({ baseUrl, credential: { token }, timeoutMs: o?.timeoutMs });
   };
-  return { db, auth: { ...auth, selfDeleteCredentialProof: selfDeleteCredentialProofOf(auth) }, cipher, omniroute, setupToken, clientIp: rt.clientIp, appOrigin: new URL(baseURL).origin, keysClient, mailer, mailCapabilities: { smtp: !!opts.smtp, cloudflare: !!opts.cloudflareEmail } };
+  return { db, auth: { ...auth, selfDeleteCredentialProof: selfDeleteCredentialProofOf(auth) }, cipher, mfa, omniroute, setupToken, clientIp: rt.clientIp, appOrigin: new URL(baseURL).origin, keysClient, mailer, mailCapabilities: { smtp: !!opts.smtp, cloudflare: !!opts.cloudflareEmail } };
 }
