@@ -573,6 +573,27 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/gate.mjs M6 --explain
 
+  p4-a1:
+    name: 관리자 MFA (A1 게이트, 다섯 DB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    # 4단계 첫 단계. 단위(G-A1.1·6·10·14), 네 DB 저장소·동시성(G-A1.2·8·12·16, docker compose 테스트 DB), 다섯 DB 마이그레이션(G-A1.3),
+    # Workers D1 흐름(G-A1.9·13·17·20, wrangler dev), 봉인 단계 검사 불변(G-A1.18·19, origin/main 과 비교하므로 이력 전체), ruleset(G-A1.24, gh api).
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: A1 게이트
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/gate.mjs A1 --explain
+
   p2-k1-result:
     name: 작업 기반 (K1 게이트, 네 DB)
     needs: p2-k1

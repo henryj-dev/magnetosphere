@@ -17,6 +17,8 @@
 | 로그인 시도 제한 | 계정+IP 칸. 5회 실패 뒤 1초부터 지수 지연, 상한 15분, 마지막 실패 15분 뒤 초기화. 저장소는 DB 공유 (`rate_limit`처럼 여러 인스턴스가 함께 센다) | 같음 |
 | 만료 | 초대 72시간 고정 (관리자 조절 없음, 이미 발급된 초대는 원래 만료 유지). 비밀번호 재설정 30분 | 같음. 3단계 Q4(기본 7일·최대 30일)를 대체 |
 | 보존 | 감사 기록 1년 (정리 작업 추가). 백업 30일 | 같음. 3단계 Q17(무기한)을 대체 |
+| MFA 배포 템플릿 값 | seed 20바이트(Q12), 부분 세션 challenge TTL 600초, 등록 시작 → 확인(pending) TTL 600초, `/admin-mfa/**` 클라이언트 IP·경로마다 분당 20회. 앞 셋은 `MFA_*` 배포 설정, 요청 수 제한은 `RATE_LIMIT_RULES` | 사용자 결정 (2026-10-19) |
+| 관리자 초대 수락 | 이메일 지정 관리자 초대(role=admin)를 수락하면 그 응답에 MFA 등록 grant(promotion, 발급자 = 초대 만든 관리자)를 한 번 넣는다. 수락 마무리와 같은 원자 단위에서 발급한다. 응답 키는 `mfaGrant.grant` (DTO 의 `token` 키 금지와 구분) | 사용자 결정 (2026-10-19) |
 | 수치의 자리 | 위 수치는 코드 기본값이 아니라 **배포 설정(env·wrangler vars)의 필수값**이다. 값이 없거나 범위 밖이면 그 기능이 fail-closed 로 닫힌다 (A1 정책 모듈과 같은 방식). 1차 결정 값은 배포 템플릿과 운영 문서에 적는다 | 사용자 결정 |
 | 범위 밖 | SSO(5단계)·SAML(6단계)·전체 관리 화면(7단계)·공개 준비(8단계) | 통합 계획 4절 C~F |
 | 사용량 원칙 (orc 공유) | 관리 화면 장애가 OmniRoute 중계를 멈추지 않는다. 인증·철회는 설치 DB 를 요청마다 동기로 확인한다. 사람 세션과 서비스 키(OmniRoute API 키)를 섞지 않는다 | orc 공유 원칙 |
@@ -96,7 +98,7 @@
 - (가) **20바이트(160비트, SHA-1 HMAC 블록 출력과 같은 길이) (추천)**.
 - (나) 32바이트. 일부 인증 앱의 QR 길이·호환성을 따로 확인해야 한다.
 - 영향: 배포 템플릿의 `MFA_SEED_BYTES`, U5.T3.
-- 결정: 미정 (U5)
+- 결정: 20바이트(160비트, RFC 4226 §4 R6) (2026-10-19 사용자)
 
 ---
 
@@ -158,7 +160,7 @@
 
 | 단계 | 제목 | 상태 | 게이트 명령 | 초기 checks |
 |---|---|---|---|---|
-| A1 | 관리자 MFA (자체 TOTP) | 🔓 | `node scripts/gate.mjs A1` | 25 (T2~T6 은 계획 값, 봉인 PR 에서 교체) |
+| A1 | 관리자 MFA (자체 TOTP) | 🔓 | `node scripts/gate.mjs A1` | 22 (실제 시험 구조, 2026-10-19 교체. G-A1.7·11·15 폐기) |
 | A2 | 공통 회원 수치 정렬 (비밀번호·해시·세션·시도 제한·만료·보존) | 🔒 | `node scripts/gate.mjs A2` | 0 |
 | U1 | 기본 회원 화면·최소 관리자 화면 | 🔒 | `node scripts/gate.mjs U1` | 0 |
 | U2 | 사용량 계약 확인 (OmniRoute analytics·call-logs·성능) | 🔒 | `node scripts/gate.mjs U2` | 0 |
@@ -240,85 +242,71 @@ TC-A1.T1.u·v  생성물·드리프트, 스키마 규칙 위반 0
 【통과】
 - [ ] G-A1.1 ~ G-A1.5 통과
 
-> **A1 T2~T6 검사는 계획 값이다.** p4/a1-mfa 의 지금 시험은 이름·구조가 이 절과 다르다: `apps/server/test/mfa/admin-mfa.test.ts`(TC-A1.T2.a~k), `admin-mfa.db.test.ts`(TC-A1.T2.l~n, Node DB 넷 × 3), `admin-mfa.workers.test.ts`(D1 3개). 작성자가 아직 쓰는 중이라 설정 값을 지금 맞추지 않는다. A1 은 봉인 전(열린) 단계라 **A1 봉인 PR 에서 실제 시험 구조로 `gates.config.mjs` A1 checks 와 이 절의 TC·GATE 표를 함께 교체**한다 (선택식과 수를 함께, 실행 결과에 맞추지 않는다). 그 전에는 A1 checks 로 CI 단계 잡(`p4-a1`)을 만들지 않는다.
+> **A1 T2~T6 검사는 실제 시험 구조다 (2026-10-19 교체).** 시험은 `apps/server/test/mfa/`에 있다: `admin-mfa.test.ts`(Node·SQLite, T2.a~e·T3.a~d·T4.a~d), `admin-mfa.db.test.ts`(Node DB 넷 × T2.f·T3.e·T4.e), `admin-mfa.workers.test.ts`(D1, T2.f·T3.e·T4.e·T6.a), 공용 단언 `checks.ts`. 봉인 단계 시험은 공용 fixture(`packages/auth/test/mfa-fixture.ts`·`mfa-policy.ts`)로 옮겼다 (A1.T5).
+> **재현 빨강은 격리 변이 대조다.** 시험과 제품 코드가 한 브랜치에서 함께 바뀌어 `Red:` 커밋을 따로 두지 않는다. 대신 작업 트리 사본에서 제품 코드를 한 곳씩 약하게 바꿔 해당 TC 가 실패함을 확인했다 (A1 봉인 PR 설명에 결과). 그래서 `check-red` 검사 G-A1.7·11·15 는 폐기했다.
 
-### ☐ A1.T2 — 서버 가드·부분 세션·challenge (코드 미확인) 🛡
-선행 A1.T1 · 산출 `packages/auth/src/mfa/plugin.ts`, `apps/server/src/mfa/admin.ts`, `routes/guard.ts` · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-A1.T2.a`
+### ☑ A1.T2 — 서버 가드·부분 세션·challenge 🛡
+선행 A1.T1 · 산출 `packages/auth/src/mfa/{plugin,session,unit}.ts`, `apps/server/src/routes/guard.ts`, `apps/server/src/mfa/proof.ts` · 되돌리기 커밋 2개 · 장치 요구 없음 (재현 빨강은 격리 변이 대조)
 
-【작업】
-1. 시험만 넣은 커밋 (`Red: TC-A1.T2.a`).
-2. A1 설계 4절 「로그인」·6절대로 `/api/auth/admin-mfa/{status,challenge}`, `hooks.before` 부분 세션 차단, `sessionAdmin` MFA 판정(get-session 한 번)을 넣는다. 커밋.
+【작업】 A1 설계 4절 「로그인」·6절대로 `/api/auth/admin-mfa/*`, `hooks.before` 부분 세션 제한(허용 `/get-session`·`/sign-out`·`/admin-mfa/*`), `sessionAdmin` MFA 판정(get-session 한 번, 세션·회원·active factor 한 SELECT)을 넣는다.
 
 【테스트】
 ```
-TC-A1.T2.a  password-only 관리자 세션은 관리 API 403 MFA_REQUIRED (직접 호출 포함)
-  단언:  비밀번호 로그인 직후 GET /api/admin/members → 403 MFA_REQUIRED, challenge 뒤 → 200
-  검출:  sessionAdmin 이 role·status 만 봐 비밀번호만으로 전체 관리자 권한을 얻는 것
-TC-A1.T2.b  부분 세션 허용 경로는 /get-session·/sign-out·/admin-mfa/* 셋뿐
-  단언:  부분 세션으로 /change-password 403 MFA_REQUIRED, 관리자 역할로 회원 API(/api/me/keys) 403
-  검출:  hooks.before 차단 목록이 허용 목록이 아니라 금지 목록이라 새 경로가 생길 때마다 우회되는 것
-TC-A1.T2.c  정책 unavailable → 503 mfa_policy_unavailable, DB 장애 → 503 mfa_unavailable (fail-closed)
-  검출:  정책을 못 읽을 때 MFA 판정을 건너뛰어 관리 API 가 열리는 것
-TC-A1.T2.d  정책 버전 불일치·factor 교체 뒤 옛 충족 세션은 미충족
+TC-A1.T2.a  부분 세션: 관리 API 403 mfa_required, 관리자의 회원 API 403, /change-password·/update-user 403 MFA_REQUIRED, /get-session·/sign-out 허용, challenge 뒤 200
+  검출:  sessionAdmin 이 role·status 만 봐 비밀번호만으로 전체 관리자 권한을 얻는 것, 차단이 금지 목록이라 새 경로가 우회되는 것
+TC-A1.T2.b  정책 버전 불일치·factor 교체 뒤 옛 충족 세션은 관리 API 직접 호출에서 403
   검출:  mfa_verified_at 만 봐 정책을 강화해도 기존 관리자 세션이 그대로 쓰이는 것
-TC-A1.T2.e  잘못된 코드·재사용·factor 없음 → 모두 401 INVALID_MFA_CODE, 성공 → 세션 승격
-  검출:  오류를 나눠 factor 존재·코드 재사용 여부가 드러나는 것
-TC-A1.T2.f  admin-mfa 응답은 Cache-Control no-store·정확 Origin·JSON 전용
-  검출:  otpauth URI 가 든 응답이 중간 캐시에 남는 것
-TC-A1.T2.g  admin-mfa 요청 수 제한 → 429 (MFA_FAILURE_* 정책 값)
+TC-A1.T2.c  정책 unavailable → 관리 API·관리자의 회원 API 503 mfa_policy_unavailable, challenge 503 MFA_POLICY_UNAVAILABLE, 회원은 그대로
+  검출:  정책을 못 읽을 때 MFA 판정을 건너뛰어 관리 API 가 열리는 것
+TC-A1.T2.d  실패 5번 뒤 429 MFA_TOO_MANY_ATTEMPTS·Retry-After, 감사·로그에 seed·grant·복구 코드 없음
   검출:  6자리 코드 대입을 시간창 안에서 무제한 시도하는 것
-TC-A1.T2.h  로그인 challenge·step-up·등록 확인을 섞은 같은 step 동시 N 건 → 정확히 1 성공 (Node DB 넷·D1)
-  검출:  경로마다 다른 재사용 기록을 써 한 코드가 경로 수만큼 쓰이는 것
+TC-A1.T2.e  같은 코드 동시 challenge → 1건 (Node SQLite)
+TC-A1.T2.f  같은 코드 동시 challenge 여섯 → 1건, 나머지 401 INVALID_MFA_CODE·관리 API 403, 같은 계정·IP 연속 실패 6번째 429 (Node DB 넷·D1)
+  검출:  last_used_step CAS 가 빠져 한 코드가 세션 수만큼 쓰이는 것, 실패 칸 UPDATE 가 DB 하나(Postgres 의 매개변수 형식)에서 500 이 되는 것
 ```
 
 【통과】
-- [ ] G-A1.6 ~ G-A1.9 통과
+- [ ] G-A1.6 · G-A1.8 · G-A1.9 통과
 
-### ☐ A1.T3 — 설치 직후 bootstrap·등록·복구 코드 (코드 미확인) 🛡
-선행 A1.T2 · 산출 `apps/server/src/setup/{index,routes}.ts`, `packages/auth/src/mfa/plugin.ts` · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-A1.T3.a`
+### ☑ A1.T3 — 설치 직후 bootstrap·등록·복구 코드 🛡
+선행 A1.T2 · 산출 `apps/server/src/setup/{index,routes}.ts`, `apps/server/src/node.ts`, `packages/auth/src/mfa/plugin.ts` · 되돌리기 커밋 2개 · 장치 요구 없음
 
-【작업】 A1 설계 4절 「설치 직후 (추천안 A)」·「등록·재등록」·「복구 코드」대로. 시험 커밋(`Red:`) 뒤 고침 커밋.
+【작업】 A1 설계 4절 「설치 직후 (추천안 A)」·「등록·재등록」·「복구 코드」대로. Node 재발급 토큰은 설치 토큰과 다른 행(`mfa_reissue_token_hash`)이다.
 
 【테스트】
 ```
-TC-A1.T3.a  정책 미준비면 POST /api/setup 503 mfa_policy_required, 설치 토큰 미소비
+TC-A1.T3.a  정책 미준비면 POST /api/setup 503 mfa_policy_required, 설치 토큰·관리자·grant 그대로
   검출:  토큰을 먼저 소비해 운영자가 설정을 고친 뒤 다시 설치할 수 없게 되는 것
-TC-A1.T3.b  설치 성공 201 에 grant 토큰 한 번, DB 에는 해시만
-  검출:  grant 원문을 DB 에 남겨 DB 읽기 권한만으로 첫 관리자 MFA 를 등록하는 것
-TC-A1.T3.c  grant 없는 등록 403 MFA_GRANT_REQUIRED, 비밀번호만으로 등록 불가, 재등록은 proof mfa.reenroll 필요
+TC-A1.T3.b  설치 201 에 mfaGrant 한 번(no-store), DB 에는 해시만, grant 없음·틀린 grant 등록 403 MFA_GRANT_REQUIRED, 등록 뒤 관리 API 200, 같은 grant 재사용 불가
   검출:  비밀번호를 훔친 사람이 자기 TOTP 를 등록해 관리자를 넘겨받는 것
-TC-A1.T3.d  enroll/confirm 원자 처리: pending→active·grant 소비·복구 코드·authVersion +1·다른 세션 삭제·현재 세션 MFA 충족
-  검출:  등록 뒤 다른 기기의 옛 세션이 살아 있어 새 factor 없이 관리 API 를 쓰는 것
-TC-A1.T3.e  grant 재발급은 bootstrap 관리자에 active factor 가 없는 동안만, 새 설치 토큰 필요
-TC-A1.T3.f  복구 코드는 생성 응답에만, 재생성은 proof 필요
-TC-A1.T3.g  등록 확인 중 실패 → 전부 되돌림, 동시 확인 2 건 → 1 건 (Node DB 넷·D1)
-  검출:  D1 batch 중간 실패로 grant 만 소비되고 factor 는 pending 으로 남아 다시 등록할 수 없는 것
+TC-A1.T3.c  재등록은 mfa.reenroll proof 필요·다른 세션 삭제·옛 seed 무효, 복구 코드는 한 번만, 재발급은 proof 필요
+TC-A1.T3.d  bootstrap grant 재발급은 active factor 가 없는 동안 Node 재발급 토큰으로 한 번
+TC-A1.T3.e  같은 코드 동시 등록 확인 → 1건, active factor 1·grant 부분 소비 없음 (Node DB 넷·D1)
+  검출:  D1 batch 중간 실패로 grant 만 소비되고 factor 가 pending 으로 남는 것
 ```
 
 【통과】
-- [ ] G-A1.10 ~ G-A1.13 통과
+- [ ] G-A1.10 · G-A1.12 · G-A1.13 통과
 
-### ☐ A1.T4 — step-up·승격·초기화·마지막 관리자 (코드 미확인) 🛡
-선행 A1.T3 · 산출 `apps/server/src/mfa/proof.ts`, `admin/{members,guard-sql,self-delete}.ts`, `invites/admin.ts` · 되돌리기 커밋 2개 · 장치 요구 `Red: TC-A1.T4.a`
+### ☑ A1.T4 — step-up·승격·초기화·마지막 관리자·관리자 초대 수락 🛡
+선행 A1.T3 · 산출 `apps/server/src/mfa/proof.ts`, `admin/{members,guard-sql,self-delete,delete}.ts`, `invites/{admin,accept}.ts` · 되돌리기 커밋 2개 · 장치 요구 없음
 
-【작업】 A1 설계 4절 「민감 작업 step-up」·「해제·승격·초기화」대로. proof 를 요구할 작업은 역할 변경·관리자 초대·MFA 작업·관리자 탈퇴다 (설정·메일·OmniRoute 토큰 변경은 A1 설계 9절 결정 대기 — 결정 전에는 proof 를 요구하지 않는다).
+【작업】 A1 설계 4절 「민감 작업 step-up」·「해제·승격·초기화」대로. proof 를 요구할 작업은 역할 변경·관리자 초대·MFA 초기화·관리자 탈퇴다 (설정·메일·OmniRoute 토큰 변경은 A1 설계 9절 결정 대기). 관리자 초대 수락은 등록 grant 를 응답에 한 번 넣는다 (2026-10-19 사용자 결정).
 
 【테스트】
 ```
-TC-A1.T4.a  proof 없는 역할 변경·관리자 초대·mfa-reset·관리자 탈퇴 → 403 MFA_PROOF_REQUIRED
-  검출:  MFA 를 마친 세션을 빼앗은 사람이 최근 확인 없이 관리자를 늘리는 것
-TC-A1.T4.b  proof 재사용·다른 purpose·target·세션·authVersion → 거부
+TC-A1.T4.a  proof 없음 403 mfa_proof_required, 다른 대상·목적·세션 proof 403 mfa_proof_invalid, 거부된 시도는 proof 를 쓰지 않음, 재사용 403
   검출:  역할 변경용 proof 로 다른 회원을 승격하는 것
-TC-A1.T4.c  승격: authVersion +1·대상 세션 철회·promotion grant 행위자에게 한 번, 대상은 grant 없이 등록 불가
-TC-A1.T4.d  mfa-reset: 자기 자신·bootstrap 대상 거부, factor 폐기·세션 철회·reset grant
-TC-A1.T4.e  마지막 관리자 = active 이면서 active factor 를 가진 관리자 수
-  검출:  MFA 없는 관리자를 세어 마지막 MFA 관리자를 강등·삭제할 수 있는 것
-TC-A1.T4.f  proof 소비는 작업 트랜잭션·batch 안: 작업 실패 시 proof 미소비, 같은 proof 동시 2 건 → 1 건 (Node DB 넷·D1)
-  검출:  proof 를 먼저 소비하고 작업이 실패해 관리자가 다시 step-up 해야 하거나, 동시 요청 둘이 같은 proof 로 성공하는 것
+TC-A1.T4.b  승격: 대상 세션 철회·promotion grant 행위자에게 한 번·대상은 grant 로만 등록, 초기화: 자기·bootstrap 409·factor 폐기·세션 철회·reset grant, 강등은 factor 폐기
+TC-A1.T4.c  마지막 관리자 = active 이면서 active factor 가 있는 관리자 수, bootstrap 강등 409, 관리자 탈퇴 proof 필요·탈퇴 뒤 MFA 행 0
+  검출:  MFA 없는 관리자를 세어 마지막 MFA 관리자를 탈퇴시키는 것
+TC-A1.T4.d  관리자 초대는 proof 필요, 수락 응답에 mfaGrant 한 번(no-store)·해시만, 그 grant 로만 등록, 회원 초대 수락에는 없음
+TC-A1.T4.e  같은 proof 동시 역할 변경 둘 → 1건, 다른 목적 proof 403 (Node DB 넷·D1)
+  검출:  proof 를 작업 트랜잭션 밖에서 소비해 동시 요청 둘이 같은 proof 로 성공하는 것
 ```
 
 【통과】
-- [ ] G-A1.14 ~ G-A1.17 통과
+- [ ] G-A1.14 · G-A1.16 · G-A1.17 통과
 
 ### ☐ A1.T5 — 봉인 단계 시험 이전과 봉인 검사 불변 검사기
 선행 A1.T2 · 산출 `scripts/check-sealed-checks.mjs`, `test/check-sealed-checks.test.mjs`, 봉인 단계 시험 파일·공용 fixture · 되돌리기 커밋 2개 · 장치 요구 없음
@@ -341,12 +329,12 @@ TC-A1.T5.e  desc·requires 만 바꾼 설정 → 통과
 - [ ] G-A1.18 · G-A1.19 통과
 - [ ] 이 PR 의 봉인 단계 잡 전부(1단계 `unit`·`schema`·`auth`·`server`·`contract`·`deploy`·`e2e`·`guard`·`s1-seal`, `p2-k*`, `p3-m*`) 초록 (봉인 단계 시험이 새 fixture 로 같은 수만큼 통과)
 
-### ☐ A1.T6 — Workers D1 전체 흐름 (코드 미확인)
-선행 A1.T3 · 산출 `apps/server/test/mfa/flow.workers.test.ts` · 되돌리기 커밋 1개
+### ☑ A1.T6 — Workers D1 전체 흐름
+선행 A1.T3 · 산출 `apps/server/test/mfa/admin-mfa.workers.test.ts` · 되돌리기 커밋 1개
 
 ```
-TC-A1.T6.a  Workers D1 에서 설치 → grant → 등록 → 로그인 challenge → 관리 API 200, 옛 password-only 세션 403
-  검출:  D1 batch 의 CAS 뒤 guard INSERT 가 빠져 0행 CAS 에도 승격이 커밋되는 것
+TC-A1.T6.a  Workers D1: grant 등록 → 승격 grant → 대상 등록 → 초기화 reset grant → 재등록 → 관리자 초대 수락 grant → 등록, 부분 세션 403
+  검출:  D1 batch 의 CAS 뒤 guard INSERT 가 빠져 0행 CAS 에도 승격·등록이 커밋되는 것
 ```
 【통과】 - [ ] G-A1.20 통과
 
@@ -365,7 +353,7 @@ TC-A1.T7.b  check-required-checks → 0 (G-A1.24)
   검출:  빨간 채로 병합되는 것
 ```
 
-## 🚪 GATE A1 (T1 은 지금 시험 기준, G-A1.6~17·20 은 계획 값 — A1 봉인 PR 에서 실제 시험 구조로 교체)
+## 🚪 GATE A1 (2026-10-19 실제 시험 구조로 교체. G-A1.7·11·15 폐기 — 재현 빨강은 격리 변이 대조)
 
 | id | 검사 | 명령 | 통과 기준 |
 |---|---|---|---|
@@ -374,15 +362,15 @@ TC-A1.T7.b  check-required-checks → 0 (G-A1.24)
 | G-A1.3 | TC-A1.T1.migration (다섯 DB) | [L] `pnpm -C packages/db test:migrate -t "TC-A1.T1.migration" --db sqlite,mysql,mariadb,pg,d1` | 통과 = 5 |
 | G-A1.4 | TC-A1.T1.u 생성물·드리프트 | `pnpm -C packages/db gen && git diff --exit-code packages/db/src/schema/ && pnpm -C packages/db check:drift` | 종료코드 0 |
 | G-A1.5 | TC-A1.T1.v 스키마 규칙 | `node scripts/schema-lint.mjs` | 종료코드 0 |
-| G-A1.6 · 7 | TC-A1.T2.a~g · 재현 빨강 | `pnpm -C apps/server test -t "TC-A1\.T2\.[a-g] "` · `check-red --check G-A1.6 --since seal:M6` | 통과 = 7 · 0 |
-| G-A1.8 · 9 | TC-A1.T2.h (Node DB 넷 · D1) | [L] `test:db -t "TC-A1\.T2\.h"` · [L] `test:workers test/mfa/challenge.workers.test.ts -t "TC-A1\.T2\.h D1"` | 4 · 1 |
-| G-A1.10 · 11 | TC-A1.T3.a~f · 재현 빨강 | `pnpm -C apps/server test -t "TC-A1\.T3\.[a-f] "` · `check-red --check G-A1.10` | 6 · 0 |
-| G-A1.12 · 13 | TC-A1.T3.g (Node DB 넷 · D1) | [L] | 4 · 1 |
-| G-A1.14 · 15 | TC-A1.T4.a~e · 재현 빨강 | `pnpm -C apps/server test -t "TC-A1\.T4\.[a-e] "` · `check-red --check G-A1.14` | 5 · 0 |
-| G-A1.16 · 17 | TC-A1.T4.f (Node DB 넷 · D1) | [L] | 4 · 1 |
+| G-A1.6 | TC-A1.T2.a~e (Node SQLite) | `pnpm -C apps/server test -t "TC-A1\.T2\.[a-e] "` | 통과 = 5 |
+| G-A1.8 · 9 | TC-A1.T2.f (Node DB 넷 · D1) | [L] `test:db -t "TC-A1\.T2\.f " --db sqlite,mysql,mariadb,pg` · [L] `test:workers test/mfa/admin-mfa.workers.test.ts -t "TC-A1\.T2\.f Workers"` | 4 · 1 |
+| G-A1.10 | TC-A1.T3.a~d (Node SQLite) | `pnpm -C apps/server test -t "TC-A1\.T3\.[a-d] "` | 통과 = 4 |
+| G-A1.12 · 13 | TC-A1.T3.e (Node DB 넷 · D1) | [L] `test:db -t "TC-A1\.T3\.e " …` · [L] `test:workers … -t "TC-A1\.T3\.e Workers"` | 4 · 1 |
+| G-A1.14 | TC-A1.T4.a~d (Node SQLite) | `pnpm -C apps/server test -t "TC-A1\.T4\.[a-d] "` | 통과 = 4 |
+| G-A1.16 · 17 | TC-A1.T4.e (Node DB 넷 · D1) | [L] `test:db -t "TC-A1\.T4\.e " …` · [L] `test:workers … -t "TC-A1\.T4\.e Workers"` | 4 · 1 |
 | G-A1.18 | TC-A1.T5.a 봉인 검사 불변 | `node scripts/check-sealed-checks.mjs --base origin/main` | 종료코드 0 |
 | G-A1.19 | TC-A1.T5.b~e 음성 대조 | `node --test … test/check-sealed-checks.test.mjs` | 통과 = 4 |
-| G-A1.20 | TC-A1.T6.a Workers D1 흐름 | [L] `test:workers test/mfa/flow.workers.test.ts -t "TC-A1\.T6\.a"` | 통과 = 1 |
+| G-A1.20 | TC-A1.T6.a Workers D1 흐름 | [L] `test:workers test/mfa/admin-mfa.workers.test.ts -t "TC-A1\.T6\.a"` | 통과 = 1 |
 | G-A1.21 | `twoFactor(` 0 | grep in `packages/auth/src`·`packages/db/src`·`apps/server/src` | == 0 |
 | G-A1.22 | 타입 검사 | `pnpm -r typecheck` | 종료코드 0 |
 | G-A1.23 · 24 | CI 단계 잡 · ruleset | grep · `check-required-checks.mjs` | == 1 · 0 |
@@ -821,6 +809,6 @@ TC-U5.T4.c  CI 단계 잡 p4-u5 · ruleset
 
 ## 코드 미확인 TC 목록
 
-- TC-A1.T2~T6 전부(G-A1.6~17·20): 계획 값이다. p4/a1-mfa 의 실제 시험(`admin-mfa.test.ts` T2.a~k, `admin-mfa.db.test.ts` T2.l~n, `admin-mfa.workers.test.ts` D1 3)과 이름·구조가 다르다. A1 봉인 PR 에서 실제 시험 구조로 checks 를 교체한다. 그 전에는 A1 checks 로 CI 단계 잡을 만들지 않는다.
+- TC-A1.T2~T6(G-A1.6~20): 2026-10-19 실제 시험 구조로 교체했다 (A1 절). 계획 값 표시는 없다.
 - G-A1.2 의 40 은 p4/a1-mfa 의 선언 수다 (`packages/auth/test/db.ts` `ALL_DBS`가 Node DB 넷 고정, 시험 10개). G-A1.3 의 5 는 `vitest.migrate.config.ts` include `test/migrate*.test.ts`가 `migrate-0007.test.ts`를 고르고 `--db` 다섯을 넘기는 값이다. 둘 다 실행 확인 전이다.
 - U1~U5 의 GATE 표는 그 단계를 시작할 때 TC 마다 한 줄로 채운다.
