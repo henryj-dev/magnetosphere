@@ -9,7 +9,7 @@ import { buildServices } from "../../src/config.ts";
 import { ensureSetupToken, SETUP_TOKEN_KEY } from "../../src/setup/index.ts";
 import { MAIL_API_KEY_AAD, MAIL_SETTINGS_KEY, settingsMailer, SMTP_PASSWORD_AAD, type SmtpFactory } from "../../src/setup/mail.ts";
 import { makeTestEnv, ADMIN, type TestEnv } from "../helpers.ts";
-import { login } from "../signup/checks.ts";
+import { login, proofHeader } from "../signup/checks.ts";
 import { serverRig, type ServerRig } from "../signup/env.ts";
 
 const SMTP = { provider: "smtp", host: "127.0.0.1", port: 1025, secure: false, user: "mg", password: "mgpass-fixed-test", from: "no-reply@mg.test" } as const;
@@ -94,7 +94,8 @@ it("TC-M5.T0.c SMTP 는 활성 관리자와 같은 Origin 만 받는다", async 
   // 정지는 운영 정지 API 로 한다. 정지 전 쿠키는 세션이 지워져 기존 계약대로 401 이다 (signup/policy.test.ts).
   // 유효한 세션을 가진 정지 관리자의 403 은 sessions/member-guard.test.ts 가 가짜 인증으로 검사한다.
   const suspended = await login(rig, "admin");
-  const stopped = await rig.call("POST", `/api/admin/users/${suspended.id}/suspend`, { cookie: admin.cookie });
+  // 다른 관리자 정지는 대상에 묶은 step-up proof 가 필요하다 (A1 보안 리뷰 M1)
+  const stopped = await rig.call("POST", `/api/admin/users/${suspended.id}/suspend`, { cookie: admin.cookie, headers: await proofHeader(rig, admin.cookie, "admin.suspend", suspended.id) });
   expect(stopped.status, "관리자 정지 응답").toBe(200);
   expect(await rig.op("user", suspended.email)).toMatchObject({ role: "admin", status: "suspended" });
   expect(await rig.op("sessionsOf", suspended.email)).toBe(0);

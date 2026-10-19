@@ -6,7 +6,7 @@ import { runAsInvite } from "@magnetosphere/auth/invite-context";
 import { attempt, body, mail, PASSWORD, userRows } from "../../../../packages/auth/test/signup-policy/rig.ts";
 import { MAIL_API_KEY_AAD } from "../../src/setup/mail.ts";
 import { makeTestEnv, type TestEnv } from "../helpers.ts";
-import { FAKE_INVITE, installed, login } from "./checks.ts";
+import { FAKE_INVITE, installed, login, proofHeader } from "./checks.ts";
 import { serverRig, type ServerRig } from "./env.ts";
 
 let t: TestEnv;
@@ -299,7 +299,8 @@ describe("TC-M2.T5 정책·메일 설정 API", () => {
       expect((await get(suspended.cookie)).status).toBe(200);
       expect((await rig.call("GET", "/api/auth/get-session", { cookie: suspended.cookie })).json?.user?.id).toBe(suspended.id);
       expect(await rig.op("sessionsOf", suspended.email)).toBe(1);
-      const stopped = await rig.call("POST", `/api/admin/users/${suspended.id}/suspend`, { cookie: admin.cookie });
+      // 다른 관리자 정지는 대상에 묶은 step-up proof 가 필요하다 (A1 보안 리뷰 M1)
+      const stopped = await rig.call("POST", `/api/admin/users/${suspended.id}/suspend`, { cookie: admin.cookie, headers: await proofHeader(rig, admin.cookie, "admin.suspend", suspended.id) });
       expect(stopped.status, stopped.body).toBe(200);
       expect(await rig.op("user", suspended.email)).toMatchObject({ role: "admin", status: "suspended" });
       // 운영 인증은 정지 전 쿠키를 무효화한다. 유효한 가짜 세션의 DB 권한 403 은 member-guard.test.ts에서 검사한다.
