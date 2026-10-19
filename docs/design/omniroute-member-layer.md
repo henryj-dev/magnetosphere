@@ -5,6 +5,7 @@
 실행판(1단계)은 [`../plan/phase1-todo.md`](../plan/phase1-todo.md) 다.
 2단계 실행판은 [`../plan/phase2-todo.md`](../plan/phase2-todo.md) 다.
 3단계 실행판은 [`../plan/phase3-todo.md`](../plan/phase3-todo.md) 다 (맨 위에 사용자에게 묻는 설계 질문 Q1~Q20).
+4단계 실행판은 [`../plan/phase4-todo.md`](../plan/phase4-todo.md) 다 (관리자 MFA A1·공통 회원 수치 A2·화면과 사용량 U1~U5).
 상태: 초안 v5.8 (설계 검토 1회 + S1 확인 + S2 리뷰 + S4 보안 리뷰 + K0 확인 + 3단계 M0 확인 반영)
 
 변경 이력

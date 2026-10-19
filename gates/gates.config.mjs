@@ -974,4 +974,114 @@ export const GATES = {
       { id: "G-M6.19", how: "test", desc: "TC-M6.T6.c·d 설치 뒤 이메일 가입 밖 생성 거부·통과한 가입의 권한 칼럼은 판정 값 (생성 훅 단위)", cmd: 'pnpm -C packages/auth exec vitest run test/m6-jit-guard.test.ts -t "TC-M6\\.T6\\."', expectPassed: 2 },
     ],
   },
+
+  // ---------- 4단계 "회원 화면·사용량" (실행판 docs/plan/phase4-todo.md) ----------
+  // A1 → A2 → U1 → U2 → U3 → U4 → U5 는 직렬이다. strictTests: test 검사마다 expectPassed(통과 수 ==)가 있어야 한다.
+  // outputs 는 그 단계가 처음 만드는 경로만 둔다 (이 설정을 넣을 때 모든 경로가 git log --all 0건).
+  // 4단계가 고칠 기존 파일(app.ts·config.ts·routes/**·setup/**·admin/**·audit/index.ts·invites/**·packages/auth/src/index.ts·
+  // packages/db/src/schema/**·migrations/*/meta/_journal.json·apps/web/src/routes/setup/**)은 어느 outputs 에도 넣지 않는다.
+  // 마이그레이션 번호는 A1 의 0007 만 정했다. 뒤 단계가 마이그레이션을 더하면 그 단계가 열린 뒤(잠기지 않은 동안) outputs 에 넣는다.
+  // A1 검사는 이 설정과 함께 채운다 (구현은 p4/a1-mfa 에서 진행 중). T1(G-A1.1~5)은 그 브랜치의 지금 시험 선언 수다.
+  // G-A1.6~17·20(T2~T6)은 계획 값이다. 지금 시험(apps/server/test/mfa/admin-mfa.test.ts T2.a~k, admin-mfa.db.test.ts T2.l~n Node DB 넷 × 3,
+  // admin-mfa.workers.test.ts D1 3)과 이름·구조가 다르다. A1 은 미봉인 단계라 A1 봉인 PR 에서 실제 시험 구조로 이 checks 를 교체한다.
+  // 그 전에는 A1 checks 로 CI 단계 잡(p4-a1)을 만들지 않는다.
+  // A2~U5 의 checks 는 그 단계를 시작할 때 실행판 GATE 표대로 채운다 (빈 단계는 gate 가 실행·봉인을 거부한다).
+  A1: {
+    needs: ["M6"],
+    waivable: false,
+    strictTests: true,
+    outputs: [
+      "packages/auth/src/mfa/**", "packages/auth/test/mfa-*",
+      "packages/db/migrations/*/0007_*", "packages/db/migrations/*/meta/0007_snapshot.json", "packages/db/test/migrate-0007.test.ts",
+      "apps/server/src/mfa/**", "apps/server/test/mfa/**", "apps/server/scripts/mfa-*",
+      "scripts/check-sealed-checks.mjs", "test/check-sealed-checks.test.mjs",
+    ],
+    checks: [
+      // A1.T1 저장소·TOTP·정책 모듈 (p4/a1-mfa 에 시험 있음). 단위 11 = a·b·c·d·e·f·g·h·i·j·k2
+      { id: "G-A1.1", how: "test", desc: "TC-A1.T1.a~j·k2 TOTP 벡터·시간창·정책 unavailable·정책 버전·seed AAD·비밀 미노출 (단위)", cmd: 'pnpm -C packages/auth exec vitest run test/mfa-unit.test.ts -t "TC-A1\\.T1\\."', expectPassed: 11 },
+      // 선언 40 = DB 당 k·l·m·n·o·p·q·r·s·t 10 × 4 (mfa-store.test.ts 는 ALL_DBS 넷 고정이라 MG_TEST_DBS 를 읽지 않는다). 끝의 공백이 TC-A1.T1.k2 를 뺀다
+      { id: "G-A1.2", how: "test", requires: ["local-services"], desc: "TC-A1.T1.k~t step CAS·동시 소비·grant·proof·slot·세션 칼럼 입력 차단 (Node DB 넷)", cmd: 'pnpm -C packages/auth test -t "TC-A1\\.T1\\.[k-t] "', expectPassed: 40 },
+      { id: "G-A1.3", how: "test", requires: ["local-services"], desc: "TC-A1.T1.migration 0007 업그레이드·기존 세션 MFA 미충족 (다섯 DB)", cmd: 'pnpm -C packages/db test:migrate -t "TC-A1.T1.migration" --db sqlite,mysql,mariadb,pg,d1', expectPassed: 5 },
+      { id: "G-A1.4", how: "cmd", desc: "TC-A1.T1.u 생성물·드리프트", cmd: "pnpm -C packages/db gen && git diff --exit-code packages/db/src/schema/ && pnpm -C packages/db check:drift" },
+      { id: "G-A1.5", how: "cmd", desc: "TC-A1.T1.v 스키마 규칙 위반 0", cmd: "node scripts/schema-lint.mjs" },
+      // A1.T2 서버 가드·challenge (계획 값, 봉인 PR 에서 교체). Red: TC-A1.T2.a — sessionAdmin 판정을 바꾸기 전 시험만 넣은 커밋
+      { id: "G-A1.6", how: "test", desc: "TC-A1.T2.a~g 부분 세션·password-only 거부·허용 경로 셋·정책/DB 장애 503·정책 버전·challenge 단일 오류·헤더·요청 수 제한", cmd: 'pnpm -C apps/server test -t "TC-A1\\.T2\\.[a-g] "', expectPassed: 7 },
+      { id: "G-A1.7", how: "cmd", desc: "재현 빨강: TC-A1.T2.a~g 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-A1.6 --since seal:M6" },
+      { id: "G-A1.8", how: "test", requires: ["local-services"], desc: "TC-A1.T2.h 로그인·step-up·등록 확인을 섞은 같은 step 동시 N건 → 정확히 1 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-A1\\.T2\\.h" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-A1.9", how: "test", requires: ["local-services"], desc: "TC-A1.T2.h 같은 step 동시 N건 (D1)", cmd: 'pnpm -C apps/server test:workers test/mfa/challenge.workers.test.ts -t "TC-A1\\.T2\\.h D1"', expectPassed: 1 },
+      // A1.T3 설치 직후 bootstrap·등록·복구 코드 (코드 미확인). Red: TC-A1.T3.a — 설치 경로를 바꾸기 전 시험만 넣은 커밋
+      { id: "G-A1.10", how: "test", desc: "TC-A1.T3.a~f 정책 미준비 설치 503·토큰 미소비, grant 1회 표시, 비밀번호만으로 등록 불가, 등록 확인 원자 처리, grant 재발급, 복구 코드 1회 표시", cmd: 'pnpm -C apps/server test -t "TC-A1\\.T3\\.[a-f] "', expectPassed: 6 },
+      { id: "G-A1.11", how: "cmd", desc: "재현 빨강: TC-A1.T3.a~f 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-A1.10 --since seal:M6" },
+      { id: "G-A1.12", how: "test", requires: ["local-services"], desc: "TC-A1.T3.g 등록 확인 실패 시 되돌림·동시 확인 1건 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-A1\\.T3\\.g" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-A1.13", how: "test", requires: ["local-services"], desc: "TC-A1.T3.g 등록 확인 batch 되돌림 (D1)", cmd: 'pnpm -C apps/server test:workers test/mfa/enroll.workers.test.ts -t "TC-A1\\.T3\\.g D1"', expectPassed: 1 },
+      // A1.T4 step-up·승격·초기화·마지막 관리자 (코드 미확인). Red: TC-A1.T4.a — 관리 작업에 proof 를 요구하기 전 시험만 넣은 커밋
+      { id: "G-A1.14", how: "test", desc: "TC-A1.T4.a~e proof 필요 작업·proof 재사용 거부·승격 grant·mfa-reset·마지막 관리자는 active factor 로 셈", cmd: 'pnpm -C apps/server test -t "TC-A1\\.T4\\.[a-e] "', expectPassed: 5 },
+      { id: "G-A1.15", how: "cmd", desc: "재현 빨강: TC-A1.T4.a~e 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-A1.14 --since seal:M6" },
+      { id: "G-A1.16", how: "test", requires: ["local-services"], desc: "TC-A1.T4.f proof 소비가 작업 트랜잭션 안에 있다 — 작업 실패 시 proof 미소비, 동시 2건 중 1건 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-A1\\.T4\\.f" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-A1.17", how: "test", requires: ["local-services"], desc: "TC-A1.T4.f proof 소비 batch (D1)", cmd: 'pnpm -C apps/server test:workers test/mfa/proof.workers.test.ts -t "TC-A1\\.T4\\.f D1"', expectPassed: 1 },
+      // A1.T5 봉인 단계 시험 이전 (관리자 fixture → MFA fixture)과 봉인 단계 검사 불변 검사기
+      { id: "G-A1.18", how: "cmd", desc: "TC-A1.T5.a 봉인 단계의 검사 정의가 기준(origin/main)과 같다", cmd: "node scripts/check-sealed-checks.mjs --base origin/main" },
+      { id: "G-A1.19", how: "test", desc: "TC-A1.T5.b~e 봉인 단계 검사 불변 검사기 음성 대조", cmd: nodeTest("test/check-sealed-checks.test.mjs", "TC-A1\\.T5\\."), expectPassed: 4 },
+      // A1.T6 Workers D1 전체 흐름 (코드 미확인)
+      { id: "G-A1.20", how: "test", requires: ["local-services"], desc: "TC-A1.T6.a 설치 → grant → 등록 → 로그인 challenge → 관리 API (Workers D1)", cmd: 'pnpm -C apps/server test:workers test/mfa/flow.workers.test.ts -t "TC-A1\\.T6\\.a"', expectPassed: 1 },
+      // 정적 검사
+      { id: "G-A1.21", how: "grep", desc: "Better Auth twoFactor 플러그인을 켜지 않는다 (A1 설계 1절)", pattern: "\\btwoFactor\\s*\\(", in: ["packages/auth/src", "packages/db/src", "apps/server/src"], op: "==", limit: 0 },
+      { id: "G-A1.22", how: "cmd", desc: "타입 검사", cmd: "pnpm -r typecheck" },
+      // A1.T7 CI 단계 잡·필수 검사. G-A1.23·24 는 ci.yml p4-a1 잡과 ruleset 이 생기기 전까지 실패한다
+      { id: "G-A1.23", how: "grep", desc: "TC-A1.T7.a CI 단계 잡 (A1)", pattern: "^\\s+run: node scripts/gate\\.mjs A1\\b", in: [".github/workflows/ci.yml"], op: "==", limit: 1 },
+      { id: "G-A1.24", how: "cmd", desc: "TC-A1.T7.b ruleset 필수 검사 ⊇ ci.yml 잡 이름, 병합은 머지 커밋만", cmd: "node scripts/check-required-checks.mjs --repo henryj-dev/magnetosphere" },
+      { id: "G-A1.25", how: "cmd", desc: "스크립트 테스트 전부", cmd: 'node --test --test-reporter=tap "scripts/*.test.mjs"' },
+    ],
+  },
+  A2: {
+    needs: ["A1"],
+    waivable: false,
+    strictTests: true,
+    outputs: [
+      "docs/verify/V33.json", "docs/verify/V34.json", "docs/verify/V35.json",
+      "packages/auth/src/policy/**", "packages/auth/test/policy/**", "packages/auth/test/verify-p4/**",
+      "apps/server/src/audit/prune.ts", "apps/server/test/policy/**",
+    ],
+    checks: [],
+  },
+  U1: {
+    needs: ["A2"],
+    waivable: false,
+    strictTests: true,
+    outputs: [
+      "apps/web/src/lib/**", "apps/web/test/**",
+      "apps/web/src/routes/login/**", "apps/web/src/routes/signup/**", "apps/web/src/routes/verify/**", "apps/web/src/routes/reset-password/**",
+      "apps/web/src/routes/invite/**", "apps/web/src/routes/account/**", "apps/web/src/routes/admin/**",
+      "apps/server/test/ui-api/**",
+    ],
+    checks: [],
+  },
+  U2: {
+    needs: ["U1"],
+    waivable: false,
+    strictTests: true,
+    outputs: ["docs/verify/V36.json", "docs/verify/V37.json", "docs/verify/V38.json", "packages/omniroute/test/contract/usage/**"],
+    checks: [],
+  },
+  U3: {
+    needs: ["U2"],
+    waivable: false,
+    strictTests: true,
+    outputs: ["apps/server/src/usage/**", "apps/server/test/usage/**"],
+    checks: [],
+  },
+  U4: {
+    needs: ["U3"],
+    waivable: false,
+    strictTests: true,
+    outputs: ["apps/web/src/routes/usage/**"],
+    checks: [],
+  },
+  U5: {
+    needs: ["U4"],
+    waivable: false,
+    strictTests: true,
+    outputs: ["tests/browser/**"],
+    checks: [],
+  },
 };
