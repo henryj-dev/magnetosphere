@@ -145,9 +145,6 @@ export function adminMfa(cfg: AdminMfaConfig) {
     const t = s.rateLimit;
     const now = Date.now();
     await h.db.delete(t).where(and(eq(t.key, key), lt(t.lastRequest, now - policy.failureWindowS * 1000)));
-    const row = { id: crypto.randomUUID(), key, count: 1, lastRequest: now };
-    const inserted = h.provider === "mysql" ? (await h.db.insert(t).ignore().values(row))[0].affectedRows === 1 : (await h.db.insert(t).values(row).onConflictDoNothing().returning()).length === 1;
-    if (inserted) return null;
     // count 가 제한 아래이거나, 마지막 시도 뒤 그 count 의 지연이 지났을 때만 한 칸 올린다.
     // 경계 시각은 JS 에서 계산해 칼럼 형식으로 비교한다 (SQL 안의 매개변수 산술은 Postgres 가 형식을 정하지 못한다)
     const allowed: any[] = [lt(t.count, limit)];
@@ -155,10 +152,18 @@ export function adminMfa(cfg: AdminMfaConfig) {
     for (; attemptDelayMs(policy, c, limit) < policy.failureDelayMaxS * 1000; c++) allowed.push(and(eq(t.count, c), lte(t.lastRequest, now - attemptDelayMs(policy, c, limit))));
     allowed.push(and(gte(t.count, c), lte(t.lastRequest, now - policy.failureDelayMaxS * 1000)));
     const cond = and(eq(t.key, key), or(...allowed));
-    if ((await changedRows(h, h.db.update(t).set({ count: sql`${t.count} + 1`, lastRequest: now }).where(cond), t.id)) === 1) return null;
-    const [cur] = await h.db.select({ count: t.count, lastRequest: t.lastRequest }).from(t).where(eq(t.key, key)).limit(1);
-    if (!cur) return 1;
-    return Math.max(1, Math.ceil((Number(cur.lastRequest) + attemptDelayMs(policy, Number(cur.count), limit) - now) / 1000));
+    // 같은 계정의 다른 요청이 성공해 칸을 지우면(clearAttempts) INSERT 충돌 뒤 UPDATE 가 0행이고 행도 없다.
+    // 그때는 지연 중이 아니므로 처음부터 한 번 더 차지한다 (계정 칸은 동시 요청이 공유한다, A1 봉인 G-A1.8)
+    for (let round = 0; round < 3; round++) {
+      const row = { id: crypto.randomUUID(), key, count: 1, lastRequest: now };
+      const inserted = h.provider === "mysql" ? (await h.db.insert(t).ignore().values(row))[0].affectedRows === 1 : (await h.db.insert(t).values(row).onConflictDoNothing().returning()).length === 1;
+      if (inserted) return null;
+      if ((await changedRows(h, h.db.update(t).set({ count: sql`${t.count} + 1`, lastRequest: now }).where(cond), t.id)) === 1) return null;
+      const [cur] = await h.db.select({ count: t.count, lastRequest: t.lastRequest }).from(t).where(eq(t.key, key)).limit(1);
+      if (cur) return Math.max(1, Math.ceil((Number(cur.lastRequest) + attemptDelayMs(policy, Number(cur.count), limit) - now) / 1000));
+    }
+    // 세 번 모두 행이 바로 지워졌다: 판정하지 못했으므로 시도를 받지 않는다 (fail-closed)
+    return 1;
   };
   const clearAttempts = async (keys: AttemptKeys) => {
     await h.db.delete(s.rateLimit).where(or(eq(s.rateLimit.key, keys.ip), eq(s.rateLimit.key, keys.account)));

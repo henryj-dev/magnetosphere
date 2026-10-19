@@ -25,7 +25,9 @@ export async function tcA1T2f(rig: HttpRig) {
   const results = await Promise.all(cookies.map((cookie) => rig.call("POST", "/api/auth/admin-mfa/challenge", { cookie, body: { code } })));
   expect(results.filter((r) => r.status >= 500).map((r) => r.status)).toEqual([]);
   expect(results.filter((r) => r.status === 200)).toHaveLength(1);
-  expect(results.filter((r) => r.status !== 200).every((r) => r.status === 401 && r.json?.code === "INVALID_MFA_CODE")).toBe(true);
+  // 실패 응답의 상태·고정 코드만 메시지에 남긴다 (비밀값 없음)
+  const failed = results.filter((r) => r.status !== 200).map((r) => `${r.status} ${r.json?.code ?? "-"}`);
+  expect(failed.every((x) => x === "401 INVALID_MFA_CODE"), failed.join(", ")).toBe(true);
   const statuses = await Promise.all(cookies.map(async (cookie) => (await rig.call("GET", "/api/admin/users", { cookie })).status));
   expect(statuses.sort()).toEqual([200, 403, 403, 403, 403, 403]);
 
