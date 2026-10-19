@@ -6,6 +6,7 @@ import path from "node:path";
 import { connectNode } from "@magnetosphere/runtime/node";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTestDb, enabledDbs, LABEL, type DbKind } from "../../../packages/runtime/test/dbs.ts";
+import { TEST_MFA_POLICY_ENV } from "../../../packages/auth/test/mfa-policy.ts";
 import { ensureSetupToken } from "../src/setup/index.ts";
 import { ADMIN, boot, closeAll, post, tokenIn, TEST_ENCRYPTION_KEY, TEST_SECRET, type TestEnv } from "./helpers.ts";
 
@@ -17,7 +18,8 @@ async function envFor(kind: DbKind): Promise<TestEnv> {
   return {
     dir,
     dbFile: "",
-    env: { DATABASE_URL: db.url, BETTER_AUTH_URL: "http://localhost:3000", BETTER_AUTH_SECRET: TEST_SECRET, APP_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY, NODE_ENV: "test" },
+    // 관리자 MFA 정책은 시험 전용 값이다 (A1). 없으면 설치가 503 mfa_policy_required 다
+    env: { DATABASE_URL: db.url, BETTER_AUTH_URL: "http://localhost:3000", BETTER_AUTH_SECRET: TEST_SECRET, APP_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY, NODE_ENV: "test", ...TEST_MFA_POLICY_ENV },
     cleanup() {
       rmSync(dir, { recursive: true, force: true });
       void db.drop();

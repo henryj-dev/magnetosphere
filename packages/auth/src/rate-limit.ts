@@ -28,6 +28,8 @@ export const RATE_LIMIT_RULES = {
   "/reset-password/*": { window: 300, max: 10 },
   "/send-verification-email": { window: 300, max: 3 },
   "/signup-confirmation": { window: 300, max: 5 },
+  // 관리자 MFA (A1). 클라이언트 IP·경로마다 센다. 계정+IP 실패 지연은 플러그인이 따로 건다 (src/mfa/plugin.ts)
+  "/admin-mfa/**": { window: 60, max: 20 },
 } as const;
 
 /** Better Auth 옵션 조각 */

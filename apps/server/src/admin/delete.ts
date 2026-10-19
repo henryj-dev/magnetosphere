@@ -1,6 +1,7 @@
 // 관리자 회원 삭제·자기 탈퇴 공용 서비스 (3단계 실행판 M4.T2·T4).
 // user id·비용 매핑은 남기고 개인정보를 익명화한다. account·session·소유 verification 정리는 guard-sql 의 같은 원자 단위다.
 // 키 disable·120초 삭제 큐는 DB 커밋 뒤에만 기존 K3 applyKey 로 맡긴다. 외부 실패는 pending 이며 익명화를 되돌리지 않는다.
+import type { UnitStep } from "@magnetosphere/auth/mfa";
 import type { Services } from "../app.ts";
 import { MemberConflictError, mutateMember, type MemberSelfProof } from "./guard-sql.ts";
 import { syncTargetKeys } from "./members.ts";
@@ -10,6 +11,10 @@ export interface DeleteMemberInput {
   actorSessionId: string;
   targetId: string;
   selfProof?: MemberSelfProof;
+  /** 관리자 탈퇴의 step-up proof 소비 단계 (A1). 삭제 단위의 첫 쓰기다 */
+  mfaProof?: UnitStep;
+  /** 관리자 API 의 다른 회원 삭제 (A1 보안 리뷰 M1). 대상이 관리자면 이 proof(admin.delete, 대상 id)가 있어야 한다 */
+  adminTarget?: { proof: UnitStep | null };
   ip: string | null;
   now: Date;
 }
@@ -27,6 +32,7 @@ export async function deleteMember(s: Services, input: DeleteMemberInput): Promi
     actorSessionId: input.actorSessionId,
     targetId: input.targetId,
     selfProof: input.selfProof,
+    mfa: input.mfaProof || input.adminTarget ? { proof: input.mfaProof, adminTarget: input.adminTarget } : undefined,
     now: input.now,
     audit: { actorId: input.actorId, action: "member.delete", target: input.targetId, detail: { anonymized: true }, ip: input.ip, now: input.now },
   });

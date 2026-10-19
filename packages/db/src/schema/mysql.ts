@@ -1,6 +1,6 @@
 // 자동 생성 파일이다. 손으로 고치지 않는다.
 // 원본: packages/db/src/schema/common.ts · 생성: pnpm -C packages/db gen
-import { bigint, boolean, customType, datetime, decimal, index, int, mysqlTable, primaryKey, text, varchar } from "drizzle-orm/mysql-core";
+import { bigint, boolean, customType, datetime, decimal, index, int, mysqlTable, primaryKey, text, uniqueIndex, varchar } from "drizzle-orm/mysql-core";
 
 // 대소문자까지 정확히 같아야 하는 칼럼 (common.ts 의 exact). MySQL·MariaDB 기본 정렬은 대소문자를 무시한다.
 const varcharBin = customType<{ data: string; config: { length: number } }>({
@@ -39,6 +39,10 @@ export const session = mysqlTable("session", {
   userId: varchar("user_id", { length: 36 }).notNull().references(() => user.id, { onDelete: "cascade" }),
   credentialFingerprint: varcharBin("credential_fingerprint", { length: 64 }),
   authVersion: int("auth_version").default(0).notNull(),
+  mfaVerifiedAt: datetime("mfa_verified_at", { fsp: 3 }),
+  mfaFactorId: varchar("mfa_factor_id", { length: 36 }),
+  mfaMethod: varcharBin("mfa_method", { length: 16 }),
+  mfaPolicyVersion: varcharBin("mfa_policy_version", { length: 64 }),
 }, (table) => [
   index("session_userId_idx").on(table.userId),
 ]);
@@ -199,3 +203,66 @@ export const auditLog = mysqlTable("audit_log", {
 }, (table) => [
   index("idx_audit_log_created").on(table.createdAt),
 ]);
+
+// 관리자 MFA 수단 (TOTP). 회원당 active 하나·pending 하나를 active_slot·pending_slot 고유 키로 강제한다
+export const mfaFactor = mysqlTable("mfa_factor", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  userId: varchar("user_id", { length: 36 }).notNull().references(() => user.id, { onDelete: "cascade" }),
+  kind: varcharBin("kind", { length: 16 }).notNull(),
+  state: varcharBin("state", { length: 16 }).notNull(),
+  secretEnc: text("secret_enc").notNull(),
+  periodS: int("period_s").notNull(),
+  digits: int("digits").notNull(),
+  algorithm: varcharBin("algorithm", { length: 16 }).notNull(),
+  lastUsedStep: bigint("last_used_step", { mode: "number" }),
+  pendingSessionId: varchar("pending_session_id", { length: 36 }),
+  pendingAuthVersion: int("pending_auth_version"),
+  pendingExpiresAt: datetime("pending_expires_at", { fsp: 3 }),
+  activeSlot: varchar("active_slot", { length: 36 }).unique(),
+  pendingSlot: varchar("pending_slot", { length: 36 }).unique(),
+  createdAt: datetime("created_at", { fsp: 3 }).$defaultFn(() => new Date()).notNull(),
+  activatedAt: datetime("activated_at", { fsp: 3 }),
+  revokedAt: datetime("revoked_at", { fsp: 3 }),
+  revokedReason: varchar("revoked_reason", { length: 32 }),
+}, (table) => [
+  index("idx_mfa_factor_user").on(table.userId),
+]);
+
+// 관리자 MFA 복구 코드. 원문은 두지 않고 HMAC 만 둔다. used_at IS NULL 조건 UPDATE 하나로 한 번만 소비한다
+export const mfaRecoveryCode = mysqlTable("mfa_recovery_code", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  factorId: varchar("factor_id", { length: 36 }).notNull().references(() => mfaFactor.id, { onDelete: "cascade" }),
+  userId: varchar("user_id", { length: 36 }).notNull().references(() => user.id, { onDelete: "cascade" }),
+  codeHash: varcharBin("code_hash", { length: 64 }).notNull(),
+  usedAt: datetime("used_at", { fsp: 3 }),
+  usedSessionId: varchar("used_session_id", { length: 36 }),
+}, (table) => [
+  uniqueIndex("uniq_mfa_recovery_code_factor_hash").on(table.factorId, table.codeHash),
+]);
+
+// 관리자 MFA 최초 등록 자격. 토큰 원문은 두지 않는다. 한 번만 쓴다
+export const mfaEnrollmentGrant = mysqlTable("mfa_enrollment_grant", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  userId: varchar("user_id", { length: 36 }).notNull().references(() => user.id, { onDelete: "cascade" }),
+  tokenHash: varcharBin("token_hash", { length: 64 }).notNull().unique(),
+  purpose: varcharBin("purpose", { length: 16 }).notNull(),
+  issuedBy: varchar("issued_by", { length: 36 }),
+  authVersion: int("auth_version").notNull(),
+  expiresAt: datetime("expires_at", { fsp: 3 }).notNull(),
+  usedAt: datetime("used_at", { fsp: 3 }),
+  revokedAt: datetime("revoked_at", { fsp: 3 }),
+});
+
+// 작업에 묶인 step-up 증명. 토큰 원문은 두지 않는다. 작업 자신의 트랜잭션 안에서 used_at IS NULL 조건 UPDATE 로 한 번만 소비한다
+export const mfaProof = mysqlTable("mfa_proof", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  tokenHash: varcharBin("token_hash", { length: 64 }).notNull().unique(),
+  sessionId: varchar("session_id", { length: 36 }).notNull().references(() => session.id, { onDelete: "cascade" }),
+  userId: varchar("user_id", { length: 36 }).notNull().references(() => user.id, { onDelete: "cascade" }),
+  authVersion: int("auth_version").notNull(),
+  factorId: varchar("factor_id", { length: 36 }).notNull(),
+  purpose: varcharBin("purpose", { length: 64 }).notNull(),
+  target: varcharBin("target", { length: 255 }).notNull(),
+  expiresAt: datetime("expires_at", { fsp: 3 }).notNull(),
+  usedAt: datetime("used_at", { fsp: 3 }),
+});

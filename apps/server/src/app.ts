@@ -21,6 +21,7 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
 import type { Mailer, SelfDeleteCredentialProof } from "@magnetosphere/auth";
+import type { MfaRuntime } from "@magnetosphere/auth/mfa";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import { memberAdminRoutes } from "./admin/members.ts";
@@ -55,6 +56,11 @@ export interface Services {
   };
   /** APP_ENCRYPTION_KEY 로 만든 암호화 유틸 */
   cipher: Cipher;
+  /**
+   * 관리자 MFA 런타임 (A1, config.ts buildMfaRuntime). 없거나 정책이 unavailable 이면 관리자 가드는 503 mfa_policy_unavailable,
+   * 최초 설치는 토큰을 쓰기 전에 503 mfa_policy_required 다
+   */
+  mfa?: MfaRuntime;
   /** OmniRoute 주소와 부트스트랩 비밀번호 (OMNIROUTE_URL, OMNIROUTE_INITIAL_PASSWORD). 없으면 null */
   omniroute: OmniRouteConfig;
   /** 운영자가 정한 설치 토큰 (SETUP_TOKEN 시크릿). 없으면 무작위로 만들어 로그에 한 번 낸다 (setup/index.ts) */

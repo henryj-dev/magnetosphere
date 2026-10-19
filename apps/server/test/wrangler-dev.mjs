@@ -6,6 +6,7 @@ import { spawn, spawnSync } from "node:child_process";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { TEST_MFA_POLICY_ENV } from "../../../packages/auth/test/mfa-policy.ts";
 
 export const SERVER_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const ROOT = path.resolve(SERVER_DIR, "../..");
@@ -43,7 +44,8 @@ export async function startWranglerDev({ env, persistTo, vars, hyperdrive, confi
   const port = await freePort();
   const inspector = await freePort();
   const baseUrl = `http://127.0.0.1:${port}`;
-  const allVars = { BETTER_AUTH_URL: baseUrl, ...vars };
+  // 관리자 MFA 정책은 시험 전용 값을 기본으로 넣는다 (A1). vars 가 같은 이름을 주면 그 값을 쓴다
+  const allVars = { BETTER_AUTH_URL: baseUrl, ...TEST_MFA_POLICY_ENV, ...vars };
   const args = ["exec", "wrangler", "dev", ...(config ? ["--config", config] : []), ...(env ? ["--env", env] : []), "--ip", "127.0.0.1", "--port", String(port), "--inspector-port", String(inspector), "--persist-to", persistTo, "--show-interactive-dev-session=false", "--log-level", "log"];
   for (const [k, v] of Object.entries(allVars)) args.push("--var", `${k}:${v}`);
   if (testScheduled) args.push("--test-scheduled");

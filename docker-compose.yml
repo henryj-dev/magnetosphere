@@ -78,6 +78,24 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?node scripts/init.mjs 로 .env 를 먼저 만든다}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?node scripts/init.mjs 로 .env 를 먼저 만든다}
       OMNIROUTE_URL: http://omniroute:20128
+      # 관리자 MFA 정책 (A1, 필수, .env). 비면 관리자 기능·최초 설치가 503 으로 닫힌다
+      MFA_TOTP_PERIOD_S: ${MFA_TOTP_PERIOD_S:-}
+      MFA_TOTP_DIGITS: ${MFA_TOTP_DIGITS:-}
+      MFA_TOTP_ALGORITHM: ${MFA_TOTP_ALGORITHM:-}
+      MFA_TOTP_PAST_WINDOW: ${MFA_TOTP_PAST_WINDOW:-}
+      MFA_TOTP_FUTURE_WINDOW: ${MFA_TOTP_FUTURE_WINDOW:-}
+      MFA_SEED_BYTES: ${MFA_SEED_BYTES:-}
+      MFA_RECENCY_TTL_S: ${MFA_RECENCY_TTL_S:-}
+      MFA_CHALLENGE_TTL_S: ${MFA_CHALLENGE_TTL_S:-}
+      MFA_PENDING_TTL_S: ${MFA_PENDING_TTL_S:-}
+      MFA_GRANT_TTL_S: ${MFA_GRANT_TTL_S:-}
+      MFA_ADMIN_SESSION_ABSOLUTE_TTL_S: ${MFA_ADMIN_SESSION_ABSOLUTE_TTL_S:-}
+      MFA_FAILURE_LIMIT: ${MFA_FAILURE_LIMIT:-}
+      MFA_ACCOUNT_FAILURE_LIMIT: ${MFA_ACCOUNT_FAILURE_LIMIT:-}
+      MFA_FAILURE_WINDOW_S: ${MFA_FAILURE_WINDOW_S:-}
+      MFA_FAILURE_DELAY_BASE_S: ${MFA_FAILURE_DELAY_BASE_S:-}
+      MFA_FAILURE_DELAY_MAX_S: ${MFA_FAILURE_DELAY_MAX_S:-}
+      MFA_RECOVERY_CODE_COUNT: ${MFA_RECOVERY_CODE_COUNT:-}
       # edge 망의 Caddy 주소 하나. 그 밖의 상대가 보낸 X-Forwarded-For 는 무시하고 경고를 한 번 남긴다 (S4 보안 리뷰 M3).
       # 망 전체(/29)를 믿으면 망 게이트웨이(호스트에서 들어온 연결의 출발지)까지 프록시로 보아 모든 요청이 Caddy 주소로 세어진다
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-${CADDY_EDGE_IP:-10.203.57.2}/32}

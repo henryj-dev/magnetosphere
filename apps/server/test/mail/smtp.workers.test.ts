@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { PASSWORD } from "../../../../packages/auth/test/signup-policy/rig.ts";
+import { challengeHttp, stepUpHttp } from "../../../../packages/auth/test/mfa-fixture.ts";
 import { ADMIN, TEST_ENCRYPTION_KEY, TEST_SECRET } from "../helpers.ts";
 import { callRes, type CallOpts } from "../signup/checks.ts";
 import { startWranglerDev, wrangler, type WranglerDev } from "../wrangler-dev.mjs";
@@ -24,7 +25,7 @@ afterEach(async () => { await d?.close(); if (persistTo) rmSync(persistTo, { rec
 const call = async (method: string, p: string, o: CallOpts = {}) => callRes(await fetch(`${d.baseUrl}${p}`, {
   method, redirect: "manual",
   headers: { "x-test-ip": `198.18.0.${Math.floor(Math.random() * 200) + 1}`, ...(o.origin === null ? {} : { origin: o.origin ?? d.baseUrl }),
-    ...(o.cookie ? { cookie: o.cookie } : {}), ...(o.body === undefined ? {} : { "content-type": "application/json" }) },
+    ...(o.cookie ? { cookie: o.cookie } : {}), ...(o.body === undefined ? {} : { "content-type": "application/json" }), ...(o.headers ?? {}) },
   body: o.body === undefined ? undefined : JSON.stringify(o.body),
 }));
 const op = async (name: string, ...args: unknown[]) => {
@@ -39,7 +40,16 @@ async function login(role: "admin" | "member", tag: string) {
   const id = (await op("addPasswordUser", email, PASSWORD, role, "active")) as string;
   const r = await call("POST", "/api/auth/sign-in/email", { body: { email, password: PASSWORD } });
   expect(r.status, "로그인 응답").toBe(200);
-  return { id, email, cookie: r.setCookie.map((c) => c.split(";")[0]).join("; ") };
+  const cookie = r.setCookie.map((c) => c.split(";")[0]).join("; ");
+  // 관리자는 관리자 MFA 를 마친 세션이다 (A1): 시험 factor 를 넣고 challenge 한다
+  if (role === "admin") {
+    await op("mfaFactor", id, TEST_ENCRYPTION_KEY);
+    await challengeHttp(async (m, p, o) => {
+      const x = await call(m, p, { body: o.body, cookie: o.cookie });
+      return { status: x.status, json: x.json };
+    }, cookie);
+  }
+  return { id, email, cookie };
 }
 function mailRows() {
   const r = wrangler(["d1", "execute", "DB", "--local", "--config", CONFIG, "--persist-to", persistTo, "--json", "--command", "SELECT value FROM app_settings WHERE key = 'mail_settings'"]);
@@ -73,7 +83,12 @@ it("TC-M5.T0.j Workers SMTP 도 권한·Origin 검사가 지원 여부 검사보
   const member = await login("member", "j");
   // 정지는 운영 정지 API 로 한다. 정지 전 쿠키는 세션이 지워져 기존 계약대로 401 이다 (signup/policy.test.ts).
   const suspended = await login("admin", "j-suspended");
-  const stopped = await call("POST", `/api/admin/users/${suspended.id}/suspend`, { cookie: admin.cookie });
+  // 다른 관리자 정지는 대상에 묶은 step-up proof 가 필요하다 (A1 보안 리뷰 M1)
+  const proof = await stepUpHttp(async (m, p, o) => {
+    const x = await call(m, p, { body: o.body, cookie: o.cookie });
+    return { status: x.status, json: x.json };
+  }, admin.cookie, "admin.suspend", suspended.id);
+  const stopped = await call("POST", `/api/admin/users/${suspended.id}/suspend`, { cookie: admin.cookie, headers: { "x-mfa-proof": proof } });
   expect(stopped.status, "관리자 정지 응답").toBe(200);
   expect(await op("user", suspended.email)).toMatchObject({ role: "admin", status: "suspended" });
   expect(await op("sessionsOf", suspended.email)).toBe(0);

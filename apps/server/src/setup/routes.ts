@@ -1,9 +1,12 @@
 // 최초 설치 API.
 //   GET  /api/setup  → { needed } 관리자가 없으면 true. setupTokenFromSecret(Workers)이면 SETUP_TOKEN 시크릿의 해시를 둔다
 //                      (출력하지 않는다). 시크릿이 없으면 관리자가 생기기 전까지 GET·POST 모두 503 setup_token_required
-//   POST /api/setup  → 201 { ok, omniroute: "connected" | "manual_required" } | 400 입력 오류 | 401 토큰 틀림 | 409 이미 설치됨
+//   POST /api/setup  → 201 { ok, omniroute: "connected" | "manual_required", mfaGrant: { grant, expiresAt } } | 400 입력 오류 | 401 토큰 틀림 | 409 이미 설치됨
+//                      | 503 mfa_policy_required (관리자 MFA 정책 없음, 설치 토큰을 소비하지 않는다)
 //                      | 429 시도 횟수 초과 (클라이언트 IP 마다 10분에 10회)
 //                      관리자를 만든 뒤 OmniRoute 토큰을 자동으로 만든다. 실패해도 201 이고 omniroute 가 manual_required 다
+//   POST /api/setup/mfa-grant { token } → 201 { mfaGrant } | 401 invalid_token | 409 mfa_already_enrolled | 503 mfa_policy_required | 429
+//                      bootstrap 관리자에게 active factor 가 없는 동안만. Node 는 시작 때 출력한 일회용 재발급 토큰, Workers 는 SETUP_TOKEN
 // OmniRoute 토큰 (관리자 세션만, 계획서 4.7 3번 "토큰 붙여 넣기")
 //   GET  /api/setup/omniroute → { omniroute } 저장된 토큰이 있으면 connected
 //   PUT  /api/setup/omniroute { token } → 200 { omniroute: "connected" } | 400 invalid_token·scope_not_write | 502 omniroute_unreachable
@@ -11,7 +14,7 @@
 import { Hono, type Context } from "hono";
 import type { Services } from "../app.ts";
 import { sessionAdmin } from "../routes/guard.ts";
-import { adminExists, consumeSetupAttempt, ensureSetupToken, runSetup } from "./index.ts";
+import { adminExists, consumeSetupAttempt, ensureSetupToken, reissueBootstrapGrant, runSetup } from "./index.ts";
 import { bootstrapOmniRoute, omniRouteStatus, saveManualToken } from "./omniroute.ts";
 
 /** 공용 활성 관리자 판정. 세션·회원 없음 401, 역할·상태 거부 403 */
@@ -49,8 +52,21 @@ export function setupRoutes(services: () => Promise<Services>, opts: { setupToke
       if (b.status !== "connected") opts.log(`[setup] OmniRoute 접근 토큰을 자동으로 만들지 못했다 (${b.reason}). 관리자로 로그인해 토큰을 붙여 넣는다.`);
       return b.status;
     };
-    const result = await runSetup(s.db, body && typeof body === "object" ? body : {}, async () => s.cipher, bootstrap, s.mailCapabilities);
-    return result.ok ? c.json({ ok: true, omniroute: result.omniroute }, 201) : c.json({ error: result.error }, result.status);
+    const result = await runSetup(s.db, body && typeof body === "object" ? body : {}, async () => s.cipher, bootstrap, s.mailCapabilities, s.mfa);
+    if (!result.ok) return c.json({ error: result.error }, result.status);
+    // bootstrap grant 토큰은 이 응답에만 한 번 나간다
+    c.header("Cache-Control", "no-store");
+    return c.json({ ok: true, omniroute: result.omniroute, mfaGrant: result.mfaGrant }, 201);
+  });
+  r.post("/mfa-grant", async (c) => {
+    const s = await services();
+    if (!/^application\/json\b/i.test(c.req.header("content-type") ?? "")) return c.json({ error: "unsupported_media_type" }, 415);
+    if (!(await consumeSetupAttempt(s.db, (await s.clientIp?.(c.req.raw)) ?? null))) return c.json({ error: "too_many_requests" }, 429);
+    const body = (await c.req.json().catch(() => null)) as { token?: unknown } | null;
+    const result = await reissueBootstrapGrant(s.db, body ?? {}, s.mfa, opts.setupTokenFromSecret ? (s.setupToken ?? null) : null);
+    if (!result.ok) return c.json({ error: result.error }, result.status);
+    c.header("Cache-Control", "no-store");
+    return c.json({ mfaGrant: result.mfaGrant }, 201);
   });
   r.get("/omniroute", async (c) => {
     const s = await services();

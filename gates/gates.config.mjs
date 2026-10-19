@@ -994,7 +994,7 @@ export const GATES = {
       "packages/auth/src/mfa/**", "packages/auth/test/mfa-*",
       "packages/db/migrations/*/0007_*", "packages/db/migrations/*/meta/0007_snapshot.json", "packages/db/test/migrate-0007.test.ts",
       "apps/server/src/mfa/**", "apps/server/test/mfa/**", "apps/server/scripts/mfa-*",
-      "scripts/check-sealed-checks.mjs", "test/check-sealed-checks.test.mjs",
+      "scripts/check-sealed-checks.mjs", "test/check-sealed-checks.test.mjs", "tests/e2e/mfa.mjs",
     ],
     checks: [
       // A1.T1 저장소·TOTP·정책 모듈 (p4/a1-mfa 에 시험 있음). 단위 11 = a·b·c·d·e·f·g·h·i·j·k2
@@ -1004,26 +1004,25 @@ export const GATES = {
       { id: "G-A1.3", how: "test", requires: ["local-services"], desc: "TC-A1.T1.migration 0007 업그레이드·기존 세션 MFA 미충족 (다섯 DB)", cmd: 'pnpm -C packages/db test:migrate -t "TC-A1.T1.migration" --db sqlite,mysql,mariadb,pg,d1', expectPassed: 5 },
       { id: "G-A1.4", how: "cmd", desc: "TC-A1.T1.u 생성물·드리프트", cmd: "pnpm -C packages/db gen && git diff --exit-code packages/db/src/schema/ && pnpm -C packages/db check:drift" },
       { id: "G-A1.5", how: "cmd", desc: "TC-A1.T1.v 스키마 규칙 위반 0", cmd: "node scripts/schema-lint.mjs" },
-      // A1.T2 서버 가드·challenge (계획 값, 봉인 PR 에서 교체). Red: TC-A1.T2.a — sessionAdmin 판정을 바꾸기 전 시험만 넣은 커밋
-      { id: "G-A1.6", how: "test", desc: "TC-A1.T2.a~g 부분 세션·password-only 거부·허용 경로 셋·정책/DB 장애 503·정책 버전·challenge 단일 오류·헤더·요청 수 제한", cmd: 'pnpm -C apps/server test -t "TC-A1\\.T2\\.[a-g] "', expectPassed: 7 },
-      { id: "G-A1.7", how: "cmd", desc: "재현 빨강: TC-A1.T2.a~g 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-A1.6 --since seal:M6" },
-      { id: "G-A1.8", how: "test", requires: ["local-services"], desc: "TC-A1.T2.h 로그인·step-up·등록 확인을 섞은 같은 step 동시 N건 → 정확히 1 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-A1\\.T2\\.h" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
-      { id: "G-A1.9", how: "test", requires: ["local-services"], desc: "TC-A1.T2.h 같은 step 동시 N건 (D1)", cmd: 'pnpm -C apps/server test:workers test/mfa/challenge.workers.test.ts -t "TC-A1\\.T2\\.h D1"', expectPassed: 1 },
-      // A1.T3 설치 직후 bootstrap·등록·복구 코드 (코드 미확인). Red: TC-A1.T3.a — 설치 경로를 바꾸기 전 시험만 넣은 커밋
-      { id: "G-A1.10", how: "test", desc: "TC-A1.T3.a~f 정책 미준비 설치 503·토큰 미소비, grant 1회 표시, 비밀번호만으로 등록 불가, 등록 확인 원자 처리, grant 재발급, 복구 코드 1회 표시", cmd: 'pnpm -C apps/server test -t "TC-A1\\.T3\\.[a-f] "', expectPassed: 6 },
-      { id: "G-A1.11", how: "cmd", desc: "재현 빨강: TC-A1.T3.a~f 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-A1.10 --since seal:M6" },
-      { id: "G-A1.12", how: "test", requires: ["local-services"], desc: "TC-A1.T3.g 등록 확인 실패 시 되돌림·동시 확인 1건 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-A1\\.T3\\.g" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
-      { id: "G-A1.13", how: "test", requires: ["local-services"], desc: "TC-A1.T3.g 등록 확인 batch 되돌림 (D1)", cmd: 'pnpm -C apps/server test:workers test/mfa/enroll.workers.test.ts -t "TC-A1\\.T3\\.g D1"', expectPassed: 1 },
-      // A1.T4 step-up·승격·초기화·마지막 관리자 (코드 미확인). Red: TC-A1.T4.a — 관리 작업에 proof 를 요구하기 전 시험만 넣은 커밋
-      { id: "G-A1.14", how: "test", desc: "TC-A1.T4.a~e proof 필요 작업·proof 재사용 거부·승격 grant·mfa-reset·마지막 관리자는 active factor 로 셈", cmd: 'pnpm -C apps/server test -t "TC-A1\\.T4\\.[a-e] "', expectPassed: 5 },
-      { id: "G-A1.15", how: "cmd", desc: "재현 빨강: TC-A1.T4.a~e 는 Red 커밋에서 실패", cmd: "node scripts/check-red.mjs --check G-A1.14 --since seal:M6" },
-      { id: "G-A1.16", how: "test", requires: ["local-services"], desc: "TC-A1.T4.f proof 소비가 작업 트랜잭션 안에 있다 — 작업 실패 시 proof 미소비, 동시 2건 중 1건 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-A1\\.T4\\.f" --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
-      { id: "G-A1.17", how: "test", requires: ["local-services"], desc: "TC-A1.T4.f proof 소비 batch (D1)", cmd: 'pnpm -C apps/server test:workers test/mfa/proof.workers.test.ts -t "TC-A1\\.T4\\.f D1"', expectPassed: 1 },
+      // A1.T2~T4·T6 은 apps/server/test/mfa 의 실제 시험 구조다 (2026-10-19 교체). Node·SQLite 는 admin-mfa.test.ts, 네 DB 는 admin-mfa.db.test.ts
+      // (describe.each 네 DB × 셋), D1 은 admin-mfa.workers.test.ts (넷). 재현 빨강은 Red 커밋 대신 격리 변이 대조로 확인했다 (실행판 A1 절, G-A1.7·11·15 폐기).
+      // 선택식 끝의 공백은 TC-A1.T2.a 가 TC-A1.T2.ab 같은 이름을 잡지 않게 한다. 수는 시험 파일의 선언 수다
+      { id: "G-A1.6", how: "test", desc: "TC-A1.T2.a~e 부분 세션·password-only 거부·허용 경로·정책 버전·factor 교체·정책 없음 503·실패 지연 429·동시 challenge (Node SQLite)", cmd: 'pnpm -C apps/server test -t "TC-A1\\.T2\\.[a-e] "', expectPassed: 5 },
+      { id: "G-A1.8", how: "test", requires: ["local-services"], desc: "TC-A1.T2.f 같은 코드 동시 challenge 여섯 → 1건 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-A1\\.T2\\.f " --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-A1.9", how: "test", requires: ["local-services"], desc: "TC-A1.T2.f 같은 코드 동시 challenge (D1)", cmd: 'pnpm -C apps/server test:workers test/mfa/admin-mfa.workers.test.ts -t "TC-A1\\.T2\\.f Workers"', expectPassed: 1 },
+      { id: "G-A1.10", how: "test", desc: "TC-A1.T3.a~d 정책 미준비 설치 503·토큰 미소비, bootstrap grant 1회·해시만·grant 없는 등록 거부, 재등록 proof·복구 코드 1회, grant 재발급 (Node SQLite)", cmd: 'pnpm -C apps/server test -t "TC-A1\\.T3\\.[a-d] "', expectPassed: 4 },
+      { id: "G-A1.12", how: "test", requires: ["local-services"], desc: "TC-A1.T3.e 같은 코드 동시 등록 확인 → 1건·부분 소비 없음 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-A1\\.T3\\.e " --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-A1.13", how: "test", requires: ["local-services"], desc: "TC-A1.T3.e 동시 등록 확인 batch (D1)", cmd: 'pnpm -C apps/server test:workers test/mfa/admin-mfa.workers.test.ts -t "TC-A1\\.T3\\.e Workers"', expectPassed: 1 },
+      { id: "G-A1.14", how: "test", desc: "TC-A1.T4.a~d proof 필요·재사용·목적·세션 거부, 승격 grant·mfa-reset·강등 factor 폐기, 마지막·bootstrap 관리자, 관리자 초대 수락 grant (Node SQLite)", cmd: 'pnpm -C apps/server test -t "TC-A1\\.T4\\.[a-d] "', expectPassed: 4 },
+      // 보안 리뷰 M1·L3 (2026-10-19): 다른 관리자 정지·삭제 proof, 관리자 초대 proof 의 이메일 결합. L2 계정 칸은 G-A1.1(T1.g)·G-A1.8·9(T2.f)가 함께 본다
+      { id: "G-A1.26", how: "test", desc: "TC-A1.T4.f 다른 관리자 정지·삭제 proof 필요·대상·목적 결합, 회원 대상은 proof 없음, 관리자 초대 proof 는 정규화 이메일에 묶임 (Node SQLite)", cmd: 'pnpm -C apps/server test -t "TC-A1\\.T4\\.f "', expectPassed: 1 },
+      { id: "G-A1.16", how: "test", requires: ["local-services"], desc: "TC-A1.T4.e 같은 proof 동시 역할 변경 → 1건, proof 는 작업 트랜잭션 안 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-A1\\.T4\\.e " --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
+      { id: "G-A1.17", how: "test", requires: ["local-services"], desc: "TC-A1.T4.e proof 소비 batch (D1)", cmd: 'pnpm -C apps/server test:workers test/mfa/admin-mfa.workers.test.ts -t "TC-A1\\.T4\\.e Workers"', expectPassed: 1 },
       // A1.T5 봉인 단계 시험 이전 (관리자 fixture → MFA fixture)과 봉인 단계 검사 불변 검사기
       { id: "G-A1.18", how: "cmd", desc: "TC-A1.T5.a 봉인 단계의 검사 정의가 기준(origin/main)과 같다", cmd: "node scripts/check-sealed-checks.mjs --base origin/main" },
       { id: "G-A1.19", how: "test", desc: "TC-A1.T5.b~e 봉인 단계 검사 불변 검사기 음성 대조", cmd: nodeTest("test/check-sealed-checks.test.mjs", "TC-A1\\.T5\\."), expectPassed: 4 },
-      // A1.T6 Workers D1 전체 흐름 (코드 미확인)
-      { id: "G-A1.20", how: "test", requires: ["local-services"], desc: "TC-A1.T6.a 설치 → grant → 등록 → 로그인 challenge → 관리 API (Workers D1)", cmd: 'pnpm -C apps/server test:workers test/mfa/flow.workers.test.ts -t "TC-A1\\.T6\\.a"', expectPassed: 1 },
+      // A1.T6 Workers D1 전체 흐름
+      { id: "G-A1.20", how: "test", requires: ["local-services"], desc: "TC-A1.T6.a grant 등록 → 승격 grant → 대상 등록 → 초기화 → 관리자 초대 수락 grant → 등록 (Workers D1)", cmd: 'pnpm -C apps/server test:workers test/mfa/admin-mfa.workers.test.ts -t "TC-A1\\.T6\\.a"', expectPassed: 1 },
       // 정적 검사
       { id: "G-A1.21", how: "grep", desc: "Better Auth twoFactor 플러그인을 켜지 않는다 (A1 설계 1절)", pattern: "\\btwoFactor\\s*\\(", in: ["packages/auth/src", "packages/db/src", "apps/server/src"], op: "==", limit: 0 },
       { id: "G-A1.22", how: "cmd", desc: "타입 검사", cmd: "pnpm -r typecheck" },

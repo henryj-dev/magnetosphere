@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { connectNode } from "@magnetosphere/runtime/node";
 import { createCipher } from "@magnetosphere/runtime/crypto";
 import { ensureSetupToken, restoreSetupToken, runSetup } from "../src/setup/index.ts";
-import { ADMIN, boot, closeAll, makeTestEnv, opened, post, sql, tokenIn, TEST_ENCRYPTION_KEY } from "./helpers.ts";
+import { testMfaRuntime } from "../../../packages/auth/test/mfa-fixture.ts";
+import { ADMIN, boot, closeAll, makeTestEnv, opened, post, sql, tokenIn, TEST_ENCRYPTION_KEY, TEST_SECRET } from "./helpers.ts";
 
 afterEach(closeAll);
 
@@ -155,18 +156,21 @@ describe("관리자 생성 실패 뒤 설치 토큰 복원 (S4 보안 리뷰 L5)
     const token = (await ensureSetupToken(h, { rotate: true, log: () => {} }))!;
     const cipher = async () => createCipher(TEST_ENCRYPTION_KEY);
     const tokenRows = async () => (await h.db.select().from(h.schema.appSettings)).filter((r: { key: string }) => r.key === "setup_token_hash");
-    return { t, h, token, cipher, tokenRows, close: async () => (await h.close(), t.cleanup()) };
+    // 관리자 MFA 정책이 있어야 설치가 토큰을 쓴다 (A1, 시험 전용 정책)
+    const mfa = await testMfaRuntime({ secret: TEST_SECRET, encryptionKey: TEST_ENCRYPTION_KEY });
+    const setup = (input: Parameters<typeof runSetup>[1]) => runSetup(h, input, cipher, undefined, undefined, mfa);
+    return { t, h, token, cipher, tokenRows, setup, close: async () => (await h.close(), t.cleanup()) };
   }
 
   it("계정 행을 못 만들면 user 를 지우고 토큰을 되돌려 같은 토큰으로 다시 할 수 있다", async () => {
     const d = await openDb();
     try {
       await d.h.db.run("CREATE TRIGGER fail_account BEFORE INSERT ON account BEGIN SELECT RAISE(ABORT, 'boom'); END");
-      await expect(runSetup(d.h, { token: d.token, ...ADMIN }, d.cipher)).rejects.toThrow();
+      await expect(d.setup({ token: d.token, ...ADMIN })).rejects.toThrow();
       expect(await d.h.db.select().from(d.h.schema.user)).toHaveLength(0);
       expect(await d.tokenRows()).toHaveLength(1);
       await d.h.db.run("DROP TRIGGER fail_account");
-      expect(await runSetup(d.h, { token: d.token, ...ADMIN }, d.cipher)).toMatchObject({ ok: true });
+      expect(await d.setup({ token: d.token, ...ADMIN })).toMatchObject({ ok: true });
     } finally {
       await d.close();
     }
@@ -179,7 +183,7 @@ describe("관리자 생성 실패 뒤 설치 토큰 복원 (S4 보안 리뷰 L5)
       await d.h.db.run(`CREATE TRIGGER rotate AFTER INSERT ON user BEGIN
         INSERT INTO app_settings (key, value, updated_at) VALUES ('setup_token_hash', '"other-instance-hash"', 0); END`);
       await d.h.db.run("CREATE TRIGGER fail_account BEFORE INSERT ON account BEGIN SELECT RAISE(ABORT, 'boom'); END");
-      await expect(runSetup(d.h, { token: d.token, ...ADMIN }, d.cipher)).rejects.toThrow();
+      await expect(d.setup({ token: d.token, ...ADMIN })).rejects.toThrow();
       const rows = await d.tokenRows();
       expect(rows.map((r: { value: string }) => JSON.parse(r.value))).toEqual(["other-instance-hash"]);
       // 직접 불러도 같다: 행이 있으면 그대로, 없으면 넣는다

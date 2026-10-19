@@ -10,6 +10,7 @@ import { after, describe, test } from "node:test";
 import https from "node:https";
 import { Readable } from "node:stream";
 import { APP_IMAGE, buildAppImage, createAdmin, createStack, ROOT, signIn, startCaddyProbe } from "./stack.mjs";
+import { challenge, enroll } from "../e2e/mfa.mjs";
 
 const V16 = JSON.parse(fs.readFileSync(path.join(ROOT, "docs/verify/V16.json"), "utf8")).answer;
 const HTTP_PORT = 28480;
@@ -27,15 +28,35 @@ function stack() {
   }
   return shared;
 }
-/** 공용 묶음에 관리자를 한 번 만든다 */
+/** 묶음의 auth API 호출 (tests/e2e/mfa.mjs 의 call 모양). 같은 출처 POST·JSON */
+function apiCall(baseUrl) {
+  return async (method, p, cookie, body, headers = {}) => {
+    const res = await fetch(`${baseUrl}${p}`, { method, headers: { "content-type": "application/json", origin: baseUrl, cookie: cookie ?? "", ...headers }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: res.status, json: await res.json().catch(() => null) };
+  };
+}
+/**
+ * 공용 묶음에 관리자를 한 번 만든다. 관리자 MFA(A1): 설치 응답의 bootstrap grant 로 factor 를 등록해 두고 seed 를 기억한다.
+ * seed·grant 는 출력하지 않는다 (실패 문구는 상태만)
+ */
 async function ensureAdmin() {
   const s = stack();
   if (!admin) {
     const r = await createAdmin(s.baseUrl, s.setupToken());
-    assert.equal(r.status, 201, JSON.stringify(r.body));
-    admin = r;
+    assert.equal(r.status, 201, `설치 상태 ${r.status}`);
+    assert.equal(typeof r.body?.mfaGrant?.grant, "string", "설치 응답에 bootstrap 등록 자격이 없다");
+    const first = await signIn(s.baseUrl, r.email, r.password);
+    assert.equal(first.status, 200);
+    const seed = await enroll(apiCall(s.baseUrl), first.cookie, r.body.mfaGrant.grant);
+    admin = { ...r, seed };
   }
   return admin;
+}
+/** 관리자 로그인 뒤 MFA challenge 까지 마친 세션 (부분 세션은 /list-sessions 등을 쓰지 못한다) */
+async function adminSignIn(s, a) {
+  const r = await signIn(s.baseUrl, a.email, a.password);
+  if (r.status === 200) await challenge(apiCall(s.baseUrl), r.cookie, a.seed);
+  return r;
 }
 /** 묶음 안의 서비스 컨테이너에서 node 로 fetch 한다 (요청의 출발지가 그 컨테이너가 된다) */
 function fetchFrom(s, service, url, init = {}) {
@@ -262,7 +283,7 @@ describe("TC-S6.T2.e Caddy 뒤에서 클라이언트별로 세고, 프록시 설
 
     const a = await ensureAdmin();
     // 출발지 둘: 호스트(공개 포트) · omniroute 컨테이너(내부망). 둘 다 Caddy 를 거치고, Caddy 가 서로 다른 X-Forwarded-For 를 단다
-    const fromHost = await signIn(s.baseUrl, a.email, a.password);
+    const fromHost = await adminSignIn(s, a);
     assert.equal(fromHost.status, 200);
     const inner = fetchFrom(s, "omniroute", "http://caddy:80/api/auth/sign-in/email", {
       method: "POST",
@@ -417,7 +438,7 @@ describe("TC-S7.T6 app 은 edge 망의 Caddy 주소 하나만 신뢰 프록시�
     assert.equal(r.status, 0, r.stderr);
     const [probeIp, status] = r.stdout.trim().split("\n").map((l) => l.trim());
     assert.equal(status, "200", r.stdout);
-    const host = await signIn(s.baseUrl, a.email, a.password);
+    const host = await adminSignIn(s, a);
     assert.equal(host.status, 200);
     const sessions = await (await fetch(`${s.baseUrl}/api/auth/list-sessions`, { headers: { cookie: host.cookie, origin: s.baseUrl } })).json();
     const ips = sessions.map((x) => x.ipAddress);

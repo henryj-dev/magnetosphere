@@ -63,7 +63,7 @@ wrapper로 고치려면 거의 전부를 덮어써야 해서 SDK를 쓸 이점�
 | 과거·미래 window | 앞뒤 1 step, 같은 step·과거 step 재사용 금지 (step CAS) |
 | 민감 작업 최근성 (proof TTL) | 10분 |
 | 관리자 세션 | 유휴 30분 · 절대 12시간 (일반 세션 A2 와 같음, 절대 TTL 은 일반 절대 TTL 이하만 받는다) |
-| 실패 제한 | 5회 실패 뒤 1초부터 지수 지연 · 상한 15분 · 마지막 실패 15분 뒤 초기화 |
+| 실패 제한 | 계정+IP 칸 5회 실패 뒤 1초부터 지수 지연 · 상한 15분 · 마지막 실패 15분 뒤 초기화. 계정 단독 칸(IP 무관)도 20회 뒤 같은 지연 (보안 리뷰 L2, 2026-10-19 사용자 결정) |
 | 등록 grant 수명 | 24시간 (공통안 원문 "TOTP 등록 코드 24시간". 이메일 확인 링크 수명이 아니다) |
 | 복구 코드 | 10개 |
 | seed 길이 | **미정** — 4단계 Q12 (U5 전에 정한다) |
@@ -101,7 +101,7 @@ wrapper로 고치려면 거의 전부를 덮어써야 해서 SDK를 쓸 이점�
 
 - `POST admin-mfa/step-up {code|recoveryCode, purpose, target}` → `mfa_proof`를 만든다(TTL = 최근성 설정값).
 - 민감 작업은 `X-MFA-Proof`를 받아 **작업 자신의 트랜잭션·batch 안에서** `UPDATE mfa_proof SET used_at … WHERE id ∧ session ∧ purpose ∧ target ∧ auth_version ∧ used_at IS NULL ∧ expires_at > now`를 실행한다. 1행이 아니면 작업 전체를 되돌린다.
-- proof를 요구할 작업: 역할 변경, 관리자 초대, MFA 작업, 관리자 탈퇴(확정 제안). 설정·메일·OmniRoute 토큰 변경은 결정 필요.
+- proof를 요구할 작업: 역할 변경, 관리자 초대(대상 = 정규화한 초대 이메일), MFA 작업, 관리자 탈퇴, 다른 관리자의 정지(`admin.suspend`)·삭제(`admin.delete`, 대상 id. 보안 리뷰 M1). 설정·메일·OmniRoute 토큰 변경은 결정 필요.
 
 ### 복구 코드
 

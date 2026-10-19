@@ -1,5 +1,6 @@
 // TC-M0.T2~T5 의 단언 (M0). 측정(measure.ts)의 관찰을 docs/verify/V<n>.json 의 answer 와 비교한다.
 // Node 네 DB 시험(이 폴더 v<n>.test.ts)과 D1 시험(apps/server/test/verify-p3/v<n>.workers.test.ts)이 같은 함수를 부른다.
+import { ADMIN_MFA_API_PATHS } from "../mfa-policy.ts";
 import { expect } from "vitest";
 import * as M from "./measure.ts";
 import type { Rig } from "./measure.ts";
@@ -98,5 +99,5 @@ export async function tcM0T5a(rig: Rig, A: any) {
   // 1.7.7 auth.api 의 경로가 하나도 빠짐없이 부른 경로 또는 otherPaths 에 있다 (판 올림으로 생긴 새 경로를 잡는다)
   const called = new Set(M.V32_CALLS.map((c) => c.path));
   // H1 전용 GET/POST 엔드포인트 둘만 역사적 V32 목록에 더한다. 실제 목록의 중복을 없애지 않는다.
-  expect(o.allPaths).toEqual([...new Set([...called, ...A.otherPaths]), "/signup-confirmation", "/signup-confirmation"].sort());
+  expect(o.allPaths).toEqual([...new Set([...called, ...A.otherPaths]), "/signup-confirmation", "/signup-confirmation", ...ADMIN_MFA_API_PATHS].sort());
 }

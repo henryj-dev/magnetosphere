@@ -1,6 +1,6 @@
 // 자동 생성 파일이다. 손으로 고치지 않는다.
 // 원본: packages/db/src/schema/common.ts · 생성: pnpm -C packages/db gen
-import { index, integer, primaryKey, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 // 회원. Better Auth 칼럼 + 권한 칼럼 다섯 + 삭제 시각 + 인증 버전
 export const user = sqliteTable("user", {
@@ -33,6 +33,10 @@ export const session = sqliteTable("session", {
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   credentialFingerprint: text("credential_fingerprint"),
   authVersion: integer("auth_version").default(0).notNull(),
+  mfaVerifiedAt: integer("mfa_verified_at", { mode: "timestamp_ms" }),
+  mfaFactorId: text("mfa_factor_id"),
+  mfaMethod: text("mfa_method"),
+  mfaPolicyVersion: text("mfa_policy_version"),
 }, (table) => [
   index("session_userId_idx").on(table.userId),
 ]);
@@ -193,3 +197,66 @@ export const auditLog = sqliteTable("audit_log", {
 }, (table) => [
   index("idx_audit_log_created").on(table.createdAt),
 ]);
+
+// 관리자 MFA 수단 (TOTP). 회원당 active 하나·pending 하나를 active_slot·pending_slot 고유 키로 강제한다
+export const mfaFactor = sqliteTable("mfa_factor", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  state: text("state").notNull(),
+  secretEnc: text("secret_enc").notNull(),
+  periodS: integer("period_s").notNull(),
+  digits: integer("digits").notNull(),
+  algorithm: text("algorithm").notNull(),
+  lastUsedStep: integer("last_used_step"),
+  pendingSessionId: text("pending_session_id"),
+  pendingAuthVersion: integer("pending_auth_version"),
+  pendingExpiresAt: integer("pending_expires_at", { mode: "timestamp_ms" }),
+  activeSlot: text("active_slot").unique(),
+  pendingSlot: text("pending_slot").unique(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" }).$defaultFn(() => new Date()).notNull(),
+  activatedAt: integer("activated_at", { mode: "timestamp_ms" }),
+  revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+  revokedReason: text("revoked_reason"),
+}, (table) => [
+  index("idx_mfa_factor_user").on(table.userId),
+]);
+
+// 관리자 MFA 복구 코드. 원문은 두지 않고 HMAC 만 둔다. used_at IS NULL 조건 UPDATE 하나로 한 번만 소비한다
+export const mfaRecoveryCode = sqliteTable("mfa_recovery_code", {
+  id: text("id").primaryKey(),
+  factorId: text("factor_id").notNull().references(() => mfaFactor.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  codeHash: text("code_hash").notNull(),
+  usedAt: integer("used_at", { mode: "timestamp_ms" }),
+  usedSessionId: text("used_session_id"),
+}, (table) => [
+  uniqueIndex("uniq_mfa_recovery_code_factor_hash").on(table.factorId, table.codeHash),
+]);
+
+// 관리자 MFA 최초 등록 자격. 토큰 원문은 두지 않는다. 한 번만 쓴다
+export const mfaEnrollmentGrant = sqliteTable("mfa_enrollment_grant", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  purpose: text("purpose").notNull(),
+  issuedBy: text("issued_by"),
+  authVersion: integer("auth_version").notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  usedAt: integer("used_at", { mode: "timestamp_ms" }),
+  revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),
+});
+
+// 작업에 묶인 step-up 증명. 토큰 원문은 두지 않는다. 작업 자신의 트랜잭션 안에서 used_at IS NULL 조건 UPDATE 로 한 번만 소비한다
+export const mfaProof = sqliteTable("mfa_proof", {
+  id: text("id").primaryKey(),
+  tokenHash: text("token_hash").notNull().unique(),
+  sessionId: text("session_id").notNull().references(() => session.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  authVersion: integer("auth_version").notNull(),
+  factorId: text("factor_id").notNull(),
+  purpose: text("purpose").notNull(),
+  target: text("target").notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp_ms" }).notNull(),
+  usedAt: integer("used_at", { mode: "timestamp_ms" }),
+});

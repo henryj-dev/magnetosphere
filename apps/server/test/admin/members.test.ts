@@ -9,7 +9,7 @@ import * as keyApplication from "../../src/keys/apply.ts";
 import { memberAdminRoutes } from "../../src/admin/members.ts";
 import { AUTH_VERSION_MAX } from "../../src/admin/guard-sql.ts";
 import { sameOrigin } from "../../src/routes/guard.ts";
-import { addUser, call, fakeAuth, openRoutes, type CallOpts, type RouteEnv } from "../routes/env.ts";
+import { addUser, call, fakeAuth, fakeMfa, mfaAdminSession, openRoutes, type CallOpts, type RouteEnv } from "../routes/env.ts";
 
 let e: RouteEnv;
 let clientMode: "available" | "absent" | "throws";
@@ -17,7 +17,10 @@ beforeEach(async () => {
   e = await openRoutes();
   clientMode = "available";
   const baseAuth = fakeAuth();
+  // 관리자 MFA (A1): 시험 정책 런타임. 관리자 세션은 mfaAdminSession 이 MFA 충족으로 만든다
+  const mfa = await fakeMfa(e.h);
   const services = async () => ({
+    mfa,
     db: e.h,
     auth: { async handler(req: Request) {
       const res = await baseAuth.handler(req);
@@ -34,7 +37,8 @@ beforeEach(async () => {
 afterEach(async () => { vi.restoreAllMocks(); await e?.close(); });
 
 const users = () => e.h.db.select().from(e.h.schema.user);
-const sessionFor = (userId: string) => e.h.db.insert(e.h.schema.session).values({ id: userId, expiresAt: new Date(Date.now() + 60_000), token: randomUUID(), createdAt: new Date(), updatedAt: new Date(), userId, authVersion: 0 });
+/** 관리자 세션 (id = 회원 id). 관리자 MFA 를 마친 세션이다 (A1, routes/env.ts mfaAdminSession) */
+const sessionFor = (userId: string) => mfaAdminSession(e.h, userId);
 const audits = (action: string) => e.h.db.select().from(e.h.schema.auditLog).where(eq(e.h.schema.auditLog.action, action));
 const api = (method: string, path: string, o: CallOpts = {}) => call(e, method, path, o);
 

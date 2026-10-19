@@ -2,6 +2,8 @@
 // 가입 거부는 응답 코드가 아니라 생긴 행 수(user·account·verification)와 메일 수로 본다 (실행판 0절).
 import { expect } from "vitest";
 import { attempt, body, mail, PASSWORD, userRows, type Rig } from "../../../../packages/auth/test/signup-policy/rig.ts";
+import { challengeHttp, stepUpHttp, type MfaCall } from "../../../../packages/auth/test/mfa-fixture.ts";
+import { TEST_ENCRYPTION_KEY } from "../helpers.ts";
 
 export interface CallOpts {
   body?: unknown;
@@ -31,14 +33,32 @@ export async function callRes(res: Response): Promise<CallRes> {
   return { status: res.status, json, body, setCookie: res.headers.getSetCookie() };
 }
 
-/** 비밀번호 회원을 만들고 로그인해 세션 쿠키 머리글 값을 돌려준다 */
-export async function login(rig: HttpRig, role: "member" | "admin", status: "active" | "suspended" = "active") {
+/** Rig 의 call 을 MFA fixture 의 HTTP 꼴로 */
+export const mfaCall = (rig: HttpRig): MfaCall => async (method, path, o) => {
+  const r = await rig.call(method, path, { body: o.body, cookie: o.cookie, headers: o.headers });
+  return { status: r.status, json: r.json };
+};
+
+/**
+ * 비밀번호 회원을 만들고 로그인해 세션 쿠키 머리글 값을 돌려준다.
+ * 활성 관리자는 관리자 MFA(A1)까지 마친 세션이다: 시험 factor 를 넣고 challenge 로 부분 세션을 올린다 (mfa: false 면 부분 세션 그대로)
+ */
+export async function login(rig: HttpRig, role: "member" | "admin", status: "active" | "suspended" = "active", o: { mfa?: boolean } = {}) {
   const email = mail(`login-${role}-${status}`);
   const id = await rig.op("addPasswordUser", email, PASSWORD, role, status);
   const r = await rig.call("POST", "/api/auth/sign-in/email", { body: { email, password: PASSWORD } });
   if (r.status !== 200) throw new Error(`로그인 실패 ${r.status} ${r.body}`);
   const cookie = r.setCookie.map((c) => c.split(";")[0]).join("; ");
+  if (role === "admin" && status === "active") {
+    await rig.op("mfaFactor", id, TEST_ENCRYPTION_KEY);
+    if (o.mfa !== false) await challengeHttp(mfaCall(rig), cookie);
+  }
   return { id, email, cookie };
+}
+
+/** MFA 를 마친 관리자 세션으로 작업 proof 를 받아 X-MFA-Proof 머리글로 돌려준다 (로그인 MFA 최근성) */
+export async function proofHeader(rig: HttpRig, cookie: string, purpose: string, target: string): Promise<Record<string, string>> {
+  return { "x-mfa-proof": await stepUpHttp(mfaCall(rig), cookie, purpose, target) };
 }
 
 const MODES = ["open", "invite_only", "domain_allowlist", "closed", "sso_only"] as const;

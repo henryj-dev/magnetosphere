@@ -1,5 +1,5 @@
 // 감사 기록 쓰기 하나 (3단계 실행판 M1.T3, 계획서 5.9, Q17). 3단계 코드(가입·초대·회원 관리·설정)는 이것만 쓴다.
-//   - action 은 허용 목록(3단계 열둘)과 2단계가 이미 쓰는 이름만 받는다. 철자가 틀린 action 은 7단계 감사 화면의 거르기에서 빠진다.
+//   - action 은 허용 목록(3단계 열둘)과 2단계가 이미 쓰는 이름, 관리자 MFA(A1) 이름만 받는다. 철자가 틀린 action 은 7단계 감사 화면의 거르기에서 빠진다.
 //   - detail 은 JSON 객체다. 키 이름이 개인정보·비밀 값(email·*name·password·token·*_hash 등)이거나 문자열 값이 이메일 꼴이면
 //     어느 깊이든 던진다 (target 의 이메일 꼴 값도).
 //     탈퇴로 지운 개인정보(Q9)가 감사 기록에 남지 않게 한다. target 은 회원·초대 id 다.
@@ -37,8 +37,11 @@ export const PHASE2_AUDIT_ACTIONS = [
   "alert.key_stuck",
 ] as const;
 
-export type AuditAction = (typeof AUDIT_ACTIONS)[number] | (typeof PHASE2_AUDIT_ACTIONS)[number];
-const ACTIONS: ReadonlySet<string> = new Set([...AUDIT_ACTIONS, ...PHASE2_AUDIT_ACTIONS]);
+/** 관리자 MFA (A1). packages/auth/src/mfa/session.ts MfaAuditAction 과 같은 이름 */
+export const MFA_AUDIT_ACTIONS = ["mfa.enroll", "mfa.recovery_use", "mfa.recovery_regenerate", "mfa.reset", "mfa.grant_issue"] as const;
+
+export type AuditAction = (typeof AUDIT_ACTIONS)[number] | (typeof PHASE2_AUDIT_ACTIONS)[number] | (typeof MFA_AUDIT_ACTIONS)[number];
+const ACTIONS: ReadonlySet<string> = new Set([...AUDIT_ACTIONS, ...PHASE2_AUDIT_ACTIONS, ...MFA_AUDIT_ACTIONS]);
 
 export interface AuditEntry {
   /** 한 사람(관리자·회원) id. 시스템이 남기면 null */
@@ -67,11 +70,14 @@ const NAME_KEY_EXCEPTIONS: ReadonlySet<string> = new Set(["keyname"]);
 /** 이메일 꼴: @ 앞뒤에 글자가 있고 @ 뒤에 점이 든 도메인. 지운 회원 주소(deleted-<id>@invalid)는 점이 없어 걸리지 않는다 */
 const EMAIL_LIKE = /[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+/;
 
-/** 개인정보·비밀 값 키. 대소문자·_·- 를 지우고 비교한다 (email·newEmail, displayName·user_name, token·sessionToken, tokenHash …) */
+/**
+ * 개인정보·비밀 값 키. 대소문자·_·- 를 지우고 비교한다 (email·newEmail, displayName·user_name, token·sessionToken, tokenHash …).
+ * 관리자 MFA(A1)의 비밀값 꼴도 막는다: otp·code(s)·recovery(복구 코드)·seed·uri(otpauth URI)·tokens. secret·token 은 원래부터 막는다
+ */
 function forbiddenKey(key: string): boolean {
   const k = key.toLowerCase().replace(/[_-]/g, "");
   if (NAME_KEY_EXCEPTIONS.has(k)) return false;
-  return /(name|email|password|token|hash|secret|apikey)$/.test(k);
+  return /(name|email|password|tokens?|hash|secrets?|apikey|otp|codes?|recovery|seed|uri)$/.test(k);
 }
 
 function checkDetail(v: unknown, path: string): void {

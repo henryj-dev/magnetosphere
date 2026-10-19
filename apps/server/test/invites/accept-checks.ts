@@ -3,7 +3,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { expect } from "vitest";
 import { mail, PASSWORD } from "../../../../packages/auth/test/signup-policy/rig.ts";
-import { installed, login, type HttpRig } from "../signup/checks.ts";
+import { installed, login, proofHeader, type HttpRig } from "../signup/checks.ts";
 
 export const ACCEPT = "/api/invites/accept";
 export const INVALID = JSON.stringify({ error: "invalid_invite" });
@@ -19,9 +19,10 @@ export async function prepareAccept(rig: HttpRig) {
   return login(rig, "admin");
 }
 
-/** 관리자 API 로 초대를 만들고 id·원문 토큰을 돌려준다 */
+/** 관리자 API 로 초대를 만들고 id·원문 토큰을 돌려준다. 관리자 초대는 step-up proof 를 싣는다 (A1) */
 export async function makeInvite(rig: HttpRig, admin: { cookie: string }, b: { role: "member" | "admin"; email?: string; expiresInDays?: number }) {
-  const r = await rig.call("POST", "/api/admin/invites", { cookie: admin.cookie, body: b });
+  const headers = b.role === "admin" ? await proofHeader(rig, admin.cookie, "admin.invite", String(b.email ?? "").trim().toLowerCase().normalize("NFC")) : undefined;
+  const r = await rig.call("POST", "/api/admin/invites", { cookie: admin.cookie, body: b, headers });
   if (r.status !== 201) throw new Error(`초대 만들기 실패 ${r.status} ${r.body}`);
   return { id: r.json.invite.id as string, token: (r.json.link as string).split("#")[1] };
 }

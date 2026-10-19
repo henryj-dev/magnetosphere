@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { API_BODY_LIMIT, createApp, type Services } from "../../src/app.ts";
-import { addUser, call, fakeAuth, openRoutes, ORIGIN, seedKey, type RouteEnv } from "../routes/env.ts";
+import { addUser, call, fakeAuth, fakeMfa, mfaAdminSession, openRoutes, ORIGIN, seedKey, type RouteEnv } from "../routes/env.ts";
 
 const PASSWORD_HASH = "server-only-password-hash-m4";
 const AUTH_SECRET = "server-only-auth-payload-m4";
@@ -30,6 +30,7 @@ beforeEach(async () => {
       selfDeleteCredentialProof: proof,
     },
     cipher: { encrypt: vi.fn().mockResolvedValue(CIPHER_SECRET), decrypt: vi.fn().mockResolvedValue(CIPHER_SECRET) } as Services["cipher"],
+    mfa: await fakeMfa(e.h),
     omniroute: { baseUrl: null, initialPassword: null }, appOrigin: ORIGIN,
     keysClient: async () => () => e.om.client(),
   };
@@ -38,6 +39,9 @@ beforeEach(async () => {
 afterEach(async () => { vi.restoreAllMocks(); await e?.close(); });
 
 async function sessionFor(userId: string) {
+  const [u] = await e.h.db.select({ role: e.h.schema.user.role }).from(e.h.schema.user).where(eq(e.h.schema.user.id, userId));
+  // 관리자 세션은 관리자 MFA 를 마친 세션이다 (A1, routes/env.ts mfaAdminSession)
+  if (u?.role === "admin") return mfaAdminSession(e.h, userId);
   await e.h.db.insert(e.h.schema.session).values({ id: userId, userId, authVersion: 0, token: randomUUID(), expiresAt: new Date(Date.now() + 60_000), createdAt: new Date(), updatedAt: new Date() });
 }
 const noSecrets = (text: string) => {

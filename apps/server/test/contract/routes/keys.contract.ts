@@ -19,6 +19,7 @@ import { omnirouteHandlers } from "../../../src/queue/handlers.ts";
 import { KEY_DELETE_DELAY_MS, runDue } from "../../../src/queue/index.ts";
 import { ensureSetupToken } from "../../../src/setup/index.ts";
 import { OMNIROUTE_TOKEN_KEY, readOmniRouteToken } from "../../../src/setup/omniroute.ts";
+import { enrollHttp } from "../../../../../packages/auth/test/mfa-fixture.ts";
 import { ADMIN, makeTestEnv, type TestEnv } from "../../helpers.ts";
 import { infer, OMNI_PASSWORD, OMNI_URL, threeRequests } from "../limits/env.ts";
 
@@ -29,6 +30,8 @@ interface App {
   base: string;
   /** 회원 앱의 관리 토큰으로 만든 어댑터 (설치 때 부트스트랩한 write 토큰) */
   om: OmniRouteClient;
+  /** 설치 응답의 bootstrap 관리자 MFA 등록 grant (A1) */
+  grant: string;
   close(): Promise<void>;
 }
 
@@ -46,7 +49,9 @@ async function boot(): Promise<App> {
   const base = `http://127.0.0.1:${listening.port}`;
   const token = await ensureSetupToken(s.db, { rotate: true, log: (l) => logs.push(l), fixedToken: null });
   const setup = await post(base, "/api/setup", { token, ...ADMIN });
-  expect(await setup.json(), "설치가 OmniRoute 토큰을 부트스트랩했다").toEqual({ ok: true, omniroute: "connected" });
+  const installed = await setup.json();
+  // 설치 응답은 bootstrap 관리자 MFA 등록 grant 를 한 번 싣는다 (A1)
+  expect(installed, "설치가 OmniRoute 토큰을 부트스트랩했다").toEqual({ ok: true, omniroute: "connected", mfaGrant: { grant: expect.any(String), expiresAt: expect.any(String) } });
   // 오늘 첫 분배의 어제 확정·대조 호출을 이 시험에서 뺀다 (한도 분배 계약 시험과 같다)
   await writeSetting(s.db, CONFIRMED_KEY, dayKey(new Date()), new Date());
   const om = createClient({ baseUrl: OMNI_URL, credential: { token: (await readOmniRouteToken(s.db, s.cipher))! } });
@@ -56,6 +61,7 @@ async function boot(): Promise<App> {
     s,
     base,
     om,
+    grant: installed.mfaGrant.grant,
     async close() {
       for (const id of cleanupKeys.splice(0)) await om.deleteKey(id).catch(() => undefined);
       await revokeAppToken(s).catch(() => undefined);
@@ -208,6 +214,11 @@ describe("TC-M4.T5.c 정지 직후 첫 요청이 거부된다 (계약, 로컬 ar
     const login = await post(app.base, "/api/auth/sign-in/email", { email: ADMIN.email, password: ADMIN.password });
     expect(login.status, "관리자 로그인").toBe(200);
     const adminCookie = login.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+    // 관리자 MFA (A1): 설치 응답의 grant 로 등록해야 관리 API 를 쓴다
+    await enrollHttp(async (method, path, o) => {
+      const r = await fetch(app.base + path, { method, headers: { origin: "http://localhost:3000", "content-type": "application/json", cookie: o.cookie ?? "" }, body: JSON.stringify(o.body ?? {}) });
+      return { status: r.status, json: await r.json().catch(() => null) };
+    }, adminCookie, app.grant);
     const res = await post(app.base, `/api/admin/users/${m.id}/suspend`, {}, adminCookie);
     const body = (await res.json().catch(() => null)) as any;
     // sync synced: 큐·점검·타이머가 아니라 정지 응답 안에서 OmniRoute 에 반영됐다

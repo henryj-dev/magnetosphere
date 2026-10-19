@@ -1,6 +1,6 @@
 // 자동 생성 파일이다. 손으로 고치지 않는다.
 // 원본: packages/db/src/schema/common.ts · 생성: pnpm -C packages/db gen
-import { bigint, boolean, index, integer, numeric, pgTable, primaryKey, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import { bigint, boolean, index, integer, numeric, pgTable, primaryKey, text, timestamp, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 
 // 회원. Better Auth 칼럼 + 권한 칼럼 다섯 + 삭제 시각 + 인증 버전
 export const user = pgTable("user", {
@@ -33,6 +33,10 @@ export const session = pgTable("session", {
   userId: varchar("user_id", { length: 36 }).notNull().references(() => user.id, { onDelete: "cascade" }),
   credentialFingerprint: varchar("credential_fingerprint", { length: 64 }),
   authVersion: integer("auth_version").default(0).notNull(),
+  mfaVerifiedAt: timestamp("mfa_verified_at"),
+  mfaFactorId: varchar("mfa_factor_id", { length: 36 }),
+  mfaMethod: varchar("mfa_method", { length: 16 }),
+  mfaPolicyVersion: varchar("mfa_policy_version", { length: 64 }),
 }, (table) => [
   index("session_userId_idx").on(table.userId),
 ]);
@@ -193,3 +197,66 @@ export const auditLog = pgTable("audit_log", {
 }, (table) => [
   index("idx_audit_log_created").on(table.createdAt),
 ]);
+
+// 관리자 MFA 수단 (TOTP). 회원당 active 하나·pending 하나를 active_slot·pending_slot 고유 키로 강제한다
+export const mfaFactor = pgTable("mfa_factor", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  userId: varchar("user_id", { length: 36 }).notNull().references(() => user.id, { onDelete: "cascade" }),
+  kind: varchar("kind", { length: 16 }).notNull(),
+  state: varchar("state", { length: 16 }).notNull(),
+  secretEnc: text("secret_enc").notNull(),
+  periodS: integer("period_s").notNull(),
+  digits: integer("digits").notNull(),
+  algorithm: varchar("algorithm", { length: 16 }).notNull(),
+  lastUsedStep: bigint("last_used_step", { mode: "number" }),
+  pendingSessionId: varchar("pending_session_id", { length: 36 }),
+  pendingAuthVersion: integer("pending_auth_version"),
+  pendingExpiresAt: timestamp("pending_expires_at"),
+  activeSlot: varchar("active_slot", { length: 36 }).unique(),
+  pendingSlot: varchar("pending_slot", { length: 36 }).unique(),
+  createdAt: timestamp("created_at").$defaultFn(() => new Date()).notNull(),
+  activatedAt: timestamp("activated_at"),
+  revokedAt: timestamp("revoked_at"),
+  revokedReason: varchar("revoked_reason", { length: 32 }),
+}, (table) => [
+  index("idx_mfa_factor_user").on(table.userId),
+]);
+
+// 관리자 MFA 복구 코드. 원문은 두지 않고 HMAC 만 둔다. used_at IS NULL 조건 UPDATE 하나로 한 번만 소비한다
+export const mfaRecoveryCode = pgTable("mfa_recovery_code", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  factorId: varchar("factor_id", { length: 36 }).notNull().references(() => mfaFactor.id, { onDelete: "cascade" }),
+  userId: varchar("user_id", { length: 36 }).notNull().references(() => user.id, { onDelete: "cascade" }),
+  codeHash: varchar("code_hash", { length: 64 }).notNull(),
+  usedAt: timestamp("used_at"),
+  usedSessionId: varchar("used_session_id", { length: 36 }),
+}, (table) => [
+  uniqueIndex("uniq_mfa_recovery_code_factor_hash").on(table.factorId, table.codeHash),
+]);
+
+// 관리자 MFA 최초 등록 자격. 토큰 원문은 두지 않는다. 한 번만 쓴다
+export const mfaEnrollmentGrant = pgTable("mfa_enrollment_grant", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  userId: varchar("user_id", { length: 36 }).notNull().references(() => user.id, { onDelete: "cascade" }),
+  tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
+  purpose: varchar("purpose", { length: 16 }).notNull(),
+  issuedBy: varchar("issued_by", { length: 36 }),
+  authVersion: integer("auth_version").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  revokedAt: timestamp("revoked_at"),
+});
+
+// 작업에 묶인 step-up 증명. 토큰 원문은 두지 않는다. 작업 자신의 트랜잭션 안에서 used_at IS NULL 조건 UPDATE 로 한 번만 소비한다
+export const mfaProof = pgTable("mfa_proof", {
+  id: varchar("id", { length: 36 }).primaryKey(),
+  tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
+  sessionId: varchar("session_id", { length: 36 }).notNull().references(() => session.id, { onDelete: "cascade" }),
+  userId: varchar("user_id", { length: 36 }).notNull().references(() => user.id, { onDelete: "cascade" }),
+  authVersion: integer("auth_version").notNull(),
+  factorId: varchar("factor_id", { length: 36 }).notNull(),
+  purpose: varchar("purpose", { length: 64 }).notNull(),
+  target: varchar("target", { length: 255 }).notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+});

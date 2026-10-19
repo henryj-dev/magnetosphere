@@ -15,7 +15,7 @@ import { smtpMailer } from "@magnetosphere/auth/mail/smtp";
 import { createApp } from "./app.ts";
 import { buildServices } from "./config.ts";
 import { registerJobs } from "./jobs.ts";
-import { ensureSetupToken, warnLeftoverInitialPassword } from "./setup/index.ts";
+import { ensureMfaReissueToken, ensureSetupToken, warnLeftoverInitialPassword } from "./setup/index.ts";
 
 export const DEFAULT_WEB_DIR = fileURLToPath(new URL("../../web/build", import.meta.url));
 
@@ -53,6 +53,8 @@ export async function startNodeServer(opts: NodeServerOptions = {}) {
     });
     const port = opts.port ?? Number(env.PORT ?? 3000);
     await ensureSetupToken(services.db, { rotate: true, log, fixedToken: services.setupToken });
+    // bootstrap 관리자가 MFA 등록 전이면 grant 재발급용 일회용 토큰을 출력한다 (A1, setup/index.ts)
+    await ensureMfaReissueToken(services.db, log);
     await warnLeftoverInitialPassword(services.db, services.omniroute.initialPassword, log);
     registerJobs(runtime);
     const listening = await listen(runtime, app.fetch, { port, hostname: opts.hostname ?? env.HOST ?? "0.0.0.0" });

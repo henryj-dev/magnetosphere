@@ -13,6 +13,8 @@ import { bindSelfDeleteProof, type SelfDeleteCredentialProve } from "./internal.
 import { resetPasswordMessage } from "./mail/messages.ts";
 import type { MailMessage, Mailer } from "./mail/types.ts";
 import { CLIENT_IP_HEADER, ipAddressOptions, rateLimitOptions, withClientIp, type ClientIp } from "./rate-limit.ts";
+import { ADMIN_MFA_PREFIX, adminMfa } from "./mfa/plugin.ts";
+import type { MfaRuntime } from "./mfa/session.ts";
 
 export type { Mailer, MailMessage } from "./mail/types.ts";
 export type { SelfDeleteCredentialProof } from "./internal.ts";
@@ -69,6 +71,11 @@ export interface AuthConfig {
   signupInputs?: (load: () => Promise<SignupInputs>) => Promise<SignupInputs>;
   /** 회원 행이 커밋된 뒤 (user.create.after). 서버는 감사 기록 member.signup 을 남긴다. 던져도 가입은 그대로이고 경고만 남는다 */
   onUserCreated?: (e: { userId: string; via: "public" | "invite"; inviteId: string | null; ip: string | null }) => Promise<void>;
+  /**
+   * 관리자 MFA 구성 (A1, src/mfa). 없거나 정책이 unavailable 이면 관리자 세션은 MFA 를 마칠 수 없어
+   * 부분 세션 경로(/get-session·/sign-out·/admin-mfa/*)만 쓴다 (fail-closed).
+   */
+  mfa?: MfaRuntime;
 }
 
 /** 기록에 붙일 오류 꼬리: 인자 가운데 Error 마다 "(이름:code)". message·stack·params·cause 는 넣지 않는다 */
@@ -204,7 +211,7 @@ function trimSignUpResponse(ctx: { path: string; json: (v: unknown) => unknown; 
  * Better Auth 옵션. 스키마 비교(TC-S3.T1.e)와 SSO 경로 검사(check-sso-paths.mjs)가 이 함수의 결과를 쓴다.
  * 서버는 이것으로 betterAuth() 를 직접 만들지 않고 createAuth 를 쓴다 (직접 만들면 handler 가 감싸지지 않는다).
  */
-export function authOptions(cfg: AuthConfig, confirmation = signupConfirmation(cfg, deliverer(cfg))) {
+export function authOptions(cfg: AuthConfig, confirmation = signupConfirmation(cfg, deliverer(cfg)), mfa = adminMfa(cfg)) {
   // 세션·토큰 서명 키. 짧으면 추측·무차별 대입에 약하므로 시작을 거부한다 (S3 보안 리뷰 L1)
   if (typeof cfg.secret !== "string" || cfg.secret.length < MIN_SECRET_LENGTH) {
     throw new Error(`BETTER_AUTH_SECRET 은 ${MIN_SECRET_LENGTH}자 이상이어야 한다 (지금 ${cfg.secret?.length ?? 0}자)`);
@@ -252,7 +259,7 @@ export function authOptions(cfg: AuthConfig, confirmation = signupConfirmation(c
     // 로그인·가입·비밀번호 재설정 요청 수 제한. 저장소는 AUTH_SCHEMA_OPTIONS 의 DB(rate_limit)
     rateLimit: rateLimitOptions(AUTH_SCHEMA_OPTIONS.rateLimit),
     // AUTH_SCHEMA_OPTIONS 는 as const 라 plugins 가 읽기 전용 튜플이다. BetterAuthOptions 는 바꿀 수 있는 배열을 받으므로 복사한다 (같은 플러그인 객체)
-    plugins: [...AUTH_SCHEMA_OPTIONS.plugins, confirmation.plugin],
+    plugins: [...AUTH_SCHEMA_OPTIONS.plugins, confirmation.plugin, mfa.plugin],
     disabledPaths: SSO_DISABLED_PATHS,
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
@@ -262,6 +269,9 @@ export function authOptions(cfg: AuthConfig, confirmation = signupConfirmation(c
         await confirmation.blockCoreVerification(ctx);
         const blocked = await confirmation.guardSession(ctx);
         if (blocked) return blocked;
+        // 관리자 부분 세션(MFA 미충족)은 /get-session·/sign-out·/admin-mfa/* 만 (A1). /change-password 등은 여기서 403 MFA_REQUIRED
+        const partial = await mfa.gate(ctx);
+        if (partial) return partial;
         await confirmation.loginSnapshot(ctx);
         const changed = await confirmation.changePassword(ctx);
         if (changed) return changed;
@@ -298,7 +308,16 @@ export function authOptions(cfg: AuthConfig, confirmation = signupConfirmation(c
 export function createAuth(cfg: AuthConfig) {
   const confirmation = signupConfirmation(cfg, deliverer(cfg));
   const auth = betterAuth(authOptions(cfg, confirmation));
-  const result = { handler: withClientIp(auth.handler, cfg.clientIp), api: auth.api };
+  const handler = withClientIp(auth.handler, cfg.clientIp);
+  // 관리자 MFA 응답은 오류까지 모두 캐시하지 않는다 (seed·복구 코드·proof 가 응답에 있다)
+  const noStore = async (req: Request) => {
+    const res = await handler(req);
+    if (!new URL(req.url).pathname.startsWith(`/api/auth${ADMIN_MFA_PREFIX}`)) return res;
+    const headers = new Headers(res.headers);
+    headers.set("Cache-Control", "no-store");
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+  };
+  const result = { handler: noStore, api: auth.api };
   // 서버 내부 proof는 같은 인스턴스의 문맥을 쓰고 원본 반환 객체에만 등록한다.
   const prove: SelfDeleteCredentialProve = async (input) => {
     const context = await auth.$context;

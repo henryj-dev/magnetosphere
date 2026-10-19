@@ -5,7 +5,7 @@ import { createApp, type Services } from "../../src/app.ts";
 import { ensureSetupToken } from "../../src/setup/index.ts";
 import * as omniSetup from "../../src/setup/omniroute.ts";
 import { ADMIN } from "../helpers.ts";
-import { addUser, call, fakeAuth, openRoutes, ORIGIN, type RouteEnv } from "../routes/env.ts";
+import { addUser, call, fakeAuth, fakeMfa, openRoutes, ORIGIN, type RouteEnv } from "../routes/env.ts";
 
 let e: RouteEnv;
 let s: Services;
@@ -15,7 +15,7 @@ beforeEach(async () => {
   vi.spyOn(omniSetup, "omniRouteStatus").mockResolvedValue("connected");
   vi.spyOn(omniSetup, "saveManualToken").mockResolvedValue({ ok: true });
   s = {
-    db: e.h, auth: fakeAuth(), cipher: {} as Services["cipher"],
+    db: e.h, auth: fakeAuth(), cipher: {} as Services["cipher"], mfa: await fakeMfa(e.h),
     omniroute: { baseUrl: null, initialPassword: null }, appOrigin: ORIGIN,
   };
   e.app = createApp({ services: async () => s, assets: async (c) => c.text("spa"), setupTokenFromSecret: false, log: (line) => e.logs.push(line) });
@@ -95,7 +95,8 @@ describe("TC-M4.T5.b 설치 완료 판정은 관리자 상태와 무관하다", 
     const rejected = await call(e, "POST", "/api/setup", { origin: "https://evil.example", body: { token, ...ADMIN } });
     expect([rejected.status, rejected.json]).toEqual([403, { error: "forbidden_origin" }]);
     const accepted = await call(e, "POST", "/api/setup", { body: { token, ...ADMIN } });
-    expect([accepted.status, accepted.json]).toEqual([201, { ok: true, omniroute: "manual_required" }]);
+    // 설치 응답은 bootstrap grant 를 한 번 싣는다 (A1)
+    expect([accepted.status, accepted.json]).toEqual([201, { ok: true, omniroute: "manual_required", mfaGrant: { grant: expect.any(String), expiresAt: expect.any(String) } }]);
     expect(omniSetup.bootstrapOmniRoute).toHaveBeenCalledTimes(1);
     expect((await call(e, "GET", "/api/setup")).json).toEqual({ needed: false });
     expect(accepted.text).not.toContain(token);

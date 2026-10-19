@@ -130,6 +130,24 @@ OmniRoute 는 어느 조합이든 상시 서버 한 대(위 Compose)에서 돈�
 - Workers 는 SMTP 를 지원하지 않는다 (400 `smtp_unsupported`). Workers 에서 바인딩이 없으면 Cloudflare 저장도 거부된다 (`cloudflare_unsupported`).
 - D1 조합은 SSO(`sso_only`·IdP)를 지원하지 않기로 했다. 설정 화면도 잠근다.
 
+## 관리자 MFA (A1)
+
+관리자는 비밀번호만으로 관리 기능을 쓸 수 없다. 로그인은 부분 세션이고, TOTP(또는 복구 코드)를 마쳐야 관리 API 가 열린다. 신뢰 기기 면제는 없다.
+
+- **정책은 필수 배포 설정이다.** 코드에 기본값이 없다. `MFA_*` 열일곱 값(`.env.example`, `apps/server/wrangler.toml` 의 `[env.*.vars]`)이
+  하나라도 없거나 범위 밖이면 관리자 API 는 503 `mfa_policy_unavailable`, 최초 설치는 설치 토큰을 쓰기 전에 503 `mfa_policy_required` 다.
+  공통안 1차 값: 30초·6자리·SHA-1·앞뒤 1 step, 최근성 10분, 관리자 세션 절대 12시간, 실패 계정+IP 5회·계정 20회 뒤 1초부터 두 배·상한 15분·마지막 실패 15분 뒤 초기화,
+  등록 자격 24시간, 복구 코드 10개. 값을 바꾸면 정책 해시가 바뀌어 모든 관리자가 MFA 를 다시 마친다.
+- **최초 설치:** `POST /api/setup` 의 201 응답 `mfaGrant.grant` 가 첫 관리자의 등록 자격이다(한 번만 보인다). 로그인 → `/api/auth/admin-mfa/enroll/start` → `enroll/confirm`.
+  자격을 잃으면 첫 관리자에게 등록된 MFA 가 없는 동안만 `POST /api/setup/mfa-grant { token }` 으로 다시 받는다.
+  Docker 는 그 동안 시작할 때마다 일회용 재발급 토큰을 로그에 한 번 낸다. Workers 는 `SETUP_TOKEN` 시크릿이 그 토큰이다 — **MFA 등록을 마치기 전에 `SETUP_TOKEN` 을 지우지 않는다.**
+- **기존 관리자 전환:** 마이그레이션 0007 뒤 기존 관리자 세션은 MFA 미충족이다. 운영자가 서버 환경(DATABASE_URL·BETTER_AUTH_SECRET·MFA_*)으로
+  `node apps/server/scripts/mfa-transition-grant.ts --email <관리자 이메일>` 을 돌리면 표준 출력에 transition grant 가 한 번 나온다. 그 관리자가 그것으로 등록한다.
+  Workers + D1 은 이 CLI 가 붙을 수 없다 (Hyperdrive 는 그 DB 주소로 쓴다).
+- **민감 작업**(역할 변경·관리자 초대·MFA 초기화·관리자 탈퇴)은 `/api/auth/admin-mfa/step-up` 으로 받은 proof 를 `X-MFA-Proof` 머리글에 싣는다. 한 번만 쓰인다.
+- 승격하면 응답 `mfaGrant` 로 promotion grant 가, MFA 초기화(`POST /api/admin/users/:id/mfa-reset`)는 reset grant 가 행위자에게 한 번 보인다. 대상에게 따로 전한다.
+- 첫 관리자가 TOTP 와 복구 코드를 모두 잃으면 앱 안에 복구 경로가 없다. 다른 관리자를 미리 두는 것을 권한다.
+
 ## 회원 한도의 한계
 
 회원 월 한도는 결제 상한이 아니다. 회원 앱이 1분마다 회원의 남은 한도를 키별 예산으로 나눠 걸고, 실제 차단은 OmniRoute 가 한다 (계획서 5.3).

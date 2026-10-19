@@ -6,8 +6,17 @@
 //   3. OmniRoute 부트스트랩(oma_live_ 토큰 발급·암호화 저장, setup/omniroute.ts)은 관리자를 만든 같은 요청에서 돈다.
 //      실패해도 설치는 끝나고 응답의 omniroute 가 "manual_required" 다. 관리자가 로그인해 토큰을 붙여 넣는다 (routes.ts).
 // 관리자가 생긴 뒤에는 /api/setup 이 항상 409 다. 토큰도 다시 만들지 않는다.
+// 관리자 MFA (A1 설계 4절 "설치 직후", 추천안 A)
+//   - MFA 정책이 준비되지 않았으면 POST /api/setup 은 설치 토큰을 소비하기 전에 503 mfa_policy_required 다 (잠길 관리자가 아직 없다).
+//   - 성공하면 관리자 생성과 bootstrap grant 생성을 한 단위로 하고 201 응답 mfaGrant 에 토큰을 한 번만 넣는다.
+//   - grant 를 잃으면 bootstrap 관리자에게 active factor 가 없는 동안에만 POST /api/setup/mfa-grant 로 다시 발급한다.
+//     Node 는 그 동안 시작할 때마다 일회용 재발급 토큰을 만들어 한 번 출력한다(설치 토큰과 다른 행 mfa_reissue_token_hash).
+//     Workers 는 SETUP_TOKEN 시크릿을 쓴다 — MFA 를 마치기 전에 지우면 재발급 경로가 없다 (운영 문서).
 import { and, eq, lt, sql } from "drizzle-orm";
 import { hashPassword } from "better-auth/crypto";
+import { grantInsert, grantRevokeOpen, runUnit, UnitAborted, type MfaRuntime } from "@magnetosphere/auth/mfa";
+import { AUTH_VERSION_DEFAULT } from "@magnetosphere/db/src/schema/common.ts";
+import { auditStatement } from "../audit/index.ts";
 import { findUserByEmail, normalizeEmail } from "@magnetosphere/db/src/users.ts";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import type { DbHandle } from "@magnetosphere/runtime/types";
@@ -180,9 +189,15 @@ export interface SetupInput {
   mail?: MailInput;
 }
 
+/** 응답에 한 번 싣는 grant. 키 이름을 token 으로 두지 않는다 (응답 DTO 의 내부 비밀 검사와 구분) */
+export interface IssuedGrant {
+  grant: string;
+  expiresAt: string;
+}
+
 export type SetupResult =
-  | { ok: true; userId: string; omniroute: OmniRouteStatus }
-  | { ok: false; status: 400 | 401 | 409; error: string };
+  | { ok: true; userId: string; omniroute: OmniRouteStatus; mfaGrant: IssuedGrant }
+  | { ok: false; status: 400 | 401 | 409 | 503; error: string };
 
 const EMAIL_TAKEN = { ok: false, status: 409, error: "email_taken" } as const;
 
@@ -210,8 +225,12 @@ export async function runSetup(
   cipher: () => Promise<Cipher>,
   bootstrapOmniRoute?: (userId: string) => Promise<OmniRouteStatus>,
   mailCapabilities?: MailCapabilities,
+  mfa?: MfaRuntime,
 ): Promise<SetupResult> {
   if (await adminExists(h)) return { ok: false, status: 409, error: "already_set_up" };
+  // MFA 정책이 없으면 설치 토큰을 보기·소비하기 전에 닫는다. 운영자는 설정을 고친 뒤 같은 토큰으로 다시 시도한다
+  if (!mfa || mfa.policy.state !== "ready") return { ok: false, status: 503, error: "mfa_policy_required" };
+  const policy = mfa.policy.policy;
   const stored = await readSetting(h, SETUP_TOKEN_KEY);
   const given = typeof input.token === "string" ? await sha256Hex(input.token.trim()) : "";
   if (typeof stored !== "string" || !sameText(given, stored)) return { ok: false, status: 401, error: "invalid_token" };
@@ -231,6 +250,7 @@ export async function runSetup(
 
   const userId = crypto.randomUUID();
   const now = new Date();
+  let grant: IssuedGrant;
   try {
     // Better Auth 가입 경로는 인증 메일을 보내고 권한 칼럼을 받지 않으므로(input: false) 행을 직접 만든다.
     // 비밀번호 해시와 credential 계정 모양은 Better Auth 이메일 가입과 같다 (만든 뒤 /sign-in/email 로 로그인된다)
@@ -254,8 +274,14 @@ export async function runSetup(
       createdAt: now,
       updatedAt: now,
     });
+    // bootstrap grant: 새 관리자의 인증 버전(기본값)에 묶는다. 토큰은 201 응답에만 한 번 나간다
+    const g = await grantInsert(h, mfa.key, policy, { userId, purpose: "bootstrap", issuedBy: null, authVersion: AUTH_VERSION_DEFAULT, now });
+    await g.build(h.db);
+    await auditStatement(h, { actorId: null, action: "mfa.grant_issue", target: userId, detail: { purpose: "bootstrap" }, ip: null, now });
+    grant = { grant: g.token, expiresAt: g.expiresAt.toISOString() };
   } catch (e) {
     // 반쯤 만든 관리자를 지우고 토큰을 되돌려 다시 시도할 수 있게 한다 (D1 은 대화형 트랜잭션이 없다)
+    await h.db.delete(h.schema.mfaEnrollmentGrant).where(eq(h.schema.mfaEnrollmentGrant.userId, userId));
     await h.db.delete(h.schema.account).where(eq(h.schema.account.userId, userId));
     await h.db.delete(h.schema.user).where(eq(h.schema.user.id, userId));
     await restoreSetupToken(h, stored);
@@ -270,5 +296,73 @@ export async function runSetup(
   }
   // OmniRoute 부트스트랩 (계획서 4.7 3번). 관리자를 만든 뒤라 실패해도 관리자는 남는다 (TC-S5.T3.c)
   const omniroute = bootstrapOmniRoute ? await bootstrapOmniRoute(userId) : "manual_required";
-  return { ok: true, userId, omniroute };
+  return { ok: true, userId, omniroute, mfaGrant: grant };
+}
+
+// ---------- bootstrap grant 재발급 (A1) ----------
+
+export const MFA_REISSUE_TOKEN_KEY = "mfa_reissue_token_hash";
+
+/** active factor 가 없는 활성 bootstrap 관리자 id. 없으면 null */
+export async function bootstrapAdminWithoutFactor(h: DbHandle): Promise<{ id: string; authVersion: number } | null> {
+  const u = h.schema.user;
+  const f = h.schema.mfaFactor;
+  const [row] = await h.db
+    .select({ id: u.id, authVersion: u.authVersion })
+    .from(u)
+    .where(and(eq(u.isBootstrapAdmin, true), eq(u.role, "admin"), eq(u.status, "active"), sql`not exists (select 1 from ${f} where ${f.activeSlot} = ${u.id})`))
+    .limit(1);
+  return row ? { id: row.id, authVersion: Number(row.authVersion) } : null;
+}
+
+/**
+ * Node 시작 때: bootstrap 관리자가 아직 MFA 를 등록하지 않았으면 일회용 재발급 토큰을 새로 만들어 한 번 출력한다.
+ * 설치 토큰(setup_token_hash)과 다른 행이다. 이미 등록했으면 남은 행을 지우고 아무것도 출력하지 않는다.
+ */
+export async function ensureMfaReissueToken(h: DbHandle, log: (line: string) => void): Promise<string | null> {
+  const t = h.schema.appSettings;
+  if (!(await bootstrapAdminWithoutFactor(h))) {
+    await h.db.delete(t).where(eq(t.key, MFA_REISSUE_TOKEN_KEY));
+    return null;
+  }
+  const token = newToken();
+  await writeSetting(h, MFA_REISSUE_TOKEN_KEY, await sha256Hex(token), null);
+  log(`[setup] 관리자 MFA 등록 자격 재발급 토큰: ${token}\n[setup] 등록 자격을 잃었을 때 POST /api/setup/mfa-grant 에 넣는다. 다시 출력하지 않는다.`);
+  return token;
+}
+
+export type ReissueResult = { ok: true; mfaGrant: IssuedGrant } | { ok: false; status: 401 | 409 | 503; error: string };
+
+/**
+ * POST /api/setup/mfa-grant: active factor 가 없는 bootstrap 관리자에게 bootstrap grant 를 다시 발급한다. 열린 grant 는 모두 취소한다.
+ * fixedToken(Workers SETUP_TOKEN)이 있으면 그 값과 비교하고, 없으면(Node) 일회용 재발급 토큰 행을 지워 소비한다.
+ */
+export async function reissueBootstrapGrant(h: DbHandle, input: { token?: unknown }, mfa: MfaRuntime | undefined, fixedToken: string | null): Promise<ReissueResult> {
+  if (!mfa || mfa.policy.state !== "ready") return { ok: false, status: 503, error: "mfa_policy_required" };
+  const target = await bootstrapAdminWithoutFactor(h);
+  if (!target) return { ok: false, status: 409, error: "mfa_already_enrolled" };
+  if (typeof input.token !== "string" || input.token.trim() === "") return { ok: false, status: 401, error: "invalid_token" };
+  const given = await sha256Hex(input.token.trim());
+  if (fixedToken) {
+    if (!sameText(given, await sha256Hex(fixedToken.trim()))) return { ok: false, status: 401, error: "invalid_token" };
+  } else {
+    const t = h.schema.appSettings;
+    if ((await deleteCount(h, t, and(eq(t.key, MFA_REISSUE_TOKEN_KEY), eq(t.value, JSON.stringify(given))))) !== 1) return { ok: false, status: 401, error: "invalid_token" };
+  }
+  const now = new Date();
+  const g = await grantInsert(h, mfa.key, mfa.policy.policy, { userId: target.id, purpose: "bootstrap", issuedBy: null, authVersion: target.authVersion, now });
+  const f = h.schema.mfaFactor;
+  try {
+    await runUnit(h, [
+      { build: (db) => grantRevokeOpen(h, db, { userId: target.id, now }) },
+      // 그사이 등록을 마쳤으면 내지 않는다: 회원 행이 그대로 bootstrap·버전 같음이고 active factor 가 없을 때만 한 행
+      { build: (db) => db.update(h.schema.user).set({ updatedAt: now }).where(and(eq(h.schema.user.id, target.id), eq(h.schema.user.authVersion, target.authVersion), eq(h.schema.user.isBootstrapAdmin, true), sql`not exists (select 1 from ${f} where ${f.activeSlot} = ${target.id})`)), one: (x) => x.user.id },
+      { build: g.build },
+      { build: (db) => auditStatement(h, { actorId: null, action: "mfa.grant_issue", target: target.id, detail: { purpose: "bootstrap", reissue: true }, ip: null, now }, db) },
+    ], { lockUserId: target.id });
+  } catch (e) {
+    if (e instanceof UnitAborted) return { ok: false, status: 409, error: "mfa_already_enrolled" };
+    throw e;
+  }
+  return { ok: true, mfaGrant: { grant: g.token, expiresAt: g.expiresAt.toISOString() } };
 }
