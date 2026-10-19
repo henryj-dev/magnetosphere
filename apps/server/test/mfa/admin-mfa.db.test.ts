@@ -16,7 +16,7 @@ describe.each(enabledDbs())("%s 관리자 MFA", (kind: DbKind) => {
     await t?.drop();
   });
 
-  it(`TC-A1.T2.f ${LABEL[kind]}: 같은 코드 동시 challenge 여섯 → 1건만 성공, 나머지 401·관리 API 403, 같은 IP 연속 실패 6번째 429`, () => tcA1T2f(rig));
+  it(`TC-A1.T2.f ${LABEL[kind]}: 같은 코드 동시 challenge 여섯 → 1건만 성공, 나머지 401·관리 API 403, 같은 IP 연속 실패 6번째 429·IP 를 바꾼 실패 21번째 429`, () => tcA1T2f(rig));
   it(`TC-A1.T3.e ${LABEL[kind]}: 같은 코드 동시 등록 확인 둘 → 1건만 성공, active factor 1·부분 소비 없음`, () => tcA1T3e(rig));
   it(`TC-A1.T4.e ${LABEL[kind]}: 같은 proof 동시 역할 변경 둘 → 1건만 성공, 다른 목적 proof 403`, () => tcA1T4e(rig));
 });

@@ -85,7 +85,7 @@ export async function runMembersRegress(ctx) {
   const a2d = { email: testEmail("radm"), password: testPassword() };
   // 관리자 초대는 작업에 묶인 step-up proof 가 필요하다 (A1)
   const mfaCall = (m, q, c, b, h) => http.api(m, q, c, b, h);
-  const adInv = await http.api("POST", "/api/admin/invites", A, { email: a2d.email, role: "admin" }, await proofHeader(mfaCall, A, "admin.invite", "admin-invite"));
+  const adInv = await http.api("POST", "/api/admin/invites", A, { email: a2d.email, role: "admin" }, await proofHeader(mfaCall, A, "admin.invite", a2d.email.trim().toLowerCase().normalize("NFC")));
   check(adInv.status === 201, `TC-M5.T2.b 이메일 지정 admin 초대 201 (${st(adInv)})`);
   const adAcc = await http.accept(inviteToken(adInv.json?.link), a2d.email, a2d.password);
   check(adAcc.status === 201, `TC-M5.T2.b admin 초대 수락 201 (${st(adAcc)})`);
@@ -98,7 +98,8 @@ export async function runMembersRegress(ctx) {
   // 관리자 확인을 통과하는지 먼저 본다. 틀린 토큰이라 저장하지 않고 400 이다
   const pre = await http.api("PUT", "/api/setup/omniroute", al.cookie, { token: "e2e-not-a-token" });
   check(pre.status === 400, `TC-M5.T2.b 정지 전 두 번째 관리자 PUT /api/setup/omniroute 가 관리자 확인 통과 (${st(pre)})`);
-  const asus = await http.api("POST", `/api/admin/users/${aid}/suspend`, A);
+  // 다른 관리자 정지는 대상에 묶은 step-up proof 가 필요하다 (A1 보안 리뷰 M1)
+  const asus = await http.api("POST", `/api/admin/users/${aid}/suspend`, A, undefined, await proofHeader(mfaCall, A, "admin.suspend", aid));
   check(asus.status === 200 && asus.json?.user?.status === "suspended", `TC-M5.T2.b 두 번째 관리자 suspend 200 (${st(asus)})`);
   const gs = await http.api("GET", "/api/auth/get-session", al.cookie);
   check(gs.status === 200 && gs.json === null, `TC-M5.T2.b 정지 관리자 옛 쿠키 get-session null (${gs.status} ${gs.json === null ? "null" : "세션 있음"})`);

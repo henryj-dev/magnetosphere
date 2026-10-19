@@ -329,7 +329,7 @@ describe("TC-A1 관리자 MFA 서버 흐름 (Node·SQLite)", () => {
     const call = httpCall(r);
     const invite = async (body: Record<string, unknown>, headers?: Record<string, string>) => api(r, "POST", "/api/admin/invites", { cookie: admin.cookie, body, headers });
     expect(await invite({ email: "new-admin@example.com", role: "admin" })).toMatchObject({ status: 403, json: { error: "mfa_proof_required" } });
-    const created = await invite({ email: "new-admin@example.com", role: "admin" }, { "x-mfa-proof": await stepUpHttp(call, admin.cookie, "admin.invite", "admin-invite") });
+    const created = await invite({ email: "new-admin@example.com", role: "admin" }, { "x-mfa-proof": await stepUpHttp(call, admin.cookie, "admin.invite", "new-admin@example.com") });
     expect(created.status).toBe(201);
     const token = String(created.json.link).split("#")[1];
     const accepted = await fetch(`${r.base}/api/invites/accept`, { method: "POST", headers: { "content-type": "application/json", origin: "http://localhost:3000" }, body: JSON.stringify({ token, email: "new-admin@example.com", name: "새 관리자", password: MEMBER_PASSWORD }) });
@@ -349,5 +349,54 @@ describe("TC-A1 관리자 MFA 서버 흐름 (Node·SQLite)", () => {
     const memberToken = String(memberInvite.json.link).split("#")[1];
     const memberAccepted = await fetch(`${r.base}/api/invites/accept`, { method: "POST", headers: { "content-type": "application/json", origin: "http://localhost:3000" }, body: JSON.stringify({ token: memberToken, email: "new-member@example.com", name: "회원", password: MEMBER_PASSWORD }) });
     expect(await memberAccepted.json()).toEqual({ emailVerified: true });
+  });
+
+  it("TC-A1.T4.f 다른 관리자의 정지·삭제는 대상에 묶은 proof 가 필요하고, 관리자 초대 proof 는 초대 이메일에 묶인다 (보안 리뷰 M1·L3)", async () => {
+    const r = await boot();
+    const admin = await installAdmin(r);
+    const h = await dbOf(r);
+    const call = httpCall(r);
+    const promote = async (email: string) => {
+      const id = await addMember(h, email);
+      const p = await api(r, "PATCH", `/api/admin/users/${id}/role`, { cookie: admin.cookie, body: { role: "admin" }, headers: { "x-mfa-proof": await stepUpHttp(call, admin.cookie, "role.change", id) } });
+      await enrollHttp(call, await signInCookie(r, email, MEMBER_PASSWORD), p.json.mfaGrant.grant);
+      return id;
+    };
+    const b = await promote("f-b@example.com");
+    const c = await promote("f-c@example.com");
+    const proof = async (purpose: string, target: string) => ({ "x-mfa-proof": await stepUpHttp(call, admin.cookie, purpose, target) });
+    const suspend = (target: string, headers?: Record<string, string>) => api(r, "POST", `/api/admin/users/${target}/suspend`, { cookie: admin.cookie, body: {}, headers });
+    const remove = (target: string, headers?: Record<string, string>) => api(r, "DELETE", `/api/admin/users/${target}`, { cookie: admin.cookie, headers });
+    const statusOf = async (id: string) => String((await sql(r.t, `SELECT status FROM user WHERE id = '${id}'`))[0].status);
+
+    // 관리자 대상: proof 없음 403 required, 다른 대상·다른 목적 403 invalid. 거부는 아무것도 쓰지 않고 proof 도 남는다
+    expect(await suspend(b)).toMatchObject({ status: 403, json: { error: "mfa_proof_required" } });
+    expect(await remove(b)).toMatchObject({ status: 403, json: { error: "mfa_proof_required" } });
+    const forB = await proof("admin.suspend", b);
+    expect(await suspend(c, forB)).toMatchObject({ status: 403, json: { error: "mfa_proof_invalid" } });
+    expect(await suspend(b, await proof("admin.delete", b))).toMatchObject({ status: 403, json: { error: "mfa_proof_invalid" } });
+    expect(await remove(b, await proof("admin.suspend", b))).toMatchObject({ status: 403, json: { error: "mfa_proof_invalid" } });
+    expect([await statusOf(b), await statusOf(c)]).toEqual(["active", "active"]);
+    expect(await OPS.audits(h.db, h.schema, "member.suspend")).toBe(0);
+    // 맞는 proof 는 한 번만 쓰인다
+    expect((await suspend(b, forB)).status).toBe(200);
+    expect(await statusOf(b)).toBe("suspended");
+    expect((await api(r, "POST", `/api/admin/users/${b}/unsuspend`, { cookie: admin.cookie, body: {} })).status).toBe(200);
+    expect(await suspend(b, forB)).toMatchObject({ status: 403, json: { error: "mfa_proof_invalid" } });
+    expect((await remove(c, await proof("admin.delete", c))).status).toBe(200);
+    expect(await statusOf(c)).toBe("deleted");
+    // 회원 대상은 proof 없이 된다 (proof 는 관리자 대상만)
+    const m = await addMember(h, "f-m@example.com");
+    expect((await suspend(m)).status).toBe(200);
+    expect((await remove(m)).status).toBe(200);
+
+    // 관리자 초대 proof 는 정규화한 초대 이메일에 묶인다: 다른 이메일 403 invalid, 대소문자·공백 차이는 같은 대상
+    await OPS.setSetting(h.db, h.schema, "signup_mode", "invite_only");
+    const invite = (email: string, headers?: Record<string, string>) => api(r, "POST", "/api/admin/invites", { cookie: admin.cookie, body: { email, role: "admin" }, headers });
+    const forOne = await proof("admin.invite", "one@example.com");
+    expect(await invite("two@example.com", forOne)).toMatchObject({ status: 403, json: { error: "mfa_proof_invalid" } });
+    expect(await sql(r.t, "SELECT id FROM invites WHERE role = 'admin'")).toHaveLength(0);
+    expect((await invite("  One@Example.com ", forOne)).status).toBe(201);
+    expect(await invite("one@example.com", forOne)).toMatchObject({ status: 403, json: { error: "mfa_proof_invalid" } });
   });
 });

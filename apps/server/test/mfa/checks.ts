@@ -36,6 +36,14 @@ export async function tcA1T2f(rig: HttpRig) {
   for (let i = 0; i < 6; i++) wrong.push(await rig.call("POST", "/api/auth/admin-mfa/challenge", { cookie: partial, body: { code: "000000" }, ip }));
   expect(wrong.map((r) => r.status)).toEqual([401, 401, 401, 401, 401, 429]);
   expect(wrong[5].json?.code).toBe("MFA_TOO_MANY_ATTEMPTS");
+
+  // 같은 계정·IP 를 바꾼 실패: IP 마다 제한(5) 안이어도 계정 칸 제한(20)을 넘으면 새 IP 에서도 429 (보안 리뷰 L2)
+  const spread = await login(rig, "admin", "active", { mfa: false });
+  const spreadWrong = [];
+  for (let i = 0; i < 20; i++) spreadWrong.push((await rig.call("POST", "/api/auth/admin-mfa/challenge", { cookie: spread.cookie, body: { code: "000000" }, ip: `198.18.251.${Math.floor(i / 4) + 1}` })).status);
+  expect(spreadWrong).toEqual(Array(20).fill(401));
+  const fresh = await rig.call("POST", "/api/auth/admin-mfa/challenge", { cookie: spread.cookie, body: { code: await totpCode() }, ip: "198.18.251.99" });
+  expect({ status: fresh.status, code: fresh.json?.code }).toEqual({ status: 429, code: "MFA_TOO_MANY_ATTEMPTS" });
 }
 
 /** TC-A1.T4.e 같은 proof 로 역할 변경 둘을 동시에 → 정확히 1건 200, 나머지 403 mfa_proof_invalid. 다른 목적의 proof 는 403 */
@@ -95,7 +103,7 @@ export async function tcA1T6a(rig: HttpRig) {
   await rig.op("setSetting", "signup_mode", "invite_only");
   await rig.op("setSetting", "public_base_url", "https://llm.example.test");
   const invited = mail("a1n-invited");
-  const inv = await rig.call("POST", "/api/admin/invites", { cookie: first, body: { email: invited, role: "admin" }, headers: await proofHeader(rig, first, "admin.invite", "admin-invite") });
+  const inv = await rig.call("POST", "/api/admin/invites", { cookie: first, body: { email: invited, role: "admin" }, headers: await proofHeader(rig, first, "admin.invite", invited) });
   expect(inv.status).toBe(201);
   const accepted = await rig.call("POST", "/api/invites/accept", { body: { token: String(inv.json.link).split("#")[1], email: invited, name: "초대 관리자", password: PASSWORD } });
   expect(accepted.status).toBe(201);

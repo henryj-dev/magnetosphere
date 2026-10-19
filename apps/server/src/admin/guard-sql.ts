@@ -43,7 +43,7 @@ export const MEMBER_MUTEX = { name: "member_management_mutex", holder: "member-m
 export const MEMBER_TX = { isolationLevel: "read committed" } as const;
 export const MEMBER_PG_LOCK_TIMEOUT = "5s";
 
-export type MemberConflict = "unauthorized" | "forbidden" | "not_found" | "invalid_transition" | "invalid_role" | "bootstrap_admin" | "self" | "last_admin" | "stale_member" | "version_exhausted" | "mfa_proof_invalid";
+export type MemberConflict = "unauthorized" | "forbidden" | "not_found" | "invalid_transition" | "invalid_role" | "bootstrap_admin" | "self" | "last_admin" | "stale_member" | "version_exhausted" | "mfa_proof_invalid" | "mfa_proof_required";
 
 export class MemberConflictError extends Error {
   readonly code: MemberConflict;
@@ -92,7 +92,11 @@ export interface MemberMutation {
    * 관리자 MFA (A1). proof: 민감 작업(역할 변경·관리자 탈퇴)의 step-up proof 소비 단계. 이 원자 단위의 첫 쓰기이고 0행이면 전체를 되돌린다 (mfa_proof_invalid).
    * promote: 승격(role → admin) 때 대상의 새 인증 버전으로 promotion grant INSERT 를 만든다. 같은 단위에 들어간다
    */
-  mfa?: { proof?: UnitStep; promote?: (nextAuthVersion: number) => Promise<{ build(db: any): any }> };
+  /**
+   * adminTarget: 다른 관리자의 정지·삭제 (보안 리뷰 M1). 대상의 잠근 역할이 admin 일 때만 proof 를 요구하고 소비한다.
+   * proof 가 null 이면 403 mfa_proof_required. 대상이 관리자가 아니면 proof 는 쓰지 않는다. CAS 가 역할을 조건으로 잡으므로 판정과 쓰기 사이에 역할이 바뀌면 stale_member 다
+   */
+  mfa?: { proof?: UnitStep; promote?: (nextAuthVersion: number) => Promise<{ build(db: any): any }>; adminTarget?: { proof: UnitStep | null } };
 }
 
 export interface MemberMutationResult {
@@ -283,6 +287,16 @@ function demotionStatements(h: DbHandle, db: any, userId: string, now: Date): an
   return [revokeAllFactorsUpdate(h, db, { userId, reason: "demoted", now }), dropRevokedCodesDelete(h, db, userId), grantRevokeOpen(h, db, { userId, now })];
 }
 
+/** 이 작업에서 소비할 step-up proof. 다른 관리자 대상이면 proof 가 있어야 한다 */
+function proofStepOf(before: MemberSnapshot, input: MemberMutation): UnitStep | undefined {
+  const target = input.mfa?.adminTarget;
+  if (target && before.role === "admin") {
+    if (!target.proof) throw new MemberConflictError("mfa_proof_required");
+    return target.proof;
+  }
+  return input.mfa?.proof;
+}
+
 const demotes = (before: MemberSnapshot, input: MemberMutation) => input.action === "role" && before.role === "admin" && input.role !== "admin";
 const promotes = (before: MemberSnapshot, input: MemberMutation) => input.action === "role" && before.role !== "admin" && input.role === "admin";
 
@@ -359,7 +373,8 @@ async function mutateLocked(h: DbHandle, tx: any, input: MemberMutation): Promis
   const targetCounts = await targetHasFactor(h, tx, before.id);
   if (removesActiveAdmin(before, input.action, input.role, judged.to) && targetCounts && activeAdmins <= 1) throw new MemberConflictError("last_admin");
   // step-up proof 는 이 트랜잭션의 첫 쓰기다. 0행이면 아무것도 쓰지 않고 되돌린다
-  if (input.mfa?.proof && !(await consumeProofIn(h, tx, input.mfa.proof))) throw new MemberConflictError("mfa_proof_invalid");
+  const proofStep = proofStepOf(before, input);
+  if (proofStep && !(await consumeProofIn(h, tx, proofStep))) throw new MemberConflictError("mfa_proof_invalid");
   const plan = mutationStatements(h, tx, input, before, actor, activeAdmins, judged.to, targetCounts);
   if ((await changed(h, plan.cas, h.schema.user.id)) !== 1) return rejectIfStale(h, input, before, plan.removesLast ? "last_admin" : "stale_member", tx);
   const { auditStatement } = await import("../audit/index.ts");
@@ -391,10 +406,11 @@ export async function mutateMember(h: DbHandle, input: MemberMutation): Promise<
     const activeAdmins = await countActiveAdmins(h, h.db);
     const targetCounts = await targetHasFactor(h, h.db, before.id);
     if (removesActiveAdmin(before, input.action, input.role, judged.to) && targetCounts && activeAdmins <= 1) throw new MemberConflictError("last_admin");
+    const proofStep = proofStepOf(before, input);
     const plan = mutationStatements(h, h.db, input, before, actor, activeAdmins, judged.to, targetCounts);
     // proof 소비 → 즉시 guard(0행이면 verification.value NOT NULL 로 batch 전체 롤백) → CAS → 감사 guard 순서
-    const proofGuard = input.mfa?.proof ? d1ProofGuard(h) : null;
-    const proofStatements = input.mfa?.proof && proofGuard ? [input.mfa.proof.build(h.db), proofGuard.guard] : [];
+    const proofGuard = proofStep ? d1ProofGuard(h) : null;
+    const proofStatements = proofStep && proofGuard ? [proofStep.build(h.db), proofGuard.guard] : [];
     const statements = [...proofStatements, plan.cas, guardedAuditStatement(h, input.audit)];
     if (demotes(before, input)) statements.push(...demotionStatements(h, h.db, before.id, input.now));
     if (promotes(before, input) && input.mfa?.promote && plan.nextVersion !== undefined) statements.push((await input.mfa.promote(plan.nextVersion)).build(h.db));

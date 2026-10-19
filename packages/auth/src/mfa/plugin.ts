@@ -14,7 +14,8 @@
 // 공통: HTTP 요청은 정확한 Origin, POST 본문은 application/json 만, 응답은 Cache-Control: no-store (createAuth 가 오류 응답에도 단다).
 // 오류: 잘못된 코드·재사용·factor 없음은 모두 401 INVALID_MFA_CODE. 403 MFA_REQUIRED·MFA_ENROLLMENT_REQUIRED·MFA_GRANT_REQUIRED·MFA_PROOF_REQUIRED,
 //       409 MFA_ENROLLMENT_EXPIRED·MFA_STALE, 429 MFA_TOO_MANY_ATTEMPTS(Retry-After), 503 MFA_POLICY_UNAVAILABLE·MFA_UNAVAILABLE.
-// 실패 지연(계정+IP, DB rate_limit 칸): failureLimit 번까지는 바로, 그 뒤는 첫 지연·2배·…·상한. 마지막 시도 failureWindowS 뒤 비운다. 성공하면 비운다.
+// 실패 지연(DB rate_limit 칸 둘): 계정+IP 칸은 failureLimit, 계정 단독 칸은 accountFailureLimit 번까지 바로, 그 뒤는 첫 지연·2배·…·상한.
+//   둘 중 하나라도 지연 중이면 429. 마지막 시도 failureWindowS 뒤 비운다. 성공하면 둘 다 비운다 (계정 칸은 IP 를 바꾼 대입을 막는다, 보안 리뷰 L2).
 // 부분 세션 제한(gate, hooks.before): 관리자 역할 세션이 MFA 미충족이면 /get-session·/sign-out·/admin-mfa/* 만 받는다. 그 밖은 403 MFA_REQUIRED.
 //   부분 세션은 만든 뒤 challengeTtlS 가 지나면 지운다 (get-session 은 null, 그 밖은 세션 없는 요청으로 이어 간다).
 // 비밀값(seed·코드·grant·proof)은 응답의 해당 필드에만 있고 로그·오류·감사에는 넣지 않는다.
@@ -53,7 +54,7 @@ type Context = any;
 type LiveContext = AuthContextRow & { session: NonNullable<AuthContextRow["session"]> };
 
 /** step-up proof 목적. 민감 작업이 이 이름으로 소비한다 */
-export const MFA_PROOF_PURPOSES = ["role.change", "admin.invite", "mfa.reset", "admin.delete", "mfa.reenroll", "mfa.recovery_regenerate"] as const;
+export const MFA_PROOF_PURPOSES = ["role.change", "admin.invite", "mfa.reset", "admin.delete", "admin.suspend", "mfa.reenroll", "mfa.recovery_regenerate"] as const;
 export type MfaProofPurpose = (typeof MFA_PROOF_PURPOSES)[number];
 /** 민감 작업 요청이 proof 토큰을 싣는 머리글 */
 export const MFA_PROOF_HEADER = "x-mfa-proof";
@@ -83,9 +84,9 @@ export function normalizeRecoveryCode(code: string): string {
 }
 
 /** 실패 지연(ms). count 는 이번 시도 전까지 성공 없이 이어진 시도 수 */
-export function attemptDelayMs(policy: Readonly<MfaPolicy>, count: number): number {
-  if (count < policy.failureLimit) return 0;
-  const exp = count - policy.failureLimit;
+export function attemptDelayMs(policy: Readonly<MfaPolicy>, count: number, limit: number = policy.failureLimit): number {
+  if (count < limit) return 0;
+  const exp = count - limit;
   const delayS = exp >= 40 ? policy.failureDelayMaxS : Math.min(policy.failureDelayBaseS * 2 ** exp, policy.failureDelayMaxS);
   return delayS * 1000;
 }
@@ -127,15 +128,20 @@ export function adminMfa(cfg: AdminMfaConfig) {
     return c as LiveContext;
   };
 
-  // ---------- 실패 지연 (계정+IP) ----------
+  // ---------- 실패 지연 (계정+IP, 계정 단독) ----------
 
-  const attemptKey = (ctx: Context, userId: string) => {
+  /** 실패 칸 둘. ip 칸 이름의 마지막 조각은 IP 버킷, account 칸은 "*" (IP 버킷과 겹치지 않는다) */
+  interface AttemptKeys {
+    ip: string;
+    account: string;
+  }
+  const attemptKey = (ctx: Context, userId: string): AttemptKeys => {
     const ip = ipOf(ctx);
-    return `${ATTEMPT_KEY}|${userId}|${mfa?.ipBucket ? mfa.ipBucket(ip) : (ip ?? "unknown")}`;
+    return { ip: `${ATTEMPT_KEY}|${userId}|${mfa?.ipBucket ? mfa.ipBucket(ip) : (ip ?? "unknown")}`, account: `${ATTEMPT_KEY}|${userId}|*` };
   };
 
-  /** 시도 한 번을 차지한다. 지연 중이면 남은 초. 조건부 문장 하나라 동시 시도가 함께 지연을 넘지 못한다 */
-  const claimAttempt = async (policy: Readonly<MfaPolicy>, key: string): Promise<number | null> => {
+  /** 칸 하나에서 시도 한 번을 차지한다. 지연 중이면 남은 초. 조건부 문장 하나라 동시 시도가 함께 지연을 넘지 못한다 */
+  const claimAttempt = async (policy: Readonly<MfaPolicy>, key: string, limit: number): Promise<number | null> => {
     const t = s.rateLimit;
     const now = Date.now();
     await h.db.delete(t).where(and(eq(t.key, key), lt(t.lastRequest, now - policy.failureWindowS * 1000)));
@@ -144,21 +150,25 @@ export function adminMfa(cfg: AdminMfaConfig) {
     if (inserted) return null;
     // count 가 제한 아래이거나, 마지막 시도 뒤 그 count 의 지연이 지났을 때만 한 칸 올린다.
     // 경계 시각은 JS 에서 계산해 칼럼 형식으로 비교한다 (SQL 안의 매개변수 산술은 Postgres 가 형식을 정하지 못한다)
-    const allowed: any[] = [lt(t.count, policy.failureLimit)];
-    let c = policy.failureLimit;
-    for (; attemptDelayMs(policy, c) < policy.failureDelayMaxS * 1000; c++) allowed.push(and(eq(t.count, c), lte(t.lastRequest, now - attemptDelayMs(policy, c))));
+    const allowed: any[] = [lt(t.count, limit)];
+    let c = limit;
+    for (; attemptDelayMs(policy, c, limit) < policy.failureDelayMaxS * 1000; c++) allowed.push(and(eq(t.count, c), lte(t.lastRequest, now - attemptDelayMs(policy, c, limit))));
     allowed.push(and(gte(t.count, c), lte(t.lastRequest, now - policy.failureDelayMaxS * 1000)));
     const cond = and(eq(t.key, key), or(...allowed));
     if ((await changedRows(h, h.db.update(t).set({ count: sql`${t.count} + 1`, lastRequest: now }).where(cond), t.id)) === 1) return null;
     const [cur] = await h.db.select({ count: t.count, lastRequest: t.lastRequest }).from(t).where(eq(t.key, key)).limit(1);
     if (!cur) return 1;
-    return Math.max(1, Math.ceil((Number(cur.lastRequest) + attemptDelayMs(policy, Number(cur.count)) - now) / 1000));
+    return Math.max(1, Math.ceil((Number(cur.lastRequest) + attemptDelayMs(policy, Number(cur.count), limit) - now) / 1000));
   };
-  const clearAttempts = async (key: string) => {
-    await h.db.delete(s.rateLimit).where(eq(s.rateLimit.key, key));
+  const clearAttempts = async (keys: AttemptKeys) => {
+    await h.db.delete(s.rateLimit).where(or(eq(s.rateLimit.key, keys.ip), eq(s.rateLimit.key, keys.account)));
   };
-  const gateAttempt = async (ctx: Context, policy: Readonly<MfaPolicy>, key: string) => {
-    const wait = await claimAttempt(policy, key);
+  /**
+   * IP 칸을 먼저 차지한다. IP 칸이 지연 중이면 계정 칸은 세지 않는다 (한 IP 의 지연된 시도로 관리자 계정 칸을 채우지 못하게).
+   * 둘 다 통과해야 코드를 확인한다
+   */
+  const gateAttempt = async (ctx: Context, policy: Readonly<MfaPolicy>, keys: AttemptKeys) => {
+    const wait = (await claimAttempt(policy, keys.ip, policy.failureLimit)) ?? (await claimAttempt(policy, keys.account, policy.accountFailureLimit));
     if (wait !== null) throw new APIError("TOO_MANY_REQUESTS", { code: "MFA_TOO_MANY_ATTEMPTS", message: "잠시 뒤 다시 시도해 주세요" }, { "Retry-After": String(wait), "Cache-Control": "no-store" });
   };
 

@@ -134,9 +134,9 @@ OmniRoute 는 어느 조합이든 상시 서버 한 대(위 Compose)에서 돈�
 
 관리자는 비밀번호만으로 관리 기능을 쓸 수 없다. 로그인은 부분 세션이고, TOTP(또는 복구 코드)를 마쳐야 관리 API 가 열린다. 신뢰 기기 면제는 없다.
 
-- **정책은 필수 배포 설정이다.** 코드에 기본값이 없다. `MFA_*` 열여섯 값(`.env.example`, `apps/server/wrangler.toml` 의 `[env.*.vars]`)이
+- **정책은 필수 배포 설정이다.** 코드에 기본값이 없다. `MFA_*` 열일곱 값(`.env.example`, `apps/server/wrangler.toml` 의 `[env.*.vars]`)이
   하나라도 없거나 범위 밖이면 관리자 API 는 503 `mfa_policy_unavailable`, 최초 설치는 설치 토큰을 쓰기 전에 503 `mfa_policy_required` 다.
-  공통안 1차 값: 30초·6자리·SHA-1·앞뒤 1 step, 최근성 10분, 관리자 세션 절대 12시간, 실패 5회 뒤 1초부터 두 배·상한 15분·마지막 실패 15분 뒤 초기화,
+  공통안 1차 값: 30초·6자리·SHA-1·앞뒤 1 step, 최근성 10분, 관리자 세션 절대 12시간, 실패 계정+IP 5회·계정 20회 뒤 1초부터 두 배·상한 15분·마지막 실패 15분 뒤 초기화,
   등록 자격 24시간, 복구 코드 10개. 값을 바꾸면 정책 해시가 바뀌어 모든 관리자가 MFA 를 다시 마친다.
 - **최초 설치:** `POST /api/setup` 의 201 응답 `mfaGrant.grant` 가 첫 관리자의 등록 자격이다(한 번만 보인다). 로그인 → `/api/auth/admin-mfa/enroll/start` → `enroll/confirm`.
   자격을 잃으면 첫 관리자에게 등록된 MFA 가 없는 동안만 `POST /api/setup/mfa-grant { token }` 으로 다시 받는다.

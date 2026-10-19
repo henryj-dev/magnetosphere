@@ -23,6 +23,7 @@ const TEST_POLICY_ENV: Record<string, string> = {
   MFA_GRANT_TTL_S: "86400",
   MFA_ADMIN_SESSION_ABSOLUTE_TTL_S: "3600",
   MFA_FAILURE_LIMIT: "5",
+  MFA_ACCOUNT_FAILURE_LIMIT: "20",
   MFA_FAILURE_WINDOW_S: "900",
   MFA_FAILURE_DELAY_BASE_S: "1",
   MFA_FAILURE_DELAY_MAX_S: "900",
@@ -166,6 +167,9 @@ describe("MFA 정책", () => {
       ["MFA_SEED_BYTES", "129", "out_of_range"],
       ["MFA_GRANT_TTL_S", "0", "out_of_range"],
       ["MFA_FAILURE_LIMIT", "0", "out_of_range"],
+      ["MFA_ACCOUNT_FAILURE_LIMIT", "0", "out_of_range"],
+      // 계정 칸 제한이 계정+IP 칸보다 낮으면 계정+IP 칸이 뜻이 없다 (보안 리뷰 L2)
+      ["MFA_ACCOUNT_FAILURE_LIMIT", "4", "inconsistent"],
       ["MFA_TOTP_PERIOD_S", "30.5", "not_integer"],
       ["MFA_TOTP_PERIOD_S", "1e3", "not_integer"],
       ["MFA_TOTP_PERIOD_S", "0x1e", "not_integer"],
@@ -194,11 +198,13 @@ describe("MFA 정책", () => {
     }
     // 지연 상한이 첫 지연보다 작으면 두 배씩 늘리는 규칙이 성립하지 않는다. 상한 설정 이름으로 알린다
     expect(await loadMfaPolicy({ ...TEST_POLICY_ENV, MFA_FAILURE_DELAY_BASE_S: "901" })).toEqual({ state: "unavailable", reason: "inconsistent", field: "MFA_FAILURE_DELAY_MAX_S" });
-    // (1+1+1) × 실패 제한 ≥ 10^6 이면 실패 예산이 코드 공간을 덮는다. 시간창 관계라 시간창 설정 이름으로 알린다
-    expect(await loadMfaPolicy({ ...TEST_POLICY_ENV, MFA_FAILURE_LIMIT: "333334" })).toEqual({ state: "unavailable", reason: "inconsistent", field: "MFA_TOTP_PAST_WINDOW" });
-    expect(await loadMfaPolicy({ ...TEST_POLICY_ENV, MFA_TOTP_DIGITS: "8", MFA_FAILURE_LIMIT: "33333334" })).toEqual({ state: "unavailable", reason: "inconsistent", field: "MFA_TOTP_PAST_WINDOW" });
+    // (1+1+1) × 계정 실패 제한 ≥ 10^6 이면 IP 를 바꿔도 실패 예산이 코드 공간을 덮는다. 시간창 관계라 시간창 설정 이름으로 알린다
+    expect(await loadMfaPolicy({ ...TEST_POLICY_ENV, MFA_ACCOUNT_FAILURE_LIMIT: "333334" })).toEqual({ state: "unavailable", reason: "inconsistent", field: "MFA_TOTP_PAST_WINDOW" });
+    expect(await loadMfaPolicy({ ...TEST_POLICY_ENV, MFA_TOTP_DIGITS: "8", MFA_ACCOUNT_FAILURE_LIMIT: "33333334" })).toEqual({ state: "unavailable", reason: "inconsistent", field: "MFA_TOTP_PAST_WINDOW" });
+    // 계정+IP 칸 제한이 계정 칸보다 크면 계정 칸 이름으로 알린다
+    expect(await loadMfaPolicy({ ...TEST_POLICY_ENV, MFA_FAILURE_LIMIT: "21" })).toEqual({ state: "unavailable", reason: "inconsistent", field: "MFA_ACCOUNT_FAILURE_LIMIT" });
     // 경계 안쪽 값은 받는다
-    for (const [name, value] of [["MFA_TOTP_DIGITS", "8"], ["MFA_TOTP_PAST_WINDOW", "0"], ["MFA_SEED_BYTES", "16"], ["MFA_SEED_BYTES", "128"], ["MFA_RECENCY_TTL_S", "3600"], ["MFA_TOTP_ALGORITHM", "sha-512"], ["MFA_TOTP_ALGORITHM", "SHA-256"], ["MFA_FAILURE_LIMIT", "333333"], ["MFA_TOTP_PAST_WINDOW", "62"]]) {
+    for (const [name, value] of [["MFA_TOTP_DIGITS", "8"], ["MFA_TOTP_PAST_WINDOW", "0"], ["MFA_SEED_BYTES", "16"], ["MFA_SEED_BYTES", "128"], ["MFA_RECENCY_TTL_S", "3600"], ["MFA_TOTP_ALGORITHM", "sha-512"], ["MFA_TOTP_ALGORITHM", "SHA-256"], ["MFA_ACCOUNT_FAILURE_LIMIT", "333333"], ["MFA_FAILURE_LIMIT", "20"], ["MFA_TOTP_PAST_WINDOW", "62"]]) {
       expect((await loadMfaPolicy({ ...TEST_POLICY_ENV, [name]: value })).state, `${name}=${value}`).toBe("ready");
     }
   });
@@ -214,7 +220,7 @@ describe("MFA 정책", () => {
     expect(same.state === "ready" && same.policy).toEqual(base.policy);
     const expectedPolicy: MfaPolicy = {
       totpPeriodS: 30, totpDigits: 6, totpAlgorithm: "SHA-1", totpPastWindow: 1, totpFutureWindow: 1, seedBytes: 20,
-      recencyTtlS: 300, challengeTtlS: 600, pendingTtlS: 900, grantTtlS: 86400, adminSessionAbsoluteTtlS: 3600, failureLimit: 5, failureWindowS: 900,
+      recencyTtlS: 300, challengeTtlS: 600, pendingTtlS: 900, grantTtlS: 86400, adminSessionAbsoluteTtlS: 3600, failureLimit: 5, accountFailureLimit: 20, failureWindowS: 900,
       failureDelayBaseS: 1, failureDelayMaxS: 900, recoveryCodeCount: 10,
     };
     expect(base.policy).toEqual(expectedPolicy);
@@ -223,7 +229,7 @@ describe("MFA 정책", () => {
     const changes: Record<string, string> = {
       MFA_TOTP_PERIOD_S: "60", MFA_TOTP_DIGITS: "8", MFA_TOTP_ALGORITHM: "SHA-256", MFA_TOTP_PAST_WINDOW: "0", MFA_TOTP_FUTURE_WINDOW: "0",
       MFA_SEED_BYTES: "32", MFA_RECENCY_TTL_S: "301", MFA_CHALLENGE_TTL_S: "601", MFA_PENDING_TTL_S: "901", MFA_GRANT_TTL_S: "86401",
-      MFA_ADMIN_SESSION_ABSOLUTE_TTL_S: "3601", MFA_FAILURE_LIMIT: "6", MFA_FAILURE_WINDOW_S: "901",
+      MFA_ADMIN_SESSION_ABSOLUTE_TTL_S: "3601", MFA_FAILURE_LIMIT: "6", MFA_ACCOUNT_FAILURE_LIMIT: "21", MFA_FAILURE_WINDOW_S: "901",
       MFA_FAILURE_DELAY_BASE_S: "2", MFA_FAILURE_DELAY_MAX_S: "901", MFA_RECOVERY_CODE_COUNT: "11",
     };
     expect(Object.keys(changes).sort()).toEqual(Object.values(MFA_POLICY_ENV).sort());

@@ -375,6 +375,15 @@ TC-A1.T7.b  check-required-checks → 0 (G-A1.24)
 | G-A1.22 | 타입 검사 | `pnpm -r typecheck` | 종료코드 0 |
 | G-A1.23 · 24 | CI 단계 잡 · ruleset | grep · `check-required-checks.mjs` | == 1 · 0 |
 | G-A1.25 | 스크립트 테스트 | `node --test --test-reporter=tap "scripts/*.test.mjs"` | 종료코드 0 |
+| G-A1.26 | TC-A1.T4.f 보안 리뷰 M1·L3 (Node SQLite) | `pnpm -C apps/server test -t "TC-A1\.T4\.f "` | 통과 = 1 |
+
+**보안 리뷰 반영 (2026-10-19, CRITICAL·HIGH 0 · MEDIUM 1 · LOW 5, 사용자 결정: M1·L2·L3·L4 고침)**
+- M1 다른 관리자 정지·삭제: proof 목적 `admin.suspend` 추가, `admin.delete` 를 관리자 API 삭제에도 쓴다(대상 id). 대상이 관리자인지는 회원 관리 단위 안의 잠근 행으로 판정하고, 관리자 대상에 proof 가 없으면 403 `mfa_proof_required`. 회원 대상은 proof 를 쓰지 않는다 (G-A1.26).
+- L2 분산 IP 대입: 계정 단독 실패 칸(`MFA_ACCOUNT_FAILURE_LIMIT`, 1차 값 20, 계정+IP 제한 이상)을 더한다. IP 칸을 먼저 차지하고, 시간창×계정 제한 < 코드 공간 관계를 정책 검사에 둔다 (G-A1.1 T1.g, G-A1.8·9 T2.f).
+- L3 관리자 초대 proof 대상: `"admin-invite"` 고정값 → 정규화한 초대 이메일 (G-A1.26).
+- L4 D1 관리자 초대 수락 마무리: guard 0행이면 batch 예외 대신 0 (Node 와 같은 201·grant 없음). grant 없는 관리자는 운영자 CLI transition grant 로 복구한다.
+- L1 MFA 승격 때 세션 토큰 회전 없음: 위험 수용. 세션 재생성은 authVersion·credential 지문 결합과 충돌한다(설계 2절). 부분 세션은 challenge TTL 뒤 지운다.
+- L5 관리자 세션 유휴 30분·절대 12시간 강제: A2 범위.
 
 `node scripts/gate.mjs A1 --seal`
 

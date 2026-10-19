@@ -24,7 +24,7 @@
 //     아무것도 쓰지 않는다. 읽은 뒤 다른 요청이 사용·취소했어도 404 이고 감사 기록이 없다. 기본 키 한 행만 잠그므로 뮤텍스를 쓰지 않는다.
 //     취소와 감사 기록 invite.revoke 는 한 트랜잭션(D1 은 batch)이다.
 //   - 목록에는 토큰·해시를 넣지 않는다. invites 에 created_at 이 없어 만료 시각 늦은 순이다.
-//   - 관리자 초대(role admin)는 민감 작업이다 (A1): X-MFA-Proof(admin.invite, 대상 "admin-invite")를 초대 쓰기 단위의 첫 쓰기로 소비한다.
+//   - 관리자 초대(role admin)는 민감 작업이다 (A1): X-MFA-Proof(admin.invite, 대상 = 정규화한 초대 이메일: trim·소문자·NFC)를 초대 쓰기 단위의 첫 쓰기로 소비한다.
 //     없으면 403 mfa_proof_required, 맞지 않으면(재사용·다른 목적·만료) 403 mfa_proof_invalid 이고 아무것도 쓰지 않는다.
 import { and, desc, eq, getTableColumns, gt, isNull, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 import { Hono, type Context } from "hono";
@@ -134,8 +134,6 @@ function parseBody(raw: unknown): Parsed {
 }
 
 /** 세션 관리자 + 요청 수 제한. 통과하면 관리자, 아니면 응답 */
-/** 관리자 초대 proof 의 대상. 초대 id 는 만들기 전이라 정해 둔 이름에 묶는다 (목적·세션·factor·1회·최근성은 proof 가 묶는다) */
-export const ADMIN_INVITE_PROOF_TARGET = "admin-invite";
 
 class ProofInvalid extends Error {}
 
@@ -258,7 +256,8 @@ export function inviteAdminRoutes(services: () => Promise<Services>) {
     if (p.email === null && !(await mailConfigured(h))) return c.json({ error: "mail_required" }, 409);
     let claim: ProofClaim | null = null;
     if (p.role === "admin") {
-      const got = await proofClaim(c, s, admin, "admin.invite", ADMIN_INVITE_PROOF_TARGET);
+      // proof 대상은 정규화한 초대 이메일이다 (보안 리뷰 L3). 관리자 초대는 이메일 지정이 필수라 늘 있다
+      const got = await proofClaim(c, s, admin, "admin.invite", p.email!);
       if (got instanceof Response) return got;
       claim = got;
     }

@@ -149,11 +149,17 @@ export async function fakeProof(h: DbHandle, userId: string, purpose: string, ta
   return issueTestProof(h.db, h.schema, { secret: TEST_SECRET, sessionId: userId, userId, factorId: factor?.id ?? "none", purpose, target });
 }
 
-/** 민감 작업 요청이면 proof 의 목적·대상 (A1). 역할 변경·관리자 초대 */
+/** 민감 작업 요청이면 proof 의 목적·대상 (A1). 역할 변경·관리자 초대·정지·삭제 */
 function sensitive(method: string, path: string, body: unknown): { purpose: string; target: string } | null {
   const role = /^\/api\/admin\/users\/([^/]+)\/role$/.exec(path);
   if (method === "PATCH" && role) return { purpose: "role.change", target: decodeURIComponent(role[1]) };
-  if (method === "POST" && path === "/api/admin/invites" && (body as { role?: unknown } | undefined)?.role === "admin") return { purpose: "admin.invite", target: "admin-invite" };
+  const b = body as { role?: unknown; email?: unknown } | undefined;
+  if (method === "POST" && path === "/api/admin/invites" && b?.role === "admin") return { purpose: "admin.invite", target: String(b.email ?? "").trim().toLowerCase().normalize("NFC") };
+  // 정지·삭제는 대상이 관리자일 때만 서버가 proof 를 소비한다. 회원 대상이면 실은 proof 는 쓰이지 않는다 (보안 리뷰 M1)
+  const suspend = /^\/api\/admin\/users\/([^/]+)\/suspend$/.exec(path);
+  if (method === "POST" && suspend) return { purpose: "admin.suspend", target: decodeURIComponent(suspend[1]) };
+  const del = /^\/api\/admin\/users\/([^/]+)$/.exec(path);
+  if (method === "DELETE" && del) return { purpose: "admin.delete", target: decodeURIComponent(del[1]) };
   return null;
 }
 

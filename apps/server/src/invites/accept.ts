@@ -30,7 +30,7 @@ import { updatedRows } from "@magnetosphere/runtime/lease";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import type { Services } from "../app.ts";
 import { auditStatement, type AuditEntry } from "../audit/index.ts";
-import { d1ProofGuard } from "../mfa/proof.ts";
+import { d1ProofGuard, proofGuardFailed } from "../mfa/proof.ts";
 import { consume, ipBucket } from "../routes/guard.ts";
 import { readSettings } from "../settings/index.ts";
 import { withRequestMemo } from "../signup/request-memo.ts";
@@ -87,12 +87,19 @@ async function finish(h: DbHandle, id: string, mine: Date, userId: string, audit
   const mineCond = and(eq(t.id, id), eq(t.usedAt, mine), isNull(t.usedBy));
   if (h.kind === "d1") {
     // grant 는 used_by UPDATE 가 한 행일 때만 들어간다: 바로 뒤 guard 가 0행이면 batch 전체를 되돌린다
+    // guard 가 0행으로 batch 를 되돌리면 Node 와 같이 0 을 돌려준다 (아무것도 쓰지 않음, 보안 리뷰 L4). 그 밖의 오류는 그대로 던진다
     const guard = grant ? d1ProofGuard(h) : null;
-    const res = await h.db.batch([
-      auditEachStatement(h, h.db, audit, mineCond),
-      h.db.update(t).set({ usedBy: userId }).where(mineCond).returning({ id: t.id }),
-      ...(grant && guard ? [guard.guard, grant.build(h.db), auditStatement(h, grant.audit), guard.drop] : []),
-    ]);
+    let res: unknown[];
+    try {
+      res = await h.db.batch([
+        auditEachStatement(h, h.db, audit, mineCond),
+        h.db.update(t).set({ usedBy: userId }).where(mineCond).returning({ id: t.id }),
+        ...(grant && guard ? [guard.guard, grant.build(h.db), auditStatement(h, grant.audit), guard.drop] : []),
+      ]);
+    } catch (e) {
+      if (guard && proofGuardFailed(e)) return 0;
+      throw e;
+    }
     return (res[1] as unknown[]).length;
   }
   return h.db.transaction(async (tx: any) => {

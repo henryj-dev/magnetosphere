@@ -84,6 +84,7 @@ export function render({ db = "sqlite", url = "http://localhost" } = {}) {
     "MFA_GRANT_TTL_S=86400",
     "MFA_ADMIN_SESSION_ABSOLUTE_TTL_S=43200",
     "MFA_FAILURE_LIMIT=5",
+    "MFA_ACCOUNT_FAILURE_LIMIT=20",
     "MFA_FAILURE_WINDOW_S=900",
     "MFA_FAILURE_DELAY_BASE_S=1",
     "MFA_FAILURE_DELAY_MAX_S=900",

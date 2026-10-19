@@ -30,6 +30,8 @@ export interface MfaPolicy {
   adminSessionAbsoluteTtlS: number;
   /** 지수 지연을 걸기 전에 허용하는 연속 실패 수 (계정+IP 칸) */
   failureLimit: number;
+  /** 계정 단독 칸(IP 무관)에서 지수 지연 전에 허용하는 연속 실패 수. 계정+IP 제한 이상이어야 한다 (A1 보안 리뷰 L2) */
+  accountFailureLimit: number;
   /** 마지막 실패 뒤 이만큼(초) 지나면 실패 칸을 비운다 */
   failureWindowS: number;
   /** 실패 제한을 넘은 뒤 첫 지연(초). 실패가 하나 늘 때마다 두 배 */
@@ -54,6 +56,7 @@ export const MFA_POLICY_ENV = {
   grantTtlS: "MFA_GRANT_TTL_S",
   adminSessionAbsoluteTtlS: "MFA_ADMIN_SESSION_ABSOLUTE_TTL_S",
   failureLimit: "MFA_FAILURE_LIMIT",
+  accountFailureLimit: "MFA_ACCOUNT_FAILURE_LIMIT",
   failureWindowS: "MFA_FAILURE_WINDOW_S",
   failureDelayBaseS: "MFA_FAILURE_DELAY_BASE_S",
   failureDelayMaxS: "MFA_FAILURE_DELAY_MAX_S",
@@ -85,6 +88,8 @@ export type MfaPolicyState =
 //                                                      전체를 덮지 못해야 한다. 덮으면 추측이 확실히 맞는다 (RFC 4226 §7.3·부록 A 의 Sec = s·v/10^Digit)
 //   past + future + 1 ≤ TOTP_WINDOW_STEPS_LIMIT        공통 정책값이 아니라 구현 안전 한계다 (totp.ts, 요청당 HMAC 계산량 상한)
 //   지연 상한 ≥ 첫 지연                                 상한이 첫 지연보다 작으면 두 배씩 늘리는 규칙이 성립하지 않는다
+//   계정 제한 ≥ 계정+IP 제한                           계정 칸이 더 낮으면 계정+IP 칸은 뜻이 없다
+//   (past + future + 1) × 계정 제한 < 10^digits       IP 를 바꿔도 계정 칸이 같은 예산을 막는다 (위 관계와 같은 근거)
 //   복구 코드 수 1~50                                  구현 안전 한계 (한 응답·한 batch 의 행 수)
 // 모든 정수는 JS 안전 정수여야 한다 (시각 계산에서 정밀도를 잃지 않게).
 const INTEGER_FIELDS = [
@@ -99,6 +104,7 @@ const INTEGER_FIELDS = [
   ["grantTtlS", 1],
   ["adminSessionAbsoluteTtlS", 1],
   ["failureLimit", 1],
+  ["accountFailureLimit", 1],
   ["failureWindowS", 1],
   ["failureDelayBaseS", 1],
   ["failureDelayMaxS", 1],
@@ -145,6 +151,7 @@ export async function loadMfaPolicy(env: Readonly<Record<string, unknown>>): Pro
   out.totpAlgorithm = algorithm;
   const policy = out as MfaPolicy;
   if (policy.failureDelayMaxS < policy.failureDelayBaseS) return { state: "unavailable", reason: "inconsistent", field: MFA_POLICY_ENV.failureDelayMaxS };
+  if (policy.accountFailureLimit < policy.failureLimit) return { state: "unavailable", reason: "inconsistent", field: MFA_POLICY_ENV.accountFailureLimit };
   for (const f of BOUNDED_BY_SESSION) {
     if (policy[f] > policy.adminSessionAbsoluteTtlS) return { state: "unavailable", reason: "inconsistent", field: MFA_POLICY_ENV[f] };
   }
@@ -152,6 +159,6 @@ export async function loadMfaPolicy(env: Readonly<Record<string, unknown>>): Pro
   const steps = policy.totpPastWindow + policy.totpFutureWindow + 1;
   const windowField = policy.totpPastWindow >= policy.totpFutureWindow ? MFA_POLICY_ENV.totpPastWindow : MFA_POLICY_ENV.totpFutureWindow;
   if (steps > TOTP_WINDOW_STEPS_LIMIT) return { state: "unavailable", reason: "implementation_limit", field: windowField };
-  if (steps * policy.failureLimit >= 10 ** policy.totpDigits) return { state: "unavailable", reason: "inconsistent", field: windowField };
+  if (steps * policy.accountFailureLimit >= 10 ** policy.totpDigits) return { state: "unavailable", reason: "inconsistent", field: windowField };
   return { state: "ready", policy: Object.freeze(policy), version: await policyVersion(policy) };
 }

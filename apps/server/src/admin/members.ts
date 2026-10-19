@@ -12,6 +12,8 @@
 //   - 승격(role → admin)은 같은 단위에서 대상 버전 +1·세션 철회·promotion grant 발급을 한다. grant 토큰은 응답 mfaGrant 로 행위자에게 한 번만 보인다.
 //     대상은 그 grant 없이 MFA 를 등록하지 못한다. 강등은 같은 단위에서 대상 factor 를 폐기한다.
 //   - 초기화는 자기 자신 409 self, 최초 관리자 409 bootstrap_admin. factor 폐기·대상 세션 철회·버전 +1·reset grant 발급이 한 단위다.
+//   - 다른 관리자의 정지·삭제는 X-MFA-Proof(admin.suspend·admin.delete, 대상 id)가 필요하다 (보안 리뷰 M1). 대상이 관리자인지는
+//     회원 관리 단위 안에서 잠근 행으로 판정한다. 관리자 대상에 proof 가 없으면 403 mfa_proof_required, 회원 대상이면 proof 를 쓰지 않는다.
 // 공통
 //   - 활성 관리자·현재 세션은 DB 에서 다시 확인한다 (sessionAdmin). 변경 요청의 같은 출처 검사는 app.ts 가 /api/admin/* 에 건다.
 //   - 변경 여섯 경로는 관리자당 분당 30회. 기존 한도 PATCH(/api/admin/users/:id)는 여기 두지 않고 기존 라우트를 유지한다.
@@ -25,7 +27,7 @@ import type { Services } from "../app.ts";
 import { applyKey } from "../keys/apply.ts";
 import type { MemberAction, MemberStatus, Role } from "../members/transition.ts";
 import { enqueue, RETRY_DELAYS_MS } from "../queue/index.ts";
-import { grantInsert } from "@magnetosphere/auth/mfa";
+import { grantInsert, MFA_PROOF_HEADER, type UnitStep } from "@magnetosphere/auth/mfa";
 import { consume, proofClaim, sessionAdmin, type AdminSession } from "../routes/guard.ts";
 import { deleteMember } from "./delete.ts";
 import { MemberConflictError, mutateMember, resetAdminMfa } from "./guard-sql.ts";
@@ -104,7 +106,7 @@ async function admitted(c: Context, s: Services): Promise<{ member: AdminSession
 
 function statusOf(code: string): 400 | 401 | 403 | 404 | 409 {
   if (code === "unauthorized") return 401;
-  if (code === "forbidden" || code === "mfa_proof_invalid") return 403;
+  if (code === "forbidden" || code === "mfa_proof_invalid" || code === "mfa_proof_required") return 403;
   if (code === "not_found") return 404;
   if (code === "invalid_role") return 400;
   return 409;
@@ -171,6 +173,16 @@ export function memberAdminRoutes(services: () => Promise<Services>) {
     let role: Role | undefined;
     let mfa: Parameters<typeof mutateMember>[1]["mfa"];
     let mfaGrant: { token: string; expiresAt: Date } | null = null;
+    // 다른 관리자의 정지·삭제: 머리글이 있으면 대상에 묶은 proof 를 만들고, 필요한지는 단위 안에서 정한다
+    let adminTarget: { proof: UnitStep | null } | undefined;
+    if (action === "suspend" || action === "delete") {
+      if (c.req.header(MFA_PROOF_HEADER) === undefined) adminTarget = { proof: null };
+      else {
+        const claim = await proofClaim(c, s, admin.member, action === "delete" ? "admin.delete" : "admin.suspend", targetId);
+        if (claim instanceof Response) return claim;
+        adminTarget = { proof: claim.step };
+      }
+    }
     if (action === "role") {
       if (!/^application\/json\b/i.test(c.req.header("content-type") ?? "")) return c.json({ error: "invalid_body" }, 400);
       const body = await c.req.json().catch(() => null);
@@ -198,7 +210,7 @@ export function memberAdminRoutes(services: () => Promise<Services>) {
       if (action === "delete") {
         // 자기 계정은 관리자 API 로 지우지 않는다. 자기 탈퇴는 DELETE /api/me + 비밀번호 재확인뿐이다 (설계 탈퇴 절, M4 보안 리뷰 M1)
         if (targetId === admin.member.id) return c.json({ error: "self" }, 409);
-        const deleted = await deleteMember(s, { actorId: admin.member.id, actorSessionId: admin.sessionId, targetId, ip, now });
+        const deleted = await deleteMember(s, { actorId: admin.member.id, actorSessionId: admin.sessionId, targetId, adminTarget, ip, now });
         return c.json(deleted);
       }
       const result = await mutateMember(s.db, {
@@ -208,7 +220,7 @@ export function memberAdminRoutes(services: () => Promise<Services>) {
         targetId,
         role,
         now,
-        mfa,
+        mfa: adminTarget ? { ...mfa, adminTarget } : mfa,
         audit: { actorId: admin.member.id, action: action === "role" ? "member.role" : (`member.${action}` as const), target: targetId, detail: action === "role" ? { role } : { from: "cas", to: action }, ip, now },
       });
       if (result.to === "row_deleted") return c.json({ deleted: true });

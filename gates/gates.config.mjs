@@ -1014,6 +1014,8 @@ export const GATES = {
       { id: "G-A1.12", how: "test", requires: ["local-services"], desc: "TC-A1.T3.e 같은 코드 동시 등록 확인 → 1건·부분 소비 없음 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-A1\\.T3\\.e " --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
       { id: "G-A1.13", how: "test", requires: ["local-services"], desc: "TC-A1.T3.e 동시 등록 확인 batch (D1)", cmd: 'pnpm -C apps/server test:workers test/mfa/admin-mfa.workers.test.ts -t "TC-A1\\.T3\\.e Workers"', expectPassed: 1 },
       { id: "G-A1.14", how: "test", desc: "TC-A1.T4.a~d proof 필요·재사용·목적·세션 거부, 승격 grant·mfa-reset·강등 factor 폐기, 마지막·bootstrap 관리자, 관리자 초대 수락 grant (Node SQLite)", cmd: 'pnpm -C apps/server test -t "TC-A1\\.T4\\.[a-d] "', expectPassed: 4 },
+      // 보안 리뷰 M1·L3 (2026-10-19): 다른 관리자 정지·삭제 proof, 관리자 초대 proof 의 이메일 결합. L2 계정 칸은 G-A1.1(T1.g)·G-A1.8·9(T2.f)가 함께 본다
+      { id: "G-A1.26", how: "test", desc: "TC-A1.T4.f 다른 관리자 정지·삭제 proof 필요·대상·목적 결합, 회원 대상은 proof 없음, 관리자 초대 proof 는 정규화 이메일에 묶임 (Node SQLite)", cmd: 'pnpm -C apps/server test -t "TC-A1\\.T4\\.f "', expectPassed: 1 },
       { id: "G-A1.16", how: "test", requires: ["local-services"], desc: "TC-A1.T4.e 같은 proof 동시 역할 변경 → 1건, proof 는 작업 트랜잭션 안 (Node DB 넷)", cmd: 'pnpm -C apps/server test:db -t "TC-A1\\.T4\\.e " --db sqlite,mysql,mariadb,pg', expectPassed: 4 },
       { id: "G-A1.17", how: "test", requires: ["local-services"], desc: "TC-A1.T4.e proof 소비 batch (D1)", cmd: 'pnpm -C apps/server test:workers test/mfa/admin-mfa.workers.test.ts -t "TC-A1\\.T4\\.e Workers"', expectPassed: 1 },
       // A1.T5 봉인 단계 시험 이전 (관리자 fixture → MFA fixture)과 봉인 단계 검사 불변 검사기

@@ -13,6 +13,8 @@ export interface DeleteMemberInput {
   selfProof?: MemberSelfProof;
   /** 관리자 탈퇴의 step-up proof 소비 단계 (A1). 삭제 단위의 첫 쓰기다 */
   mfaProof?: UnitStep;
+  /** 관리자 API 의 다른 회원 삭제 (A1 보안 리뷰 M1). 대상이 관리자면 이 proof(admin.delete, 대상 id)가 있어야 한다 */
+  adminTarget?: { proof: UnitStep | null };
   ip: string | null;
   now: Date;
 }
@@ -30,7 +32,7 @@ export async function deleteMember(s: Services, input: DeleteMemberInput): Promi
     actorSessionId: input.actorSessionId,
     targetId: input.targetId,
     selfProof: input.selfProof,
-    mfa: input.mfaProof ? { proof: input.mfaProof } : undefined,
+    mfa: input.mfaProof || input.adminTarget ? { proof: input.mfaProof, adminTarget: input.adminTarget } : undefined,
     now: input.now,
     audit: { actorId: input.actorId, action: "member.delete", target: input.targetId, detail: { anonymized: true }, ip: input.ip, now: input.now },
   });
