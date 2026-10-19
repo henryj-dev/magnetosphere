@@ -54,7 +54,8 @@ export interface Table {
   columns: Record<string, Column>;
   /** 여러 칼럼 기본 키 (필드 이름). 칼럼 하나면 Column.primaryKey 를 쓴다 */
   primaryKey?: string[];
-  indexes?: { name: string; columns: string[] }[];
+  /** unique: true 면 고유 인덱스 (여러 칼럼 고유 제약) */
+  indexes?: { name: string; columns: string[]; unique?: boolean }[];
 }
 
 const now = { kind: "timestamp", notNull: true, defaultNow: true } as const;
@@ -94,6 +95,12 @@ export const SESSION_ADDITIONAL_FIELDS = {
   credentialFingerprint: { type: "string", required: false, input: false, returned: false },
   // 생성 본문의 값은 버리고 0 을 쓴다. 갱신 본문에 값이 있으면 FIELD_NOT_ALLOWED 다. 세션 응답에는 없다.
   authVersion: { type: "number", required: false, defaultValue: AUTH_VERSION_DEFAULT, input: false, returned: false },
+  // 관리자 MFA 충족 증거 (A1). 서버 전용이라 생성·갱신 본문으로 쓰지 못하고 응답에도 없다.
+  // 세션 행에 두어 세션 철회 문장과 함께 사라진다. 기존 세션은 NULL 이라 MFA 충족으로 소급되지 않는다.
+  mfaVerifiedAt: { type: "date", required: false, input: false, returned: false },
+  mfaFactorId: { type: "string", required: false, input: false, returned: false },
+  mfaMethod: { type: "string", required: false, input: false, returned: false },
+  mfaPolicyVersion: { type: "string", required: false, input: false, returned: false },
 } as const;
 
 export const TABLES: Record<string, Table> = {
@@ -135,6 +142,10 @@ export const TABLES: Record<string, Table> = {
       userId: { name: "user_id", kind: "id", notNull: true, references: { table: "user", column: "id", onDelete: "cascade" } },
       credentialFingerprint: { name: "credential_fingerprint", kind: "string", length: 64, exact: true, doc: "서버 전용 credential HMAC. 비밀번호 변경 전 세션은 조회 때도 거부. NULL 은 기존·비비밀번호 세션" },
       authVersion: { name: "auth_version", kind: "integer", notNull: true, default: AUTH_VERSION_DEFAULT, doc: "세션을 만들 때 관찰한 회원 인증 버전. 로그인 전 재바인딩하지 않으며 현재 user.auth_version 과 다르면 접근을 막는다" },
+      mfaVerifiedAt: { name: "mfa_verified_at", kind: "timestamp", doc: "관리자 MFA 를 마친 시각 (A1). NULL 이면 부분 세션" },
+      mfaFactorId: { name: "mfa_factor_id", kind: "id", doc: "MFA 충족에 쓴 mfa_factor.id. 현재 active factor 와 다르면 미충족" },
+      mfaMethod: { name: "mfa_method", kind: "string", length: 16, exact: true, doc: "totp | recovery" },
+      mfaPolicyVersion: { name: "mfa_policy_version", kind: "string", length: 64, exact: true, doc: "충족 당시 MFA 정책 해시(SHA-256 hex). 현재 정책 해시와 다르면 미충족" },
     },
     indexes: [{ name: "session_userId_idx", columns: ["userId"] }],
   },
@@ -337,5 +348,83 @@ export const TABLES: Record<string, Table> = {
       createdAt: { name: "created_at", kind: "timestamp", notNull: true },
     },
     indexes: [{ name: "idx_audit_log_created", columns: ["createdAt"] }],
+  },
+
+  // ---------- 관리자 MFA (A1, 설계 docs/plan/phase4-a1-admin-mfa.md 2절) ----------
+  // 회원 행을 지우는 경로(가입 거절 row_deleted)가 MFA 행 때문에 막히지 않게 user_id 참조는 ON DELETE CASCADE 다.
+  // session·account 의 Better Auth 참조와 같은 규칙이다. foreign_keys 가 꺼진 SQLite 연결에서는 cascade 가 돌지 않으므로
+  // 삭제 경로(guard-sql cleanupOwned)가 MFA 행을 직접 지우는 일은 서버 연결 단계에서 함께 맞춘다.
+  mfaFactor: {
+    name: "mfa_factor",
+    owner: "app",
+    doc: "관리자 MFA 수단 (TOTP). 회원당 active 하나·pending 하나를 active_slot·pending_slot 고유 키로 강제한다",
+    columns: {
+      id: { name: "id", kind: "id", primaryKey: true },
+      userId: { name: "user_id", kind: "id", notNull: true, references: { table: "user", column: "id", onDelete: "cascade" } },
+      kind: { name: "kind", kind: "string", length: 16, exact: true, notNull: true, doc: "totp" },
+      state: { name: "state", kind: "string", length: 16, exact: true, notNull: true, doc: "pending | active | revoked" },
+      secretEnc: { name: "secret_enc", kind: "text", notNull: true, doc: "createCipher 암호문. AAD 는 mfa_factor.secret_enc|v1|{factorId}|{userId}" },
+      periodS: { name: "period_s", kind: "integer", notNull: true, doc: "등록 당시 정책의 TOTP step 폭(초)" },
+      digits: { name: "digits", kind: "integer", notNull: true, doc: "등록 당시 정책의 자릿수" },
+      algorithm: { name: "algorithm", kind: "string", length: 16, exact: true, notNull: true, doc: "등록 당시 정책의 HMAC 해시: SHA-1 | SHA-256 | SHA-512" },
+      lastUsedStep: { name: "last_used_step", kind: "bigint", doc: "마지막으로 받은 시간 step. 이보다 큰 step 만 받는다 (재사용 차단 CAS)" },
+      pendingSessionId: { name: "pending_session_id", kind: "id", doc: "등록을 시작한 세션. pending 일 때만" },
+      pendingAuthVersion: { name: "pending_auth_version", kind: "integer", doc: "등록을 시작할 때 관찰한 user.auth_version. pending 일 때만" },
+      pendingExpiresAt: { name: "pending_expires_at", kind: "timestamp", doc: "등록 확인 마감. pending 일 때만" },
+      activeSlot: { name: "active_slot", kind: "id", unique: true, doc: "state = active 이면 user_id, 아니면 NULL. MySQL 에 부분 인덱스가 없어 회원당 active 하나를 이것으로 강제한다" },
+      pendingSlot: { name: "pending_slot", kind: "id", unique: true, doc: "state = pending 이면 user_id, 아니면 NULL. 회원당 pending 하나" },
+      createdAt: { name: "created_at", ...now },
+      activatedAt: { name: "activated_at", kind: "timestamp" },
+      revokedAt: { name: "revoked_at", kind: "timestamp" },
+      revokedReason: { name: "revoked_reason", kind: "string", length: 32, doc: "replaced | superseded | demoted | reset | ..." },
+    },
+    indexes: [{ name: "idx_mfa_factor_user", columns: ["userId"] }],
+  },
+  mfaRecoveryCode: {
+    name: "mfa_recovery_code",
+    owner: "app",
+    doc: "관리자 MFA 복구 코드. 원문은 두지 않고 HMAC 만 둔다. used_at IS NULL 조건 UPDATE 하나로 한 번만 소비한다",
+    columns: {
+      id: { name: "id", kind: "id", primaryKey: true },
+      factorId: { name: "factor_id", kind: "id", notNull: true, references: { table: "mfa_factor", column: "id", onDelete: "cascade" } },
+      userId: { name: "user_id", kind: "id", notNull: true, references: { table: "user", column: "id", onDelete: "cascade" } },
+      codeHash: { name: "code_hash", kind: "string", length: 64, exact: true, notNull: true, doc: "HMAC-SHA256(서버 키, factorId|code) hex" },
+      usedAt: { name: "used_at", kind: "timestamp" },
+      usedSessionId: { name: "used_session_id", kind: "id" },
+    },
+    indexes: [{ name: "uniq_mfa_recovery_code_factor_hash", columns: ["factorId", "codeHash"], unique: true }],
+  },
+  mfaEnrollmentGrant: {
+    name: "mfa_enrollment_grant",
+    owner: "app",
+    doc: "관리자 MFA 최초 등록 자격. 토큰 원문은 두지 않는다. 한 번만 쓴다",
+    columns: {
+      id: { name: "id", kind: "id", primaryKey: true },
+      userId: { name: "user_id", kind: "id", notNull: true, references: { table: "user", column: "id", onDelete: "cascade" } },
+      tokenHash: { name: "token_hash", kind: "string", length: 64, exact: true, notNull: true, unique: true, doc: "HMAC-SHA256(서버 키, token) hex" },
+      purpose: { name: "purpose", kind: "string", length: 16, exact: true, notNull: true, doc: "bootstrap | promotion | reset | transition" },
+      issuedBy: { name: "issued_by", kind: "id", doc: "발급한 회원 id. 설치·운영자 CLI 는 NULL" },
+      authVersion: { name: "auth_version", kind: "integer", notNull: true, doc: "발급할 때의 대상 user.auth_version. 다르면 쓸 수 없다" },
+      expiresAt: { name: "expires_at", kind: "timestamp", notNull: true },
+      usedAt: { name: "used_at", kind: "timestamp" },
+      revokedAt: { name: "revoked_at", kind: "timestamp" },
+    },
+  },
+  mfaProof: {
+    name: "mfa_proof",
+    owner: "app",
+    doc: "작업에 묶인 step-up 증명. 토큰 원문은 두지 않는다. 작업 자신의 트랜잭션 안에서 used_at IS NULL 조건 UPDATE 로 한 번만 소비한다",
+    columns: {
+      id: { name: "id", kind: "id", primaryKey: true },
+      tokenHash: { name: "token_hash", kind: "string", length: 64, exact: true, notNull: true, unique: true, doc: "HMAC-SHA256(서버 키, mfa_proof|v1|token) hex. 토큰 원문은 두지 않는다" },
+      sessionId: { name: "session_id", kind: "id", notNull: true, references: { table: "session", column: "id", onDelete: "cascade" }, doc: "proof 를 만든 세션. 세션을 지우면 proof 도 지운다" },
+      userId: { name: "user_id", kind: "id", notNull: true, references: { table: "user", column: "id", onDelete: "cascade" } },
+      authVersion: { name: "auth_version", kind: "integer", notNull: true },
+      factorId: { name: "factor_id", kind: "id", notNull: true, doc: "proof 를 만든 factor. 소비 때 이 factor 가 아직 active 여야 한다" },
+      purpose: { name: "purpose", kind: "string", length: 64, exact: true, notNull: true, doc: "mfa.reenroll, mfa.reset, role.change, ..." },
+      target: { name: "target", kind: "string", length: 255, exact: true, notNull: true, doc: "작업 대상 (예: 회원 id)" },
+      expiresAt: { name: "expires_at", kind: "timestamp", notNull: true },
+      usedAt: { name: "used_at", kind: "timestamp" },
+    },
   },
 };

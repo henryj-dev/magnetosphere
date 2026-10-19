@@ -50,6 +50,13 @@
       "when": 1792195201123,
       "tag": "0006_m6_invite_anonymize",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "5",
+      "when": 1792333956294,
+      "tag": "0007_a1_mfa",
+      "breakpoints": true
     }
   ]
 }

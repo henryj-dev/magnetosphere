@@ -156,7 +156,7 @@ function render(dialect) {
       }
       lines.push(`  ${field}: ${code},`);
     }
-    // 표 단위 제약: 여러 칼럼 기본 키(primaryKey)와 인덱스
+    // 표 단위 제약: 여러 칼럼 기본 키(primaryKey)와 인덱스 (unique 면 고유 인덱스)
     const extras = [];
     if (t.primaryKey?.length) {
       for (const f of t.primaryKey) {
@@ -167,8 +167,8 @@ function render(dialect) {
       extras.push(`  primaryKey({ columns: [${t.primaryKey.map((c) => `table.${c}`).join(", ")}] }),`);
     }
     if (t.indexes?.length) {
-      imports.add("index");
-      extras.push(...t.indexes.map((i) => `  index(${lit(i.name)}).on(${i.columns.map((c) => `table.${c}`).join(", ")}),`));
+      for (const i of t.indexes) imports.add(i.unique ? "uniqueIndex" : "index");
+      extras.push(...t.indexes.map((i) => `  ${i.unique ? "uniqueIndex" : "index"}(${lit(i.name)}).on(${i.columns.map((c) => `table.${c}`).join(", ")}),`));
     }
     const tail = extras.length ? `, (table) => [\n${extras.join("\n")}\n]` : "";
     blocks.push(`// ${t.doc}\nexport const ${key} = ${d.table}(${lit(t.name)}, {\n${lines.join("\n")}\n}${tail});`);
