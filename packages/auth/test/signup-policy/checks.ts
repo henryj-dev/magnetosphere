@@ -1,5 +1,6 @@
 // 가입 정책 시험(M2)의 Better Auth 단언. Node 네 DB(policy.test.ts, node-rig.ts)와 D1(apps/server/test/signup/signup.workers.test.ts)이 같은 함수를 부른다.
 // 가입 거부는 생긴 행 수로 본다. 응답은 Better Auth 가 숨길 수 있다 (실행판 0절).
+import { ADMIN_MFA_API_PATHS } from "../mfa-policy.ts";
 import { expect } from "vitest";
 import { V32_CALLS } from "../verify-p3/measure.ts";
 import { attempt, body, mail, userRows, type Invite, type Rig } from "./rig.ts";
@@ -48,7 +49,7 @@ export async function tcM2T1b(rig: Rig, A: any) {
   }
   expect(await userRows(rig)).toBe(before);
   // 경로 목록 고정: V32 가 부른 경로 + 그 밖의 경로. 판 올림·플러그인으로 회원을 만드는 새 경로가 생기면 여기서 걸린다
-  const want = [...new Set([...V32_CALLS.map((c) => c.path), ...A.otherPaths]), "/signup-confirmation", "/signup-confirmation"].sort();
+  const want = [...new Set([...V32_CALLS.map((c) => c.path), ...A.otherPaths]), "/signup-confirmation", "/signup-confirmation", ...ADMIN_MFA_API_PATHS].sort();
   expect((await rig.apiPaths()).sort()).toEqual(want);
 }
 

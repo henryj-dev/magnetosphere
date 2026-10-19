@@ -10,10 +10,12 @@ import { apiReply, OPS, reply } from "../../../../packages/auth/test/signup-poli
 import { callRes, type CallOpts, type HttpRig } from "./checks.ts";
 import { createApp, type Services } from "../../src/app.ts";
 import { buildServices } from "../../src/config.ts";
+import { TEST_MFA_POLICY_ENV } from "../../../../packages/auth/test/mfa-policy.ts";
 import { TEST_ENCRYPTION_KEY, TEST_SECRET } from "../helpers.ts";
 
 export const ORIGIN = "http://localhost:3000";
-const ENV: Record<string, string> = { BETTER_AUTH_URL: ORIGIN, BETTER_AUTH_SECRET: TEST_SECRET, APP_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY };
+// 관리자 MFA 정책은 시험 전용 값이다 (A1, packages/auth/test/mfa-policy.ts)
+const ENV: Record<string, string> = { BETTER_AUTH_URL: ORIGIN, BETTER_AUTH_SECRET: TEST_SECRET, APP_ENCRYPTION_KEY: TEST_ENCRYPTION_KEY, ...TEST_MFA_POLICY_ENV };
 
 export const randomIp = () => `198.18.${Math.floor(Math.random() * 256)}.${Math.floor(Math.random() * 254) + 1}`;
 

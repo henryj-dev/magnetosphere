@@ -9,7 +9,7 @@ import { memberAdminRoutes } from "../../src/admin/members.ts";
 import { selfDeleteRoutes } from "../../src/admin/self-delete.ts";
 import { KEY_DELETE_DELAY_MS } from "../../src/queue/index.ts";
 import { sameOrigin } from "../../src/routes/guard.ts";
-import { installed, login, type CallOpts, type HttpRig } from "../signup/checks.ts";
+import { installed, login, proofHeader, type CallOpts, type HttpRig } from "../signup/checks.ts";
 import { verificationLink } from "../signup/confirmation-checks.ts";
 import { body, mail, PASSWORD } from "../../../../packages/auth/test/signup-policy/rig.ts";
 import type { ServerRig } from "../signup/env.ts";
@@ -232,7 +232,9 @@ export async function tcM4DeleteAndSelf(rig: Rig) {
   const foreign = await call(app, "DELETE", `/api/admin/users/${admin.id}`, { cookie: other.cookie });
   expect(foreign.status).toBe(401);
   await rig.h.db.update(s.user).set({ isBootstrapAdmin: true }).where(eq(s.user.id, admin.id));
-  expect((await call(app, "DELETE", "/api/me", { cookie: admin.cookie, body: { password: PASSWORD } })).status).toBe(409);
+  // 관리자 탈퇴는 작업에 묶인 step-up proof 가 필요하다 (A1). proof 를 실은 요청이 bootstrap 판정에 닿는다
+  expect((await call(app, "DELETE", "/api/me", { cookie: admin.cookie, body: { password: PASSWORD } })).status).toBe(403);
+  expect((await call(app, "DELETE", "/api/me", { cookie: admin.cookie, body: { password: PASSWORD }, headers: await proofHeader(rig, admin.cookie, "admin.delete", admin.id) })).status).toBe(409);
   await rig.h.db.update(s.user).set({ isBootstrapAdmin: false }).where(eq(s.user.id, admin.id));
   // 관리자 API 로 자기 계정을 지우지 못한다. 다른 활성 관리자가 있어도 409 self 이고 아무것도 쓰지 않는다 (M4 보안 리뷰 M1, 자기 탈퇴는 /api/me 뿐)
   const selfBefore = await rows(rig);
@@ -245,7 +247,7 @@ export async function tcM4DeleteAndSelf(rig: Rig) {
   const otherAdmins = (await rows(rig)).users.filter((row: any) => row.role === "admin" && row.status === "active" && row.id !== admin.id).map((row: any) => row.id as string);
   expect(otherAdmins.length).toBeGreaterThan(0);
   for (const id of otherAdmins) await rig.h.db.update(s.user).set({ status: "suspended" }).where(eq(s.user.id, id));
-  const lastAdmin = await call(app, "DELETE", "/api/me", { cookie: admin.cookie, body: { password: PASSWORD } });
+  const lastAdmin = await call(app, "DELETE", "/api/me", { cookie: admin.cookie, body: { password: PASSWORD }, headers: await proofHeader(rig, admin.cookie, "admin.delete", admin.id) });
   expect({ status: lastAdmin.status, json: lastAdmin.json }).toEqual({ status: 409, json: { error: "last_admin" } });
   expect((await rows(rig)).users.find((row: any) => row.id === admin.id)).toMatchObject({ role: "admin", status: "active" });
   for (const id of otherAdmins) await rig.h.db.update(s.user).set({ status: "active" }).where(eq(s.user.id, id));

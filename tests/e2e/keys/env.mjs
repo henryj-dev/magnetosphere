@@ -5,6 +5,7 @@
 //   - OmniRoute 조회(분석·키 목록)와 정리는 어댑터(packages/omniroute)로만 한다 (대시보드 쿠키).
 //   - 회원 도구 요청(/v1)은 Docker 는 Caddy(공개 주소), Workers 는 계약 환경 OmniRoute 로 보낸다 (run.mjs 머리 주석).
 // localhost:20128(사람이 쓰는 OmniRoute)은 쓰지 않는다.
+import { afterSignIn } from "../mfa.mjs";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -142,10 +143,12 @@ export function appHttp(baseUrl, origin = baseUrl) {
     const res = await fetch(`${baseUrl}/api/auth/sign-in/email`, { method: "POST", headers: { "content-type": "application/json", origin }, body: JSON.stringify({ email, password }) });
     const cookie = res.headers.getSetCookie().map((s) => s.split(";")[0]).filter((s) => /session_token=./.test(s)).join("; ");
     if (res.status !== 200 || !cookie) throw new Error(`로그인 실패 ${email} (${res.status})`);
+    // 설치 흐름이 MFA 를 등록한 관리자는 로그인 직후 challenge 한다 (A1, tests/e2e/mfa.mjs)
+    await afterSignIn(api, email, cookie);
     return cookie;
   }
-  async function api(method, p, cookie, body) {
-    const headers = { origin, cookie };
+  async function api(method, p, cookie, body, extra = {}) {
+    const headers = { origin, cookie, ...extra };
     if (body !== undefined) headers["content-type"] = "application/json";
     const res = await fetch(baseUrl + p, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: res.status, json: await res.json().catch(() => null) };

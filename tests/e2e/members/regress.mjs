@@ -12,6 +12,7 @@
 // 옛 쿠키는 세션 없음 401 unauthorized 다 (routes/guard.ts). 403 은 세션이 남은 채 DB 상태로 거부할 때만이다. 401·403 둘 다 받지 않는다.
 // 출력은 TC 이름·HTTP 상태·짧은 오류 코드뿐이다.
 import { ADMIN, check, codeOf, inviteToken, log, memberId, membersEnv, patchSignup, st, testEmail, testPassword } from "./env.mjs";
+import { enroll, proofHeader } from "../mfa.mjs";
 
 const DEFAULT_LIMIT_USD = 5;
 /** 본문에 넣는 권한 필드 (서버가 버려야 한다) */
@@ -82,16 +83,21 @@ export async function runMembersRegress(ctx) {
   check(oldM.status === 401, `TC-M5.T2.b 정지 회원 옛 쿠키 401 (${st(oldM)})`);
 
   const a2d = { email: testEmail("radm"), password: testPassword() };
-  const adInv = await http.api("POST", "/api/admin/invites", A, { email: a2d.email, role: "admin" });
+  // 관리자 초대는 작업에 묶인 step-up proof 가 필요하다 (A1)
+  const mfaCall = (m, q, c, b, h) => http.api(m, q, c, b, h);
+  const adInv = await http.api("POST", "/api/admin/invites", A, { email: a2d.email, role: "admin" }, await proofHeader(mfaCall, A, "admin.invite", "admin-invite"));
   check(adInv.status === 201, `TC-M5.T2.b 이메일 지정 admin 초대 201 (${st(adInv)})`);
   const adAcc = await http.accept(inviteToken(adInv.json?.link), a2d.email, a2d.password);
   check(adAcc.status === 201, `TC-M5.T2.b admin 초대 수락 201 (${st(adAcc)})`);
+  const aid = await memberId(http, A, a2d.email, "active");
+  // 관리자 초대 수락 응답의 등록 grant 로 MFA 를 등록한다 (A1, 2026-10-19 사용자 결정)
+  check(typeof adAcc.json?.mfaGrant?.grant === "string", "TC-M5.T2.b admin 초대 수락 응답에 MFA 등록 자격");
   const al = await http.signIn(a2d.email, a2d.password);
   check(al.status === 200 && !!al.cookie, `TC-M5.T2.b 두 번째 관리자 로그인 200 (${st(al)})`);
+  await enroll(mfaCall, al.cookie, adAcc.json.mfaGrant.grant);
   // 관리자 확인을 통과하는지 먼저 본다. 틀린 토큰이라 저장하지 않고 400 이다
   const pre = await http.api("PUT", "/api/setup/omniroute", al.cookie, { token: "e2e-not-a-token" });
   check(pre.status === 400, `TC-M5.T2.b 정지 전 두 번째 관리자 PUT /api/setup/omniroute 가 관리자 확인 통과 (${st(pre)})`);
-  const aid = await memberId(http, A, a2d.email, "active");
   const asus = await http.api("POST", `/api/admin/users/${aid}/suspend`, A);
   check(asus.status === 200 && asus.json?.user?.status === "suspended", `TC-M5.T2.b 두 번째 관리자 suspend 200 (${st(asus)})`);
   const gs = await http.api("GET", "/api/auth/get-session", al.cookie);

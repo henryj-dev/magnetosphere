@@ -39,6 +39,8 @@ async function race(env: WorkersEnv, group: string | null): Promise<Response> {
         { id: b, name: "b", email: `${b}@example.com`, emailVerified: true, role: "admin", status: "active", authVersion: 0, createdAt: now, updatedAt: now },
         ...(kind === "approveReject" ? [{ id: target, name: "target", email: `${target}@example.com`, emailVerified: true, role: "member", status: "pending", authVersion: 0, createdAt: now, updatedAt: now }] : []),
       ]);
+      // 활성 관리자는 관리자 MFA 를 등록한 관리자다 (A1: 마지막 관리자 판정은 active factor 가 있는 활성 관리자 수). seed 는 복호화하지 않는 자리 값이다
+      await h.db.insert(h.schema.mfaFactor).values([a, b].map((userId) => ({ id: crypto.randomUUID(), userId, kind: "totp", state: "active", secretEnc: "fixture-not-decrypted", periodS: 30, digits: 6, algorithm: "SHA-1", activeSlot: userId, createdAt: now, activatedAt: now })));
       await h.db.insert(s).values([
         { id: sa, expiresAt: new Date(now.getTime() + 60_000), token: crypto.randomUUID(), createdAt: now, updatedAt: now, userId: a, authVersion: 0 },
         { id: sb, expiresAt: new Date(now.getTime() + 60_000), token: crypto.randomUUID(), createdAt: now, updatedAt: now, userId: b, authVersion: 0 },
@@ -199,6 +201,9 @@ export default {
         ...(removesAdmin ? [] : [{ id: target, name: "target", email: `${target}@example.com`, emailVerified: false, role: "member", status: "pending", authVersion: scenario === "versionMax" ? AUTH_VERSION_MAX : 0, createdAt: now, updatedAt: now }]),
       ]);
       if (scenario === "lastAdminRace") await h.db.insert(h.schema.user).values({ id: extraAdmin, name: "extra", email: `${extraAdmin}@example.com`, emailVerified: true, role: "admin", status: "active", authVersion: 0, createdAt: now, updatedAt: now });
+      // 활성 관리자는 관리자 MFA 를 등록한 관리자다 (A1). seed 는 복호화하지 않는 자리 값이다
+      const mfaAdmins = scenario === "lastAdminRace" ? [actor, extraAdmin] : [actor];
+      await h.db.insert(h.schema.mfaFactor).values(mfaAdmins.map((userId) => ({ id: crypto.randomUUID(), userId, kind: "totp", state: "active", secretEnc: "fixture-not-decrypted", periodS: 30, digits: 6, algorithm: "SHA-1", activeSlot: userId, createdAt: now, activatedAt: now })));
       await h.db.insert(h.schema.session).values([
         { id: session, expiresAt: new Date(now.getTime() + 60_000), token: crypto.randomUUID(), createdAt: now, updatedAt: now, userId: actor, authVersion: 0 },
         { id: targetSession, expiresAt: new Date(now.getTime() + 60_000), token: crypto.randomUUID(), createdAt: now, updatedAt: now, userId: target, authVersion: scenario === "versionMax" ? AUTH_VERSION_MAX : 0 },

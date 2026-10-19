@@ -3,6 +3,8 @@
 //     라우터가 세션에서 얻는 것은 회원 id 하나뿐이고 역할·상태는 DB 에서 읽는다 (그것을 시험한다).
 //   - OmniRoute: 키 상태를 기억하는 가짜 어댑터. 호출은 경로가 아니라 어댑터 함수 이름으로 적는다 (G-S5.9).
 //   - 클라이언트 IP: 시험 헤더 x-test-ip (런타임 어댑터 대신).
+//   - 관리자 MFA (A1): 가짜 세션 id 는 회원 id 와 같다. 관리자 역할 회원(addUser role admin)은 시험 factor 와 MFA 충족 세션 행을 함께 만든다.
+//     민감 작업(역할 변경·관리자 초대) 요청에는 call() 이 그 세션에 묶인 step-up proof 를 X-MFA-Proof 로 싣는다 (proof: false 면 싣지 않는다).
 import { randomBytes, randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { OmniRouteError, type Analytics } from "@magnetosphere/omniroute";
@@ -10,9 +12,13 @@ import { seedAppSettings } from "@magnetosphere/db/src/seed.ts";
 import type { Cipher } from "@magnetosphere/runtime/crypto";
 import { connectNode } from "@magnetosphere/runtime/node";
 import type { DbHandle } from "@magnetosphere/runtime/types";
+import { addActiveFactor, issueTestProof, markSessionMfa, testMfaPolicy, testMfaRuntime } from "../../../../packages/auth/test/mfa-fixture.ts";
+import type { MfaRuntime } from "@magnetosphere/auth/mfa";
 import { createApp, type Services } from "../../src/app.ts";
+import { auditStatement } from "../../src/audit/index.ts";
+import { ipBucket } from "../../src/routes/guard.ts";
 import type { KeysClient } from "../../src/routes/issue.ts";
-import { makeTestEnv, type TestEnv } from "../helpers.ts";
+import { makeTestEnv, TEST_ENCRYPTION_KEY, TEST_SECRET, type TestEnv } from "../helpers.ts";
 
 export const ORIGIN = "http://localhost:3000";
 export const SESSION_COOKIE = "mg_test_session";
@@ -105,16 +111,50 @@ export function fakeOmni(): FakeOmni {
   return f;
 }
 
-/** 세션을 돌려주는 가짜 인증. 쿠키 mg_test_session 의 값이 회원 id 다 */
+/** 세션을 돌려주는 가짜 인증. 쿠키 mg_test_session 의 값이 회원 id 이고, 세션 id 도 그 값이다 (관리자 MFA 세션 행의 id) */
 export function fakeAuth(): Services["auth"] {
   return {
     async handler(req: Request) {
       const url = new URL(req.url);
       if (url.pathname !== "/api/auth/get-session") return new Response("not found", { status: 404 });
       const m = /(?:^|;\s*)mg_test_session=([^;]+)/.exec(req.headers.get("cookie") ?? "");
-      return Response.json(m ? { user: { id: decodeURIComponent(m[1]) }, session: { id: "s" } } : null);
+      const id = m ? decodeURIComponent(m[1]) : null;
+      return Response.json(id ? { user: { id }, session: { id } } : null);
     },
   };
+}
+
+/** 가짜 인증 Rig 의 관리자 MFA 런타임 (시험 정책, 서버와 같은 감사·IP 묶음) */
+export function fakeMfa(h: DbHandle): Promise<MfaRuntime> {
+  return testMfaRuntime({ secret: TEST_SECRET, encryptionKey: TEST_ENCRYPTION_KEY, audit: (db, e) => auditStatement(h, e, db), ipBucket });
+}
+
+/**
+ * 관리자 회원에게 시험 factor 와 MFA 를 마친 세션 행(id = 회원 id)을 만든다. 이미 있으면 그 세션을 충족으로 표시한다.
+ * 가짜 인증 Rig 의 관리자가 비밀번호만으로 관리 API 를 부르지 않게 하는 공용 fixture 다
+ */
+export async function mfaAdminSession(h: DbHandle, userId: string): Promise<void> {
+  const factorId = await addActiveFactor(h.db, h.schema, userId, TEST_ENCRYPTION_KEY);
+  const s = h.schema.session;
+  const [row] = await h.db.select({ id: s.id }).from(s).where(eq(s.id, userId));
+  const [u] = await h.db.select({ v: h.schema.user.authVersion }).from(h.schema.user).where(eq(h.schema.user.id, userId));
+  if (!row) await h.db.insert(s).values({ id: userId, expiresAt: new Date(Date.now() + 60 * 60_000), token: randomUUID(), createdAt: new Date(), updatedAt: new Date(), userId, authVersion: Number(u?.v ?? 0) });
+  await markSessionMfa(h.db, h.schema, { sessionId: userId, factorId, policyVersion: (await testMfaPolicy()).version });
+}
+
+/** 가짜 인증 Rig 관리자의 step-up proof (세션 id = 회원 id) */
+export async function fakeProof(h: DbHandle, userId: string, purpose: string, target: string): Promise<string> {
+  const f = h.schema.mfaFactor;
+  const [factor] = await h.db.select({ id: f.id }).from(f).where(eq(f.activeSlot, userId));
+  return issueTestProof(h.db, h.schema, { secret: TEST_SECRET, sessionId: userId, userId, factorId: factor?.id ?? "none", purpose, target });
+}
+
+/** 민감 작업 요청이면 proof 의 목적·대상 (A1). 역할 변경·관리자 초대 */
+function sensitive(method: string, path: string, body: unknown): { purpose: string; target: string } | null {
+  const role = /^\/api\/admin\/users\/([^/]+)\/role$/.exec(path);
+  if (method === "PATCH" && role) return { purpose: "role.change", target: decodeURIComponent(role[1]) };
+  if (method === "POST" && path === "/api/admin/invites" && (body as { role?: unknown } | undefined)?.role === "admin") return { purpose: "admin.invite", target: "admin-invite" };
+  return null;
 }
 
 export interface RouteEnv {
@@ -139,6 +179,7 @@ export async function openRoutes(opts: { url?: string; h?: DbHandle } = {}): Pro
     db: h,
     auth: fakeAuth(),
     cipher: {} as Cipher,
+    mfa: await fakeMfa(h),
     omniroute: { baseUrl: null, initialPassword: null },
     clientIp: (req) => req.headers.get("x-test-ip") ?? "203.0.113.1",
     appOrigin: ORIGIN,
@@ -167,6 +208,7 @@ export interface UserSpec {
   role?: string;
 }
 
+/** 회원 하나. 관리자 역할이면 시험 factor·MFA 충족 세션도 만든다 (mfaAdminSession) */
 export async function addUser(h: DbHandle, spec: UserSpec = {}): Promise<string> {
   const id = randomUUID();
   await h.db.insert(h.schema.user).values({
@@ -179,6 +221,7 @@ export async function addUser(h: DbHandle, spec: UserSpec = {}): Promise<string>
     monthlyLimitUsd: spec.limitUsd === undefined ? 5 : spec.limitUsd,
     maxKeys: spec.maxKeys ?? null,
   });
+  if (spec.role === "admin") await mfaAdminSession(h, id);
   return id;
 }
 
@@ -190,11 +233,15 @@ export interface CallOpts {
   /** 기본 같은 출처. null 이면 Origin 헤더를 빼고 보낸다 */
   origin?: string | null;
   ip?: string;
+  /** false 면 민감 작업에도 step-up proof 를 싣지 않는다 (A1) */
+  proof?: false;
 }
 
 export async function call(e: RouteEnv, method: string, path: string, o: CallOpts = {}) {
   const headers: Record<string, string> = {};
   if (o.user) headers.cookie = `${SESSION_COOKIE}=${encodeURIComponent(o.user)}`;
+  const need = o.user && o.proof !== false ? sensitive(method, path, o.body) : null;
+  if (need && o.user) headers["x-mfa-proof"] = await fakeProof(e.h, o.user, need.purpose, need.target);
   if (o.origin !== null) headers.origin = o.origin ?? ORIGIN;
   if (o.ip) headers["x-test-ip"] = o.ip;
   let body: string | undefined;

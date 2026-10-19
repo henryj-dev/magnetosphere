@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { PASSWORD } from "../../../../packages/auth/test/signup-policy/rig.ts";
+import { challengeHttp } from "../../../../packages/auth/test/mfa-fixture.ts";
 import { ADMIN, TEST_ENCRYPTION_KEY, TEST_SECRET } from "../helpers.ts";
 import { callRes, type CallOpts } from "../signup/checks.ts";
 import { startWranglerDev, wrangler, type WranglerDev } from "../wrangler-dev.mjs";
@@ -39,7 +40,16 @@ async function login(role: "admin" | "member", tag: string) {
   const id = (await op("addPasswordUser", email, PASSWORD, role, "active")) as string;
   const r = await call("POST", "/api/auth/sign-in/email", { body: { email, password: PASSWORD } });
   expect(r.status, "로그인 응답").toBe(200);
-  return { id, email, cookie: r.setCookie.map((c) => c.split(";")[0]).join("; ") };
+  const cookie = r.setCookie.map((c) => c.split(";")[0]).join("; ");
+  // 관리자는 관리자 MFA 를 마친 세션이다 (A1): 시험 factor 를 넣고 challenge 한다
+  if (role === "admin") {
+    await op("mfaFactor", id, TEST_ENCRYPTION_KEY);
+    await challengeHttp(async (m, p, o) => {
+      const x = await call(m, p, { body: o.body, cookie: o.cookie });
+      return { status: x.status, json: x.json };
+    }, cookie);
+  }
+  return { id, email, cookie };
 }
 function mailRows() {
   const r = wrangler(["d1", "execute", "DB", "--local", "--config", CONFIG, "--persist-to", persistTo, "--json", "--command", "SELECT value FROM app_settings WHERE key = 'mail_settings'"]);

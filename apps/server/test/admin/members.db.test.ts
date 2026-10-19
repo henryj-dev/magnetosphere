@@ -8,7 +8,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { connectNode } from "@magnetosphere/runtime/node";
 import type { DbHandle } from "@magnetosphere/runtime/types";
 import { createTestDb, enabledDbs, LABEL, type DbKind, type TestDb } from "../../../../packages/runtime/test/dbs.ts";
+import { addActiveFactor } from "../../../../packages/auth/test/mfa-fixture.ts";
 import { MEMBER_MUTEX, MemberConflictError, mutateMember, type MemberMutation } from "../../src/admin/guard-sql.ts";
+import { TEST_ENCRYPTION_KEY } from "../helpers.ts";
 
 const NOW = new Date("2026-10-13T00:00:00.000Z");
 // 실패 출력에 세션 token·비밀번호 해시·재설정 identifier 원문이 찍히지 않게, 그 칸은 같음 비교만 되는 해시로 바꿔 둔다.
@@ -34,6 +36,8 @@ describe.each(enabledDbs())("%s", (kind: DbKind) => {
   const add = async (role: "member" | "admin", status = "active") => {
     const id = randomUUID();
     await h.db.insert(h.schema.user).values({ id, name: "fixture", email: `${id}@example.com`, emailVerified: true, role, status, isBootstrapAdmin: false, authVersion: 0, createdAt: NOW, updatedAt: NOW });
+    // 활성 관리자는 관리자 MFA 를 등록한 관리자다 (A1: 마지막 관리자 판정은 active factor 가 있는 활성 관리자 수)
+    if (role === "admin" && status === "active") await addActiveFactor(h.db, h.schema, id, TEST_ENCRYPTION_KEY);
     return id;
   };
   const session = async (userId: string) => {

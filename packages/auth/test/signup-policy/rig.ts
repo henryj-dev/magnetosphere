@@ -6,6 +6,7 @@
 import { hashPassword } from "better-auth/crypto";
 import { and, eq, like, sql } from "drizzle-orm";
 import type { MailMessage } from "../../src/index.ts";
+import { addActiveFactor, issueTestGrant, resetFactorStep } from "../mfa-fixture.ts";
 
 type AnyDb = any;
 type Schema = any;
@@ -144,6 +145,24 @@ export const OPS = {
     const [u] = await db.select({ id: s.user.id }).from(s.user).where(byEmail(s, email));
     if (!u) return 0;
     return (await db.select({ id: s.session.id }).from(s.session).where(eq(s.session.userId, u.id))).length;
+  },
+  /** 관리자 MFA (A1) 시험 fixture: 회원에게 active factor(시험 seed)를 넣고 id 를 돌려준다. encryptionKey 는 서버 APP_ENCRYPTION_KEY */
+  async mfaFactor(db: AnyDb, s: Schema, userId: string, encryptionKey: string) {
+    return addActiveFactor(db, s, userId, encryptionKey);
+  },
+  /** 관리자 MFA 등록 grant 를 DB 에 만들고 토큰을 돌려준다. secret 은 서버 BETTER_AUTH_SECRET */
+  async mfaGrant(db: AnyDb, s: Schema, userId: string, secret: string, purpose: "bootstrap" | "promotion" | "reset" | "transition" = "transition") {
+    return issueTestGrant(db, s, { userId, secret, purpose });
+  },
+  /** 같은 step 안 재시험을 위해 factor 재사용 기록을 비운다 (시험 전용) */
+  async mfaResetStep(db: AnyDb, s: Schema, userId: string) {
+    await resetFactorStep(db, s, userId);
+    return true;
+  },
+  /** 그 회원의 factor 상태 목록 (오래된 순이 아니라 상태별 수) */
+  async mfaFactors(db: AnyDb, s: Schema, userId: string) {
+    const rows = await db.select({ state: s.mfaFactor.state }).from(s.mfaFactor).where(eq(s.mfaFactor.userId, userId));
+    return { pending: rows.filter((r: any) => r.state === "pending").length, active: rows.filter((r: any) => r.state === "active").length, revoked: rows.filter((r: any) => r.state === "revoked").length };
   },
   /** 회원 행을 지운다 (account·session 도). 다음 단언의 행 수를 0 에서 다시 센다 */
   async deleteMembers(db: AnyDb, s: Schema) {

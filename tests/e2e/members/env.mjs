@@ -6,6 +6,7 @@
 //   - 출력 규칙: 토큰·초대 링크·키 원문·비밀번호·이메일·오류 본문·docker/wrangler 원문 출력을 내지 않는다.
 //     실패 메시지는 고정 코드·HTTP 상태·짧은 오류 코드만 담는다 (run.mjs 가 e.message 를 그대로 낸다).
 //   - 요청 수 제한: Better Auth 인증 경로 한도(packages/auth/src/rate-limit.ts)를 넘지 않게 시험이 먼저 기다린다 (pacer).
+import { afterSignIn } from "../mfa.mjs";
 import { spawn, spawnSync } from "node:child_process";
 import net from "node:net";
 import { randomBytes } from "node:crypto";
@@ -451,16 +452,16 @@ export function pacer() {
 /** 회원 앱 HTTP. 변경 요청은 같은 출처(Origin = BETTER_AUTH_URL)로 보낸다. 던지지 않고 { status, json } 을 돌려준다 */
 export function membersHttp(baseUrl, pace = pacer()) {
   const origin = baseUrl;
-  async function call(method, p, { cookie, body } = {}) {
-    const headers = { origin };
+  async function call(method, p, { cookie, body, headers: extra } = {}) {
+    const headers = { origin, ...(extra ?? {}) };
     if (cookie) headers.cookie = cookie;
     if (body !== undefined) headers["content-type"] = "application/json";
     return request(baseUrl + p, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   }
   return {
     pace,
-    api: async (method, p, cookie, body) => {
-      const { status, json } = await call(method, p, { cookie, body });
+    api: async (method, p, cookie, body, headers) => {
+      const { status, json } = await call(method, p, { cookie, body, headers });
       return { status, json };
     },
     /** { status, cookie, json } (cookie 는 200 일 때만) */
@@ -468,6 +469,8 @@ export function membersHttp(baseUrl, pace = pacer()) {
       await pace.before("sign-in");
       const { res, status, json } = await call("POST", "/api/auth/sign-in/email", { body: { email, password } });
       const cookie = res.headers.getSetCookie().map((s) => s.split(";")[0]).filter((s) => /session_token=./.test(s)).join("; ");
+      // 설치 흐름이 MFA 를 등록한 관리자는 로그인 직후 challenge 한다 (A1, tests/e2e/mfa.mjs)
+      if (status === 200 && cookie) await afterSignIn(async (m, q, c, b) => { const r = await call(m, q, { cookie: c, body: b }); return { status: r.status, json: r.json }; }, email, cookie);
       return { status, json, cookie: status === 200 && cookie ? cookie : null };
     },
     /** 공개 가입. extra 는 본문에 더 넣을 필드 (권한 필드 회귀) */

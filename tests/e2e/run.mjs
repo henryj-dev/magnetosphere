@@ -28,6 +28,7 @@ import path from "node:path";
 import { buildAppImage, createStack, dockerAvailable, ROOT } from "../deploy/stack.mjs";
 import { lastSetupToken, startWranglerDev } from "../../apps/server/test/wrangler-dev.mjs";
 import { composeUp } from "../../scripts/compose-up.mjs";
+import { enroll, rememberSeed } from "./mfa.mjs";
 
 const COMBOS = ["docker-sqlite", "docker-mysql", "docker-pg", "workers-d1", "workers-mysql", "workers-pg"];
 const CONTRACT = { url: "http://127.0.0.1:20170", password: "contract-initial-password-5c1e9a", compose: "tests/contract/docker-compose.yml" };
@@ -92,6 +93,16 @@ async function installFlow(baseUrl, readToken, members = false) {
   const first = await signIn();
   check(first.status === 200 && first.cookie, `첫 로그인 200 + 세션 쿠키 (${first.status})`);
   check((await session(first.cookie))?.user?.email === ADMIN.email, "세션 사용자 = 관리자");
+  // 관리자 MFA (A1): 비밀번호 세션은 부분 세션이다. 설치 응답의 bootstrap grant 로 등록하면 관리 API 가 열린다.
+  // seed 는 기억해 두고 시나리오의 관리자 로그인이 challenge 에 쓴다 (tests/e2e/mfa.mjs). 값은 출력하지 않는다
+  const api = async (method, p, cookie, body) => {
+    const res = await fetch(`${baseUrl}${p}`, { method, headers: { ...headers, cookie }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: res.status, json: await readJson(res) };
+  };
+  check((await api("GET", "/api/admin/users", first.cookie)).status === 403, "MFA 전 관리자 세션의 관리 API 403");
+  check(typeof setupBody?.mfaGrant?.grant === "string", "설치 응답에 bootstrap 등록 자격");
+  rememberSeed(ADMIN.email, await enroll(api, first.cookie, setupBody.mfaGrant.grant));
+  check((await api("GET", "/api/admin/users", first.cookie)).status === 200, "MFA 등록 뒤 관리 API 200");
   const out = await fetch(`${baseUrl}/api/auth/sign-out`, { method: "POST", headers: { ...headers, cookie: first.cookie }, body: "{}" });
   if (members) await readJson(out);
   check(out.status === 200, `로그아웃 200 (${out.status})`);
