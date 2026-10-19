@@ -167,5 +167,181 @@
     "table": "UNKNOWN",
     "columns": [],
     "reason": "ctx.context.responseHeaders.delete의 쿠키 제거. 외부 Context 속성은 출처를 추적하지 못해 UNKNOWN 유지."
+  },
+  {
+    "file": "apps/server/src/admin/guard-sql.ts",
+    "function": "resetAdminMfa/cas",
+    "operation": "update",
+    "table": "USER",
+    "columns": ["authVersion", "updatedAt"],
+    "reason": "관리자 MFA 초기화(A1) CAS. 관측한 대상·actor·세션 조건 아래 인증 버전 +1 로 대상의 세션을 끊는다. 권한·상태 칼럼은 쓰지 않는다."
+  },
+  {
+    "file": "apps/server/src/setup/index.ts",
+    "function": "reissueBootstrapGrant/build~2",
+    "operation": "update",
+    "table": "USER",
+    "columns": ["updatedAt"],
+    "reason": "bootstrap grant 재발급(A1) 경합 guard. active factor 없는 bootstrap 관리자이고 인증 버전이 그대로일 때만 한 행이며 updatedAt 만 쓴다."
+  },
+  {
+    "file": "packages/auth/src/mfa/plugin.ts",
+    "function": "adminMfa/gate",
+    "operation": "delete",
+    "table": "UNKNOWN",
+    "columns": [],
+    "reason": "부분 세션 제한(A1). challenge 시간이 지난 관리자 부분 세션 행을 session 표에서 지운다. user 표가 아니다."
+  },
+  {
+    "file": "packages/auth/src/mfa/session.ts",
+    "function": "adminVersionBump",
+    "operation": "update",
+    "table": "USER",
+    "columns": ["authVersion", "updatedAt"],
+    "reason": "MFA 등록 확인(A1)의 활성 관리자 인증 버전 +1. 버전·역할·상태·상한 조건 CAS 이며 권한 칼럼은 쓰지 않는다."
+  },
+  {
+    "file": "packages/auth/src/mfa/store.ts",
+    "function": "activateUpdate",
+    "operation": "update",
+    "table": "UNKNOWN",
+    "columns": ["activatedAt", "activeSlot", "lastUsedStep", "pendingAuthVersion", "pendingExpiresAt", "pendingSessionId", "pendingSlot", "state"],
+    "reason": "mfa_factor 표. pending factor 를 active 로 바꾼다 (세션·인증 버전·마감 조건). user 표가 아니다."
+  },
+  {
+    "file": "packages/auth/src/mfa/store.ts",
+    "function": "dropRevokedCodesDelete",
+    "operation": "delete",
+    "table": "UNKNOWN",
+    "columns": [],
+    "reason": "mfa_recovery_code 표. 폐기된 factor 의 복구 코드를 지운다. user 표가 아니다."
+  },
+  {
+    "file": "packages/auth/src/mfa/store.ts",
+    "function": "grantConsumeUpdate",
+    "operation": "update",
+    "table": "UNKNOWN",
+    "columns": ["usedAt"],
+    "reason": "mfa_enrollment_grant 표. 등록 자격을 한 번 소비한다 (used_at IS NULL 조건). user 표가 아니다."
+  },
+  {
+    "file": "packages/auth/src/mfa/store.ts",
+    "function": "grantInsert/build",
+    "operation": "insert",
+    "table": "UNKNOWN",
+    "columns": ["authVersion", "expiresAt", "id", "issuedBy", "purpose", "tokenHash", "userId"],
+    "reason": "mfa_enrollment_grant 표. 토큰 해시만 두는 등록 자격 행을 만든다. user 표가 아니다."
+  },
+  {
+    "file": "packages/auth/src/mfa/store.ts",
+    "function": "grantRevokeOpen",
+    "operation": "update",
+    "table": "UNKNOWN",
+    "columns": ["revokedAt"],
+    "reason": "mfa_enrollment_grant 표. 대상의 열린 등록 자격을 모두 취소한다. user 표가 아니다."
+  },
+  {
+    "file": "packages/auth/src/mfa/store.ts",
+    "function": "insertRecoveryCodes",
+    "operation": "insert",
+    "table": "UNKNOWN",
+    "columns": ["?"],
+    "reason": "mfa_recovery_code 표. 복구 코드 해시 행을 넣는다 (칼럼은 배열 값이라 정적으로 읽지 못한다). user 표가 아니다."
+  },
+  {
+    "file": "packages/auth/src/mfa/store.ts",
+    "function": "pendingFactorStatements/build",
+    "operation": "insert",
+    "table": "UNKNOWN",
+    "columns": ["algorithm", "createdAt", "digits", "id", "kind", "pendingAuthVersion", "pendingExpiresAt", "pendingSessionId", "pendingSlot", "periodS", "secretEnc", "state", "userId"],
+    "reason": "mfa_factor 표. 암호화한 seed 로 pending factor 를 만든다. user 표가 아니다."
+  },
+  {
+    "file": "packages/auth/src/mfa/store.ts",
+    "function": "pendingFactorStatements/build",
+    "operation": "update",
+    "table": "UNKNOWN",
+    "columns": ["pendingSlot", "revokedAt", "revokedReason", "state"],
+    "reason": "mfa_factor 표. 같은 회원의 이전 pending factor 를 폐기한다. user 표가 아니다."
+  },
+  {
+    "file": "packages/auth/src/mfa/store.ts",
+    "function": "proofConsumeUpdate",
+    "operation": "update",
+    "table": "UNKNOWN",
+    "columns": ["usedAt"],
+    "reason": "mfa_proof 표. step-up proof 를 작업 단위 안에서 한 번 소비한다. user 표가 아니다."
+  },
+  {
+    "file": "packages/auth/src/mfa/store.ts",
+    "function": "proofInsert/build",
+    "operation": "insert",
+    "table": "UNKNOWN",
+    "columns": ["authVersion", "expiresAt", "factorId", "id", "purpose", "sessionId", "target", "tokenHash", "userId"],
+    "reason": "mfa_proof 표. 세션·목적·대상에 묶인 proof 해시 행을 만든다. user 표가 아니다."
+  },
+  {
+    "file": "packages/auth/src/mfa/store.ts",
+    "function": "recoveryConsumeUpdate",
+    "operation": "update",
+    "table": "UNKNOWN",
+    "columns": ["usedAt", "usedSessionId"],
+    "reason": "mfa_recovery_code 표. 복구 코드를 한 번 소비한다. user 표가 아니다."
+  },
+  {
+    "file": "packages/auth/src/mfa/store.ts",
+    "function": "recoveryDropUnused",
+    "operation": "delete",
+    "table": "UNKNOWN",
+    "columns": [],
+    "reason": "mfa_recovery_code 표. 재발급 때 미사용 복구 코드를 지운다. user 표가 아니다."
+  },
+  {
+    "file": "packages/auth/src/mfa/store.ts",
+    "function": "recoveryInsert/build",
+    "operation": "insert",
+    "table": "UNKNOWN",
+    "columns": ["?"],
+    "reason": "mfa_recovery_code 표. 원자 단위에 넣을 복구 코드 해시 INSERT (칼럼은 배열 값). user 표가 아니다."
+  },
+  {
+    "file": "packages/auth/src/mfa/store.ts",
+    "function": "revokeActiveFactors",
+    "operation": "update",
+    "table": "UNKNOWN",
+    "columns": ["activeSlot", "revokedAt", "revokedReason", "state"],
+    "reason": "mfa_factor 표. active factor 를 폐기한다 (강등·초기화). user 표가 아니다."
+  },
+  {
+    "file": "packages/auth/src/mfa/store.ts",
+    "function": "revokeAllFactorsUpdate",
+    "operation": "update",
+    "table": "UNKNOWN",
+    "columns": ["activeSlot", "pendingSlot", "revokedAt", "revokedReason", "state"],
+    "reason": "mfa_factor 표. 등록 확인·초기화 때 회원의 factor 를 폐기한다. user 표가 아니다."
+  },
+  {
+    "file": "packages/auth/src/mfa/store.ts",
+    "function": "revokeFactor",
+    "operation": "update",
+    "table": "UNKNOWN",
+    "columns": ["activeSlot", "pendingSlot", "revokedAt", "revokedReason", "state"],
+    "reason": "mfa_factor 표. factor 하나를 폐기한다. user 표가 아니다."
+  },
+  {
+    "file": "packages/auth/src/mfa/store.ts",
+    "function": "totpStepUpdate",
+    "operation": "update",
+    "table": "UNKNOWN",
+    "columns": ["lastUsedStep"],
+    "reason": "mfa_factor 표. 마지막 사용 step CAS 로 TOTP 코드 재사용을 막는다. user 표가 아니다."
+  },
+  {
+    "file": "packages/auth/src/mfa/unit.ts",
+    "function": "runUnit/body",
+    "operation": "update",
+    "table": "USER",
+    "columns": ["authVersion"],
+    "reason": "SQLite 트랜잭션의 회원 행 쓰기 잠금. authVersion 을 같은 값으로 다시 쓴다 (값은 바뀌지 않는다). 다른 DB 는 SELECT FOR UPDATE."
   }
 ]
